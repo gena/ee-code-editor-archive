@@ -1,0 +1,39 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var alos_median = ee.Image("users/gena/ALOS_30m/N051E005_MED_DSM"),
+    alos_average = ee.Image("users/gena/ALOS_30m/N051E005_AVE_DSM"),
+    l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var pansharpen = function(image) {
+    var pan = image.select('pan');
+    var rgb = image.select('red', 'green', 'blue');
+    var hsv  = rgb.rgbtohsv();
+    var huesat = hsv.select('hue', 'saturation');
+    var upres = ee.Image.cat(huesat, pan).hsvtorgb();
+ 
+    return upres;
+}
+
+var ahn_ruw = ee.Image('AHN/AHN2_05M_RUW')
+var ahn_int = ee.Image('AHN/AHN2_05M_INT')
+var dem = ee.Image('USGS/SRTMGL1_003')
+
+Map.addLayer(dem, {min:0, max:10, palette: ['ffffff', '000000']}, 'srtm', false)
+Map.addLayer(alos_average, {min:0, max:10, palette: ['ffffff', '000000']}, 'alos_average', false)
+Map.addLayer(ahn_ruw, {min:0, max:10, palette: ['ffffff', '000000']}, 'ahn_raw', false)
+
+Map.addLayer(pansharpen(l8.select(['B4','B3','B2', 'B8']).reduce(ee.Reducer.percentile([30])).rename('red', 'green', 'blue', 'pan')), {min:0.03, max:[0.3, 0.3, 0.5]}, 'l8 4-3-2 (RGB)', false)
+Map.addLayer(pansharpen(l8.select(['B6','B3','B2', 'B8']).reduce(ee.Reducer.percentile([30])).rename('red', 'green', 'blue', 'pan')), {min:0.03, max:[0.3, 0.3, 0.5]}, 'l8 6-5-2 (Agriculture)', false)
+Map.addLayer(pansharpen(l8.select(['B6','B5','B4', 'B8']).reduce(ee.Reducer.percentile([30])).rename('red', 'green', 'blue', 'pan')), {min:0.03, max:0.3}, 'l8 6-5-4 (Vegetation)', false)
+Map.addLayer(pansharpen(l8.select(['B7','B6','B4', 'B8']).reduce(ee.Reducer.percentile([30])).rename('red', 'green', 'blue', 'pan')), {min:0.03, max:0.3}, 'l8 7-6-4 (Urban)', false)
+Map.addLayer(dem.subtract(ahn_ruw), 
+  {min:-5, max:5, palette: ['ff0000', 'ffffff', '0000ff']}, 'diff (srtm - ahn_ruw)')
+Map.addLayer(dem.subtract(ahn_int), 
+  {min:-5, max:5, palette: ['ff0000', 'ffffff', '0000ff']}, 'diff (srtm - ahn_int)', false)
+Map.addLayer(alos_median.subtract(ahn_ruw), 
+  {min:-5, max:5, palette: ['ff0000', 'ffffff', '0000ff']}, 'diff (alos_median - ahn_raw)', false)
+Map.addLayer(alos_average.subtract(ahn_ruw), 
+  {min:-5, max:5, palette: ['ff0000', 'ffffff', '0000ff']}, 'diff (alos_average - ahn_raw)', false)
+Map.addLayer(alos_average.subtract(dem), 
+  {min:-5, max:5, palette: ['ff0000', 'ffffff', '0000ff']}, 'diff (alos_average - srtm)', false)
+
+//Map.centerObject(ahn_ruw.geometry(), 8)

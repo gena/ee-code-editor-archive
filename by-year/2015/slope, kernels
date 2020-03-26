@@ -1,0 +1,61 @@
+var dem = ee.Image('USGS/SRTMGL1_003');
+var terrain = ee.Algorithms.Terrain(dem);
+var hillshade = terrain.select("hillshade")
+var slope = terrain.select("slope")
+var aspect = terrain.select("aspect")
+
+Map.addLayer(dem, {min:0, max:500});
+
+var terrain2 = ee.Algorithms.Terrain(slope);
+var slope2 = terrain2.select("slope")
+Map.addLayer(slope, {min:0, max:10}, 'slope');
+Map.addLayer(slope2, {min:0, max:10}, 'slope2');
+
+//Map.addLayer(hillshade);
+
+var min = 0;
+var max = 3000;
+
+// Used a fixed kernel to create a log kernel.
+var k = ee.Kernel.fixed(3, 3, 
+                          [[1, 1, 1],
+                           [1, 1, 1],
+                           [1, 1, 1]]);
+var magnitude = 1000;
+var normalize = false;
+var s = ee.Kernel.sobel(magnitude, normalize);
+// var c = dem.convolve(s);
+//Map.addLayer(c, {min:0, max:5000});
+
+var radius = 60;
+var sigma = 30;
+var units = "meters";
+var normalize = true;
+var magnitude = 1;
+var k2 = ee.Kernel.gaussian(radius, sigma, units, normalize, magnitude)
+
+var c = dem.convolve(k2);
+Map.addLayer(c, {min:0, max:500});
+
+var terrain2 = ee.Algorithms.Terrain(c);
+var hillshade2 = terrain2.select("hillshade")
+
+
+Map.addLayer(hillshade);
+Map.addLayer(hillshade2);
+
+Map.setCenter(4.6, 10.7, 12)
+
+// Create a Landsat 7, median-pixel image collection for Spring of 2000.
+// Select the Landsat 7 image collection and filter it by date.
+/*
+var collection = ee.ImageCollection('L7_L1T')
+                      .filterDate('2000-04-01', '2000-04-10');
+
+
+// Compute the median pixel values in the collection for display.
+// var image = collection.median();
+
+// Add the resulting image to the map and center it.
+Map.addLayer(collection, {gain: ['1.4', '1.4', '1.1']});
+*/

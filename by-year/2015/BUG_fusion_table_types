@@ -1,0 +1,95 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: d63000 */ee.Geometry.Point([39.28384780883789, -6.818716401984169]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/***
+ * Splits feature collection into two collectionswhere prop is null and not null
+ */
+function splitIsNull(fc, prop) {
+  return [
+    fc.filter(ee.Filter.neq(prop, null)),
+    fc.filter(ee.Filter.eq(prop, null))
+    ]
+}
+
+// somehow this does not work ... should be equal to the above
+function splitIsNull2(fc, prop) {
+   var withFilter = fc.map(function(f) {
+    return f.set(prop + '_isnull', ee.Algorithms.IsEqual(f.get(prop), null));
+  })
+
+  return [
+    withFilter.filter(ee.Filter.eq(prop + '_isnull', false)), // not null
+    withFilter.filter(ee.Filter.eq(prop + '_isnull', true))   // null
+    ]
+}
+
+
+/***
+ * Paints features
+ */
+function paintFeatures(fc, prop) {
+  return ee.Image(0).toFloat().paint(fc, prop)
+} 
+
+/***
+ * Computs an edge
+ */
+function getEdge(image) {
+  var edge = ee.Algorithms.CannyEdgeDetector(image, 0.9, 0)
+  return edge.mask(edge).focal_max(0.5);
+}
+
+Map.centerObject(geometry, 16)
+Map.setOptions('SATELLITE')
+
+var features = ee.FeatureCollection('ft:1l8s4AUPo5NEXDGHCvbQCXTFBdG069b8hAi5qtxPH')
+  .filter(ee.Filter.neq('building', null));
+
+print('all features:', features.size())
+
+// skip features with empty geometry
+features = features
+  .map(function(f) {
+    return f.set('empty_geometry', f.geometry().coordinates().size().eq(0))
+  }).filter(ee.Filter.eq('empty_geometry', 0))
+
+print('featrues with non-empty geometry:', features.size())
+
+Map.addLayer(ee.Image(1).toByte(), {palette:['000000'], opacity: 0.5}, 'black')
+
+var featuresImage = paintFeatures(features, 'building_levels');
+Map.addLayer(featuresImage.mask(featuresImage), 
+  {min:0, max:5, palette:['000000', 'efedf5', 'bcbddc', '756bb1']}, 'building levels')
+  
+
+// split features into 2 sets, with and without building_levels
+var featuresSplit = splitIsNull2(features, 'building_levels')
+
+// features with correct building_levels
+var featuresWithProperty = featuresSplit[0]
+print('features with non-empty building_levels:', featuresWithProperty.size())
+
+// set building_levels if it is missing
+var featuresWithoutProperty = featuresSplit[1].map(function(f) {
+    return f.set('building_levels', 1)
+})
+print('features with empty building_levels:', featuresWithoutProperty.size())
+
+// merge
+features = featuresWithProperty.merge(featuresWithoutProperty)
+
+// compute building height
+var levelHeight = 2.5
+
+features = features.map(function(f){
+    return f.set('height', ee.Number(f.get('building_levels')).multiply(levelHeight))
+})
+
+// print property value for a BAD feature 
+print(features.filter(ee.Filter.eq('id', 101466)).first().get('building_levels'))
+
+var featuresImage = paintFeatures(features, 'height');
+Map.addLayer(featuresImage.mask(featuresImage), 
+  {min:0, max:12.5, palette:['000000', 'efedf5', 'bcbddc', '756bb1']}, 'building height')
+
+Map.addLayer(getEdge(featuresImage), {palette:['ffff00']}, 'edge', false)  

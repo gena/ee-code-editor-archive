@@ -1,0 +1,52 @@
+// lights, diffs, Calibrate satellite differences
+
+// //for now, we're just taking the mean value
+// var l = [];
+// for (var year = 1992; year < 2013; year++) {
+//   var dt1 = year + "-01-01"; 
+//   var dt2 = year + "-12-31";
+
+//   var nl = ee.ImageCollection('NOAA/DMSP-OLS/NIGHTTIME_LIGHTS')
+//     .filterDate(dt1,dt2);
+//     var nlr = nl.reduceToImage(['stable_lights'], 'mean');
+//     l.push(nlr)
+// }
+
+
+// //Get the differences for each year
+// var dif = [];
+// for (var i = 1; i < 21; i+= 1) {
+//     var dd = l[i]
+//     var dd1 = l[(i-1)]
+//     dif.push((dd1.subtract(dd)));
+// }
+
+// //test adding one of the images in the list
+// print(dif[1]); //yep, it's an image
+// addToMap(dif[1], {bands:['mean']});
+
+/////////////////////////////////////////////////////////
+//Here something similar using arrays
+
+//Get the collection
+var nl = ee.ImageCollection('NOAA/DMSP-OLS/NIGHTTIME_LIGHTS')
+.filterDate('1992-01-01','2013-12-31')
+//.select(['avg_vis'])
+var bandNames = ee.Image(nl.first()).bandNames()
+var nlArray = nl.toArray();
+
+//Compute approximation of d1
+var left = nlArray.arraySlice(0,0,-1);
+var right = nlArray.arraySlice(0,1,null);
+var d1 = left.subtract(right);
+
+//Compute the mean difference
+var meanD1 = d1.arrayReduce(ee.Reducer.mean(),[0]);
+
+//Convert it back to an image
+var meanD1Image = meanD1.arrayProject([1])
+  .arrayFlatten([bandNames]);
+
+
+addToMap(meanD1Image,{'min':0,'max':0.1},'meanD1Avg_Vis')
+  

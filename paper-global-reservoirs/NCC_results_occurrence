@@ -1,0 +1,61 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory"),
+    jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    hydroLakes = ee.FeatureCollection("users/gena/HydroLAKES_polys_v10"),
+    s1 = ee.ImageCollection("COPERNICUS/S1_GRD"),
+    hand = ee.Image("users/gena/GlobalHAND/30m/hand-1000"),
+    image = ee.Image("users/gena/eo-reservoirs/Limpopo_occurrence_cell1_detail5");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var style = require('users/gena/packages:style')
+
+hand = hand.resample('bicubic')
+
+var rivers = ee.FeatureCollection('ft:1yMXz_cItkAJFvmeXNcsuW2i7kK5i1iJ0QcYK3g')
+Map.addLayer(rivers, {color: 'lightblue'}, 'rivers (Natural Earth)', false)  
+
+var hydro = require('users/gena/packages:hydro')
+var utils = require('users/gena/packages:utils')
+
+// add basins
+var basins4 = hydro.getCatchments({level: 4});
+utils.Map.addAsImage(basins4, 'HydroBASINS L4', {outline: true, fill: false, palette: ['ffffff', 'ffffff'], layer: {visible: false}})
+
+// add Limpopo river and basins
+var limpopo = {
+  rivers: rivers.filter(ee.Filter.eq('name', 'Limpopo')),
+}
+
+// detect outlet
+var outlet = ee.Geometry.Point(limpopo.rivers.geometry().coordinates().get(-5))
+Map.addLayer(outlet, {color: 'red'}, 'outlet')
+
+
+// get catchments limited by the outlet
+limpopo.basins = hydro.getCatchments({level: 5, outlet: outlet})
+  //.map(function(f) { return f.buffer(500) })
+  
+Export.table.toDrive(limpopo.basins, 'basins_l5', 'Limpopo', 'basins_l5', 'GeoJSON')
+  
+// add Limpopo catchments
+utils.Map.addAsImage(limpopo.basins, 'Limpopo (basins)', {outline: true, fill: false, opacity: 0.9, palette: ['000000', 'ffffff']})
+
+var waterIndexHR = hydro.getWaterIndexHR()
+
+hydro.addWaterIndexHR(waterIndexHR)
+
+
+var jrcMonthly2000 = jrcMonthly.filterDate('2000-01-01', '2005-01-01').map(function(i) { return i.eq(2) })
+var jrcMonthly2000_data = jrcMonthly.filterDate('2000-01-01', '2005-01-01').map(function(i) { return i.eq(2).or(i.eq(1)) })
+jrcMonthly2000 = jrcMonthly2000.sum().divide(jrcMonthly2000_data.sum())
+Map.addLayer(jrcMonthly2000.mask(jrcMonthly2000.gt(0.0001)), {min:0, max:1, palette: style.Palettes.RedToBlue}, 'jrc 2000-2005', false)
+
+var jrcMonthly2010 = jrcMonthly.filterDate('2010-01-01', '2015-01-01').map(function(i) { return i.eq(2) })
+var jrcMonthly2010_data = jrcMonthly.filterDate('2010-01-01', '2015-01-01').map(function(i) { return i.eq(2).or(i.eq(1)) })
+jrcMonthly2010 = jrcMonthly2010.sum().divide(jrcMonthly2010_data.sum())
+Map.addLayer(jrcMonthly2010.mask(jrcMonthly2010.gt(0.0001)), {min:0, max:1, palette: style.Palettes.RedToBlue}, 'jrc 2010-2015')
+
+Map.addLayer(jrc.select('occurrence').divide(100), {min:0, max:1, palette: style.Palettes.RedToBlue}, 'jrc 1984-2015', false)
+
+Map.addLayer(ee.Image().paint(hydroLakes, 1, 2), {palette:['ffff00']}, 'HydroLAKES', false)
+
+Map.addLayer(ee.Image(1).mask(hand.resample('bicubic').gt(30)), {palette:['000000']}, 'HAND > 20m', false, 0.4)

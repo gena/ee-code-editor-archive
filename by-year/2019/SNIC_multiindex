@@ -1,0 +1,224 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #98ff00 */ee.Geometry.Polygon(
+        [[[6.317996978759766, 53.17908662176165],
+          [6.464424133300781, 53.179806771382395],
+          [6.463050842285156, 53.24056438248143],
+          [6.319370269775391, 53.24097530800698]]]),
+    geometry2 = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-120.16163349151611, 39.374615707416275],
+          [-120.16892910003662, 39.37640709081805],
+          [-120.17819881439209, 39.377700839132416],
+          [-120.1823616027832, 39.373520950487006],
+          [-120.18073081970215, 39.37080057106722],
+          [-120.17661094665527, 39.37219394937678],
+          [-120.1649808883667, 39.36967257778439],
+          [-120.15880107879639, 39.37116550616922],
+          [-120.1536512374878, 39.3724261763917],
+          [-120.15077590942383, 39.376241223915564],
+          [-120.14167785644531, 39.37474840405939],
+          [-120.13652801513672, 39.3775018024908],
+          [-120.13528347015381, 39.380885348219344],
+          [-120.14056205749512, 39.384600425202414],
+          [-120.1450252532959, 39.38897865492045],
+          [-120.15069007873535, 39.389277160580384],
+          [-120.1510763168335, 39.385396487400136],
+          [-120.15541076660156, 39.386126203104595],
+          [-120.1606035232544, 39.390006835706586],
+          [-120.16455173492432, 39.39004000257648],
+          [-120.16219139099121, 39.38652422663652],
+          [-120.16480922698975, 39.38622570920039],
+          [-120.1715898513794, 39.38907815694898],
+          [-120.17794132232666, 39.39282596336655],
+          [-120.18120288848877, 39.39116766677276],
+          [-120.17519474029541, 39.38513113434315],
+          [-120.17004489898682, 39.38125023060856],
+          [-120.1646375656128, 39.37982386133248],
+          [-120.15841484069824, 39.379658002548254]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var assets = require('users/gena/packages:assets')
+var animation = require('users/gena/packages:animation')
+var utils = require('users/gena/packages:utils')
+var colorbrewer = require('users/gena/packages:colorbrewer')
+
+var scale = Map.getScale()
+
+var seeds = utils.generateHexagonalSeeds(25)
+
+var seedsRGB = seeds.mask(seeds).visualize({palette: ['ffff00']})
+
+var dt = seeds.fastDistanceTransform().sqrt()
+Map.addLayer(dt, {min: 0, max: scale * 50}, 'distance', true, 0.3)
+
+Map.addLayer(seeds.mask(seeds), {min: 0, max: 1, palette: ['ffff00']}, 'seeds')
+
+var bounds = Map.getBounds(true)
+var bounds = geometry2
+var images = assets.getImages(bounds, {missions: ['S2'/*, 'L8'*/], resample: true})
+
+print(images.size())
+
+images = assets.getMostlyCleanImages(images, bounds, {
+  filterMasked: true,
+  scale: scale * 10,
+  percentile: 95,
+  cloudFrequencyThresholdDelta: 0.2,
+  qualityBand: 'green'
+}).sort('system:time_start').limit(10)
+
+print(images.size())
+
+images = images.map(function(i) {
+  return i.set({label: i.date().format() })
+})
+
+images = images.map(function(i) {
+  var ndwi = i.normalizedDifference(['green', 'nir']).rename('ndwi')
+  var mndwi = i.normalizedDifference(['green', 'swir']).rename('mndwi')
+  var ndvi = i.normalizedDifference(['red', 'nir']).rename('ndvi')
+  
+  var image = i.addBands(ee.Image([ndwi, ndvi, mndwi]))
+
+  return image
+})
+
+function computeSnic(seeds, compactness) {
+  return function(i) {
+    var snic = ee.Algorithms.Image.Segmentation.SNIC({
+      image: image, 
+      seeds: seeds,
+      compactness: compactness,
+      connectivity: 8,
+      neighborhoodSize: 256,
+    })
+    
+    var original = i.visualize({min: 0.03, max: 0.4, bands: ['swir', 'nir', 'green']})
+    var segmented = snic.visualize({min: 0.03, max: 0.4, bands: ['swir_mean', 'nir_mean', 'green_mean']})
+    var edges = ee.Algorithms.CannyEdgeDetector(snic.select('clusters'), 0.1, 0).focal_max(0.1)
+    edges = edges.mask(edges).visualize({palette: ['ffffff'], opacity: 0.5})
+    var clusters = snic.select('clusters').mod(9).abs().visualize({palette: colorbrewer.Palettes.Set1[9], opacity: 0.15, min:0, max: 8})
+    
+    var rgb = ee.ImageCollection.fromImages([
+      original,
+      //segmented,
+      //clusters,
+      edges,
+      
+      //seedsRGB
+    ]).mosaic()
+    
+    
+    return rgb
+      .set({label: i.get('label')})
+  }
+}
+
+var compactness = 1.2
+
+var seeds = utils.generateHexagonalSeeds(25)
+
+
+// == vary compactness
+// var image = ee.Image(images.first())
+// images = ee.List.sequence(0, 3.0, 0.3).map(function(compactness) {
+//   return computeSnic(seeds, compactness)(image).set({label: ee.Number(compactness).format('%.1f') })
+// })
+// images = ee.ImageCollection(images)
+
+// == vary size
+var image = ee.Image(images.first())
+images = ee.List.sequence(256 / 4, 8, -8).map(function(size) {
+  var seeds = utils.generateHexagonalSeeds(size)
+
+  return computeSnic(seeds, compactness)(image).set({label: ee.Number(size).format('%.1f') })
+})
+images = ee.ImageCollection(images)
+
+
+// === time
+//images = images.map(computeSnic(seeds, compactness))
+
+animation.animate(images, { label: 'label' })
+
+utils.exportVideo(images, {bounds: bounds, label: 'label', maxFrames: 600, name: 'animation', label: 'label' })
+
+
+throw('stop')
+
+var images = assets.getImages()
+
+// Create some segmentation, I don't care how well it is for this script (as long as not TOO bad)
+
+//Map.centerObject(geometry,14)
+
+geometry = ee.Geometry(Map.getBounds(true))
+var img = ee.Image(ee.ImageCollection('COPERNICUS/S2').
+  filterBounds(geometry).
+  filterDate('2017-02-01', '2017-09-30').
+  filterMetadata('CLOUDY_PIXEL_PERCENTAGE', 'less_than', 10.0)
+  //.filterMetadata('MGRS_TILE', 'equals', '31UGV')
+  .sort('CLOUDY_PIXEL_PERCENTAGE', true)
+  .map(function(f) { 
+      f = f.resample('bilinear')
+      return f
+        .addBands(f.normalizedDifference(['B3', 'B8']).rename('NDWI'))
+        .addBands(f.normalizedDifference(['B3', 'B12']).rename('MNDWI'))
+        .addBands(f.normalizedDifference(['B4', 'B8']).rename('NDVI'))
+  })
+  .select(['B8','B4','B3','B2', 'NDWI', 'MNDWI', 'NDVI']).first()).aside(print).divide(10000);
+
+Map.addLayer(img, {min:0.07, max: 0.14, bands: ['B4','B3','B2'], gamma: 0.8}, "S2", false)
+
+// Run SNIC on the regular square grid.
+var snic = ee.Algorithms.Image.Segmentation.SNIC({
+  image: img, 
+  size: 25,
+  compactness: 0.05,
+  connectivity: 8,
+  neighborhoodSize:256,
+})
+
+print(snic)
+var seeds = snic.select('seeds')
+
+snic = snic.select(["B4_mean", "B3_mean", "B2_mean", "clusters"],["B4", "B3", "B2", "clusters"])
+//.reproject(img.projection())
+
+
+Map.addLayer(snic, {min:0.07, max: 0.14, bands: ['B4','B3','B2'], gamma: 0.8}, "snic", false)
+
+var clusters = snic.select("clusters")
+
+
+
+// Now add the known parcel polygons into the map
+var parcels = ee.FeatureCollection("users/gglemoine62/BRP_gewaspercelen_2017_concept")
+  .filterBounds(geometry)
+var parcelsImage = parcels.randomColumn('rnd')
+  .reduceToImage(['rnd'],'mean').unmask(-1).rename('parcel') 
+
+//parcelsImage = clusters.translate(60,-10,'meters')
+
+Map.addLayer(clusters.randomVisualizer(), {}, "clusters")
+
+var edges = ee.Algorithms.CannyEdgeDetector(clusters, 0.5, 0)
+Map.addLayer(edges.mask(edges))
+
+seeds = seeds.focal_max(1)
+Map.addLayer(seeds.mask(seeds), {palette: ['ffff00']}, 'seeds')
+
+Map.addLayer(parcelsImage.randomVisualizer(), {}, 'field parcels (image)');
+
+
+var hist = parcelsImage.multiply(10000).toInt().addBands(clusters)
+             .reduceConnectedComponents(ee.Reducer.autoHistogram(), 'parcel', 256)
+             .arraySlice(1, 1, 2).arrayProject([0]),
+    totalN = hist.arrayReduce('sum',[0]).arrayRepeat(0,hist.arrayLength(0)),
+    P = hist.divide(totalN),
+    logP = P.log(),
+    PlogP = P.multiply(logP).arraySort(P.multiply(-1)),
+    numNotNull = logP.arrayReduce(ee.Reducer.count(),[0]).arrayGet([0]),
+    PlogP_nn = PlogP.arraySlice(0,0,numNotNull),
+    entropy = PlogP_nn.arrayReduce(ee.Reducer.sum(),[0])
+
+Map.addLayer(PlogP_nn)
+throw('stop')

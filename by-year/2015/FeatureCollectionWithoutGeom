@@ -1,0 +1,17 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var features = /* color: d63000 */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Polygon(
+                [[[-136.318359375, 48.554796169223565],
+                  [-128.232421875, 41.61749568924246],
+                  [-129.462890625, 48.204540845239244]]]),
+            {
+              "p1": 1,
+              "system:index": "0"
+            })]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+features = features.select([".*"], null, false)
+
+Export.table(features)
+
+print(features.getInfo())

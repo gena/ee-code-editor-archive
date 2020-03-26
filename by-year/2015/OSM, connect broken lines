@@ -1,0 +1,37 @@
+// OSM, connect broken lines
+
+print(Map.getScale())
+Map.setCenter(148.92, -35, 12)
+
+var images = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+      .filterBounds(Map.getBounds(true))
+      .filterMetadata('CLOUD_COVER', 'less_than', 1);
+
+print(images)
+
+var image = ee.Image(images.toList(1000, 0).get(4));
+var crs = image.getInfo().bands[0].crs;
+var crs_transform = image.getInfo().bands[0].crs_transform;
+
+Map.addLayer(image.select('B7', 'B5', 'B2'), {gamma:1.2}, image.getInfo().id)
+
+var maskClouds = function(i) {
+  var bad = [61440,59424,57344,56320,53248,52256,52224,49184,49152];
+  var clear = i.select('BQA').eq(bad).reduce('max').not();
+  var clouds = clear.mask(clear.not());
+  
+  Map.addLayer(clouds, {palette:'ffffff'}, 'clouds')
+  
+  // exclude low clouds using buffer
+  var cloudsAndShadows = clouds.focal_max({radius: 2000, units: 'meters'});
+  
+  Map.addLayer(cloudsAndShadows, {palette:'aaaaaa', opacity: 0.6}, 'clouds (maybe)')
+}
+
+// maskClouds(image);
+
+var ndwi = image.normalizedDifference(['B6', 'B3']);
+var threshold = 0.1;
+var water = ndwi.lt(threshold);
+Map.addLayer(water.mask(water), {palette:'0000aa'}, 'water')
+

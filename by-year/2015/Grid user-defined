@@ -1,0 +1,81 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var gfcImage = ee.Image("UMD/hansen/global_forest_change_2013");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Grid user-defined
+
+// Bounding coordinates:
+var lon_start = -25;
+var lon_end = 50;
+var lat_start = 35;
+var lat_end = 72;
+
+// Cell size (edge of a square) in degrees
+var edge = 1;
+
+var polys = [];
+for (var lon = lon_start; lon < lon_end; lon += edge) {
+  var x1 = lon - edge/2;
+  var x2 = lon + edge/2;
+  for (var lat = lat_start; lat < lat_end; lat += edge) {
+    var y1 = lat - edge/2;
+    var y2 = lat + edge/2;
+    polys.push(ee.Geometry.Rectangle(x1, y1, x2, y2));
+  }
+}
+var grid = ee.FeatureCollection(polys);
+
+// Calculations of forest extent for all species in year 2000
+var forest2000 = gfcImage.select(['treecover2000']).divide(100);
+var lossImage = gfcImage.select(['loss']);
+var gainImage = gfcImage.select(['gain']);
+
+var areaImage2000 = forest2000.multiply(ee.Image.pixelArea());
+var totalLoss2012 = lossImage.multiply(ee.Image.pixelArea());
+var maskLossArea = forest2000.mask(lossImage).multiply(ee.Image.pixelArea());
+var gainOnly = gainImage.and(lossImage.not());
+var gainOnlyArea = gainOnly.multiply(ee.Image.pixelArea());
+
+var scale = 200;
+var maxPixels = 1e14;
+var tileScale = 1;
+
+var areaImage2000Calc = areaImage2000.reduceRegions({
+  'collection': grid,
+  'reducer': ee.Reducer.sum(),
+  'scale': scale,
+  'tileScale': tileScale
+});
+
+var maskLossAreaCalc = maskLossArea.reduceRegions({
+  'collection': grid,
+  'reducer': ee.Reducer.sum(),
+  'scale': scale,
+  'tileScale': tileScale
+});
+
+var totalLoss2012Calc = totalLoss2012.reduceRegions({
+  'collection': grid,
+  'reducer': ee.Reducer.sum(),
+  'scale': scale,
+  'tileScale': tileScale
+});
+
+var gainOnlyAreaCalc = gainOnlyArea.reduceRegions({
+  'collection': grid,
+  'reducer': ee.Reducer.sum(),
+  'scale': scale,
+  'tileScale': tileScale
+});
+
+var edge_km = edge * 111;
+var filenamePrefix = 'grid_' + edge_km + 'km_' + scale + 'm_';
+
+var taskParams = {
+  'driveFolder' : '',
+  'fileFormat' : 'CSV'
+};
+  
+Export.table(areaImage2000Calc, filenamePrefix + 'areaImage2000', taskParams);
+Export.table(maskLossAreaCalc, filenamePrefix + 'Total_tree_cover_loss', taskParams);
+Export.table(totalLoss2012Calc, filenamePrefix + 'Total_tree_cover_loss_worst_case', taskParams);
+Export.table(gainOnlyAreaCalc, filenamePrefix + 'gainOnlyArea', taskParams);

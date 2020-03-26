@@ -1,0 +1,67 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.MultiPoint(),
+    greenlandIce = ee.Image("OSU/GIMP/2000_ICE_OCEAN_MASK"),
+    etopo = ee.Image("NOAA/NGDC/ETOPO1");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+greenlandIce = greenlandIce.select('ice_mask')
+Map.addLayer(greenlandIce.mask(greenlandIce))
+
+var belowZero = etopo.select('bedrock').resample('bicubic').lte(0)
+
+var image = ee.Image.pixelArea()
+
+var crs = 'EPSG:4326'
+var step = 0.1
+var crsTransform = [step, 0, -180, 0, -step, 90]
+var region = ee.Geometry.Polygon([-180, 88, 0, 88, 180, 88, 180, -88, 0, -88, -180, -88], null, false)
+
+var globalArea = image.reduceRegion({
+  reducer: ee.Reducer.sum(), 
+  geometry: region,
+  crs: crs, 
+  crsTransform: crsTransform,
+  maxPixels: 1e13,
+  tileScale: 8
+}).get('area')
+
+globalArea = ee.Number(globalArea)
+
+print('Global area (sq.km)', globalArea.divide(1e6))
+
+var greenlandIceArea = ee.Image.pixelArea().mask(greenlandIce).reduceRegion({
+  reducer: ee.Reducer.sum(), 
+  geometry: region,
+  crs: crs, 
+  crsTransform: crsTransform,
+  maxPixels: 1e13,
+  tileScale: 8
+}).get('area')
+
+greenlandIceArea = ee.Number(greenlandIceArea)
+
+print('Greenland ice area (sq.km)', greenlandIceArea.divide(1e6))
+
+var belowZeroArea = ee.Image.pixelArea().mask(belowZero).rename('area').reduceRegion({
+  reducer: ee.Reducer.sum(), 
+  geometry: region,
+  crs: crs, 
+  crsTransform: crsTransform,
+  maxPixels: 1e13,
+  tileScale: 8
+}).get('area')
+
+belowZeroArea = ee.Number(belowZeroArea)
+
+print('Global area below zero sea level (sq.km)', belowZeroArea.divide(1e6))
+
+// Source https://www.eea.europa.eu/data-and-maps/indicators/greenland-ice-sheet/greenland-ice-sheet-assessment-published
+var greenlandAverageIceThickness = 1600 // m
+
+var greenlandIceVolume = greenlandIceArea.multiply(greenlandAverageIceThickness)
+
+print('Greenland ice volume', greenlandIceVolume.divide(1e6))
+
+// var greenlandIceVolume = ee.Number(2900000000000000)
+
+var seaLevelRise = greenlandIceVolume.divide(belowZeroArea)
+print('Sea level rise (m): ', seaLevelRise)

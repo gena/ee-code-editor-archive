@@ -1,0 +1,43 @@
+// DEMs
+
+var bounds = JSON.stringify(Map.getBounds(true));
+
+var download = function(image, scale, name, aoi) {
+  var region = JSON.stringify(aoi.geometry().bounds().getInfo().coordinates[0])
+
+  print(image.getDownloadURL({
+    name: name, 
+    format: 'tif', 
+    scale: scale,
+    region: region
+  }));
+};
+
+var au = [
+  null, // 0
+  null, // 1
+  ee.FeatureCollection('ft:1Dq_Q2JvvYkYO-kFX7L4E4Nzycwc50j9hfhSsBQJW'), // 2
+  ee.FeatureCollection('ft:1778IyIZLZKSKVgko9X3aIV94E7jcm28uniyD6ycp'), // 3
+  ee.FeatureCollection('ft:1WZ4Utbbatdl3vFVK7kTmAyHDyRjhMVfXeJeJTnBa'), // 4
+  ee.FeatureCollection('ft:1rrk-yEOb8ILSolV_kSVD1qGxszHcy0cSL9UnUxIh'), // 5
+  ee.FeatureCollection('ft:1-aMEhsi4usdxVUSSjKkJGC8pir3duCi_5oItnxtT') // 6
+];
+
+var aoi_features = au[6];
+var aoi = aoi_features.filter(ee.Filter.or(ee.Filter.eq('HYBAS_ID', 5060590270), ee.Filter.eq('HYBAS_ID', 5060591290), ee.Filter.eq('HYBAS_ID', 5060591330)));
+
+Map.addLayer(aoi);
+Map.centerObject(aoi)
+
+var srtm90 = ee.Image('CGIAR/SRTM90_V4').clip(aoi);
+var srtm30 = ee.Image('USGS/SRTMGL1_003').clip(aoi);
+var srtm90hs_vf = ee.Image('WWF/HydroSHEDS/03VFDEM').clip(aoi);
+var srtm90hs_hc = ee.Image('WWF/HydroSHEDS/03CONDEM').clip(aoi);
+var srtm450_hs_hc = ee.Image('WWF/HydroSHEDS/15CONDEM').clip(aoi);
+
+/*download(srtm90, 90, "SRTM90", aoi);
+download(srtm30, 30, "SRTM30", aoi);
+download(srtm90hs_vf, 90, "SRTM90_HS_VOID_FILLED", aoi);
+download(srtm90hs_hc, 90, "SRTM90_HS_HYDRO_CORRECTED", aoi);
+*/
+download(srtm450_hs_hc, 450, "SRTM450_HS_HYDRO_CORRECTED", aoi);

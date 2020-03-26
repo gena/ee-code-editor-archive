@@ -1,0 +1,35 @@
+// Common name mapping to the sensor-specific bands.
+var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+// 2. Use BQA band to detect clouds
+var cloudsBQALandsat8 = function(img) {
+  var q = img.select( 'BQA' );
+  
+  // see http://landsat.usgs.gov/L8QualityAssessmentBand.php
+  var cloud = q.eq(61440)
+    .or(q.eq(59424))
+    .or(q.eq(57344))
+    .or(q.eq(56320))
+    .or(q.eq(39936))
+    .or(q.eq(36896))
+    .or(q.eq(36864))
+    .or(q.eq(53248))
+    .or(q.eq(31744))
+    .or(q.eq(28672));
+    
+    return cloud;
+};
+
+// Define image collection and map bands
+var landsat8 = ee.Image('LANDSAT/LC8_L1T/LC81970242013154LGN00')
+  .select(LC8_BANDS, STD_NAMES);
+
+var cloud = cloudsBQALandsat8(landsat8);
+
+addToMap(landsat8.mask(cloud.not()), {'bands':'nir,swir1,red', 'gamma':1.3})
+addToMap(landsat8, {'bands':'nir,swir1,red', 'gamma':1.3})
+
+cloud =  cloud.reduceNeighborhood(ee.call("Reducer.min"), ee.call("Kernel.square", 1));
+cloud =  cloud.reduceNeighborhood(ee.call("Reducer.max"), ee.call("Kernel.chebyshev", 15));
+addToMap(landsat8.mask(cloud.not()), {'bands':'nir,swir1,red', 'gamma':1.3})

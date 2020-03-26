@@ -1,0 +1,46 @@
+// temporal reducers
+
+var col = ee.ImageCollection('MODIS/MOD13A1'); //MOD11A1, MOD09GA_EVI
+
+//set a month property on each image
+// also just select the EVI band
+col = col.map(function(i){
+      var m = ee.Date(i.get('system:time_start')).get('month');
+      return i.select(1).set({'month':m});
+    }
+  );
+  
+//print(col.limit(5));
+
+//make a feature collection, one for each month
+// the image collection will join to this
+var pts = [];
+for(var m=1; m<=12; m++){
+  pts.push(
+    ee.Feature(
+      ee.Feature.Point([0,0]), {
+      'month': m,
+      'crs': 'SR-ORG:6974'
+      })
+  );
+}
+pts = ee.FeatureCollection(pts);
+
+//print(pts);
+
+
+var filter = ee.Filter.equals('month',null,'month');
+var joined = ee.Join.saveAll('image_col').apply(pts, col, filter);
+
+//print(joined);
+
+//get the monthly means
+var byMonth = joined.map(function(f) {
+  return ee.ImageCollection
+          .fromImages(f.get('image_col'))
+          .mean()
+          .set({'month':f.get('month')});
+});
+
+print(byMonth); //note images now have 4326 crs
+

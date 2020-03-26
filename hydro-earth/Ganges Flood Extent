@@ -1,0 +1,104 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var EcoZones = ee.FeatureCollection("users/gerben199066/Zonation_Gangabasin_Complete"),
+    MODIS = ee.ImageCollection("MODIS/MOD09GA_006_NDWI"),
+    MODIS_16days = ee.ImageCollection("MODIS/MCD43A4_NDWI"),
+    MODIS_2 = ee.ImageCollection("MODIS/MOD09GA_006_NDWI"),
+    Ribasim_nodes = ee.FeatureCollection("users/gerben199066/Ribasim_Nodes"),
+    L7 = ee.ImageCollection("LANDSAT/LE07/C01/T1_TOA"),
+    L5 = ee.ImageCollection("LANDSAT/LT5_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Find AOI (intersection between ecozone and buffer around node)
+print(EcoZones.size())
+Map.addLayer(EcoZones,{},'EcoZones')
+
+function Buffering(feature){
+  var buffer = ee.Geometry(feature.geometry()).buffer(12*1000)
+  buffer = ee.Feature(buffer)
+  return buffer
+}
+
+// var EcoZonesBuffers = ee.FeatureCollection(EcoZones.toList(10,0)).map(Buffering);
+// Map.addLayer(EcoZonesBuffers)
+
+// Load RIBASIM nodes
+Map.addLayer(Ribasim_nodes,{},'Ribasim nodes')
+
+// Define AOI
+// RIBASIM buffer + intersection with ecozone
+
+function FindWaterMask(im) {
+  
+  var ndwi = im.normalizedDifference(['NIR','G']);
+  var edge = ee.Algorithms.CannyEdgeDetector(ndwi,1,1).focal_max(1);
+  var hist_info = ee.Dictionary(ndwi.mask(edge).reduceRegion(
+      ee.Reducer.histogram(255), ndwi.geometry(), 250).get('nd'))
+  var hist = hist_info.get('histogram')
+  var buckets = hist_info.get('bucketMeans')
+  
+  var len = ee.List(hist).length()
+  var counter = ee.List.sequence(1,len.subtract(1))
+  
+  // OTSU to build binary image
+  function OTSU(i) {
+   
+      var len = ee.List(hist).length()
+      var total = ee.Array(hist).accum(0).get([-1])
+      var q_L = ee.Array(ee.List(hist).slice(0,ee.Number(i))).divide(total).accum(0).get([-1])
+      var q_H = ee.Array(ee.List(hist).slice(ee.Number(i))).divide(total).accum(0).get([-1])
+    
+      var miu_L = ee.Array(ee.List(hist).slice(0,ee.Number(i))).divide(total)
+                    .multiply(ee.Array(ee.List.sequence(1,ee.Number(i))))
+                    .accum(0).get([-1]).divide(q_L)
+      var miu_H = ee.Array(ee.List(hist).slice(ee.Number(i))).divide(total)
+                    .multiply(ee.Array(ee.List.sequence(ee.Number(i),ee.Number(len).subtract(1))))
+                    .accum(0).get([-1]).divide(q_H)
+      
+      var sigma = q_L.multiply(q_H).multiply((miu_L.subtract(miu_H)).pow(2))
+      
+      return sigma
+    
+  }
+  
+  var out = counter.map(OTSU)
+  var maxxer = out.reduce(ee.Reducer.max())
+  var threshold_index = ee.Number(out.indexOf(maxxer)).subtract(1)
+  
+  var threshold = ee.List(buckets).get(threshold_index.round()); 
+  threshold = ee.Number(threshold)
+  var water = ndwi.where(ndwi.lte(threshold),1)
+  
+  return ee.Image(water).set({thresh:threshold})
+}
+
+// Load images
+var aoi = Map.getBounds(true);
+
+L7 = L7.filterBounds(aoi).filterMetadata('CLOUD_COVER','less_than', 70)
+L5 = L5.filterBounds(aoi).filterMetadata('CLOUD_COVER','less_than', 70)
+var col = ee.ImageCollection(L7.select('B4','B3','B2','B1').merge(L5.select('B4','B3','B2','B1')))
+
+var sdate = ee.Date('2001-01-01')
+
+for (var i = 0; i < 4; i++) { 
+  var edate = sdate.advance(2,'month')
+
+  var image = ee.Image(col.filterDate(sdate,edate).reduce(ee.Reducer.intervalMean(14,15)))
+  image = image.select(['B4_mean','B3_mean','B2_mean','B1_mean'],['NIR','R','G','B'])
+  Map.addLayer(image.select('R','G','B'),{min:0,max:0.2}, sdate.getInfo().value, false)
+  
+  // calculate NDWI
+  var NDWI = image.normalizedDifference(['B2_mean','B4_mean'],)
+  Map.addLayer(NDWI,{min:-1,max:1},'NDWI', false)
+  
+  // Mask water (implement OTSU)
+  var water = FindWaterMask(image)
+  // var water = ee.Image(NDWI.mask(NDWI.gte(0)))
+  Map.addLayer(water,{palette:'blue'},'Water', false)
+  
+  // Calculate number of water pixels
+  var waterarea = water.reduceRegion(ee.Reducer.count(),aoi,30)
+  print(sdate, col.filterDate(sdate,edate).size(), waterarea)
+  
+  sdate = edate;
+}
+

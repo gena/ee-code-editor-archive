@@ -1,0 +1,109 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([4.778101200126116, 52.37995460631043]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var assets = require('users/gena/packages:assets')
+
+var aoi = ee.Geometry(Map.getBounds(true))
+var scale = Map.getScale() * 10
+
+var images = assets.getImages(aoi, {
+  includeTemperature: true,
+  filter: ee.Filter.date('2000-01-01', '2020-01-01'),
+  missions: [
+    'L5', 
+    'L7', 
+    'L8']
+})
+
+print(images.size())
+
+images = assets.getMostlyCleanImages(images, aoi)
+
+print(images.size())
+
+
+var addTimeBand = function(image) {
+  return image.addBands(image.metadata('system:time_start').divide(1e12));
+}
+
+var addNDVIBand = function(image) {
+  return image.addBands(image.resample('bicubic').normalizedDifference(['nir', 'red']).clamp(0, 1).rename('NDVI'))
+}
+
+// Load the input image collection: projected climate data.
+images = images.map(addTimeBand).map(addNDVIBand)
+
+var chart = ui.Chart.image.series(images.select('temp').map(function(i) { 
+  return i.subtract(273.15).copyProperties(i, ['system:time_start'])
+}), aoi, ee.Reducer.mean(), scale, 'system:time_start')
+
+chart = chart.setOptions({
+  trendlines: {
+    0: {
+      showR2: true,
+      visibleInLegend: true,
+      color: 'ff0000'
+    }
+  },
+  
+  series: {0: {lineWidth: 0, pointSize: 1} } 
+})
+print(chart)
+
+var chart = ui.Chart.image.series(images.select('NDVI'), 
+  aoi, ee.Reducer.mean(), scale, 'system:time_start')
+
+chart = chart.setOptions({
+  trendlines: {
+    0: {
+      showR2: true,
+      visibleInLegend: true,
+      color: 'ff0000'
+    }
+  },
+  
+  series: {0: {lineWidth: 0, pointSize: 1} } 
+})
+print(chart)
+
+
+// Reduce the collection with the linear fit reducer.
+// Independent variable are followed by dependent variables.
+var linearFit = images.select(['system:time_start', 'NDVI'])
+  .reduce(ee.Reducer.linearFit());
+
+Map.addLayer(linearFit, {min: 0, max: [-1, 1, 0], bands: ['scale', 'scale', 'scale']}, 'fit (NDVI)')
+    
+
+// Reduce the collection with the linear fit reducer.
+// Independent variable are followed by dependent variables.
+var linearFitTemp = images.select(['system:time_start', 'temp']).map(function(i) { 
+  return i.select('system:time_start')
+    .addBands(i.select('temp').resample('bicubic').subtract(273.15).clamp(-5, 100))
+})
+.reduce(ee.Reducer.linearFit());
+
+Map.addLayer(linearFitTemp, {min: 0, max: [15, 15, -15], bands: ['scale', 'scale', 'scale']}, 'fit (temperature)')
+    
+
+// This function adds a constant band to the image.
+var addConstantBand = function(image) {
+  return ee.Image(1).addBands(image);
+}
+
+// Compute robust linear regression coefficients.
+var robustLinearRegression = images.map(addConstantBand)
+  .select(['constant', 'system:time_start', 'temp'])
+  .reduce(
+  ee.Reducer.robustLinearRegression({
+    numX: 2,
+    numY: 1
+}))
+
+var bandNames = [['constant', 'time'], // 0-axis variation.
+                 ['temp']]; // 1-axis variation.
+
+// Flatten the array images to get multi-band images according to the labels.
+var rlrImage = robustLinearRegression.select(['coefficients']).arrayFlatten(bandNames);
+
+Map.addLayer(rlrImage, {min: 0, max: [15, 15, -15], bands: ['time_temp', 'time_temp', 'time_temp']}, 'fit (temperature, robust)')

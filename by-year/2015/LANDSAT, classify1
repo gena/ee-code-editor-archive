@@ -1,0 +1,27 @@
+// LANDSAT, classify1
+var region = ee.Geometry.Rectangle([3.04802, 8.90052, 12.56531, 3.12672])
+var input = ee.ImageCollection('LE7_L1T')
+    .filterDate('1999-01-01','2001-12-31');
+    // Select the median pixel.
+var median = input.median();
+var features = ee.FeatureCollection("ft:1wp3BTRf4VvN5RlG92E3doir7UzkvebRDStQc2kmY")
+var classifier = median.trainClassifier({
+  training_features: features,
+  training_property: "class",
+  classifier_name: "VotingSvm",
+  "crs": "EPSG:4326",
+        "crs_transform": [
+          0.00008983152841195213,
+          0,
+          -180,
+          0,
+          -0.00008983152841195213,
+          90]});
+var result = median.classify(classifier)
+
+var palette = ["22e5ef","ff4217","4de41c","2b783b","fbff13"];
+Map.addLayer(result, {palette: palette, min:1, max:5, format:"png"});
+Map.addLayer(ee.Image().paint(region, 1, 1));
+Export.image(result, "Classification", {
+  region: JSON.stringify(region.toGeoJSON().coordinates),'maxPixels': 10e9,
+  scale: 30})

@@ -1,0 +1,26 @@
+// BUGS: canny, export
+
+var img = ee.Image('L7_L1T/LE71130602002104EDC00').select('80');
+Map.centerObject(img, 15);
+img = img.clip(Map.getBounds(true));
+
+Map.addLayer(img);
+
+var canny = ee.Algorithms.CannyEdgeDetector(img, 0.99, 4);
+Map.addLayer(canny.mask(canny), {min: 0, max: 1, palette: 'FF0000'}, 'cannny');
+//Map.addLayer(canny, {}, 'canny (no mask');
+
+// export
+var crs = JSON.stringify(canny.getInfo().bands[0].crs);
+var crs_t = JSON.stringify(canny.getInfo().bands[0].crs_transform);
+
+var region = JSON.stringify(Map.getBounds(true).coordinates);
+//Export.image(canny, "canny", { scale: 1, region: region });
+
+// download
+//print(canny.getDownloadURL({crs: crs, crs_transform: crs_t, dimensions:'500x100' }));
+
+// convert to vector
+var canny_v = canny.mask(canny).reduceToVectors();
+print(canny_v)
+

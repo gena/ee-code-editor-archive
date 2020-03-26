@@ -1,0 +1,301 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var modis = ee.ImageCollection("MODIS/006/MOD09GQ"),
+    L7 = ee.ImageCollection("LANDSAT/LE07/C01/T1_SR"),
+    L8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_SR");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/* Passos:
+  - Modis - downscalling para 30m - Feito
+  - Landsat 7 e 8 merge - Feito
+  - L7 e L8 excluir pixeis contaminados e não estimados - Feito
+  - Merde L7/L8 - Modis: Fazer o par
+  - Criar imagem vazia com o time_start que queremos - Feito
+  - Método Classificação com 8 classes - Feito
+  - Método com (PesoEspacial), PesoEspectral, PesoTemporal- Feito
+  - Método para excluir pixeis candidatos
+  - Método para aplicar peso
+  - Método final P/estimar todoos os pixeis (loop)
+*/
+
+//Dicofre: 181621; Freguesia: Santa Cruz da Trapa e São Cristóvão de Lafões
+var saocristovao = ee.FeatureCollection('users/danielahenriques16/Cont_AAD_CAOP2017').filterMetadata('Dicofre', 'equals', '181621');
+
+Map.centerObject(saocristovao,12); //centrar e com nível de zoom
+Map.addLayer(saocristovao,{}, 'São Cristovao');
+
+var interpolation_method = 'bilinear';
+var window_pixels = 5;
+var radius = ee.Number(window_pixels).subtract(1).divide(2);
+
+var date_pair = ee.Date('2017-08-02')
+var date_predicted = ee.Date('2017-08-10')
+
+var maskClouds = function(image){
+  // Bits 3 and 5 are cloud shadow and cloud, respectively.
+  var cloudShadowBitMask = ee.Number(2).pow(3).int();
+  var cloudsBitMask = ee.Number(2).pow(5).int();
+  // Get the pixel QA band.
+  var qa = image.select('pixel_qa');
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudShadowBitMask).eq(0)
+      .and(qa.bitwiseAnd(cloudsBitMask).eq(0));
+  return image.updateMask(mask)
+};
+
+// function to add NDVI and time
+var addNDVI = function(img) {
+  
+  return ee.Algorithms.If(ee.Algorithms.IsEqual(img.get('SATELLITE'), 'LANDSAT_8'),
+                          img.addBands(img.normalizedDifference(['B5', 'B4']).rename('NDVI')),
+                          img.addBands(img.normalizedDifference(['B4', 'B3']).rename('NDVI')))
+}
+ 
+var addTime = function(img) {
+  return img
+  // System Time
+  .addBands(img.metadata('system:time_start').rename('Time'))
+  // Date - Day is the Julian date
+  .set('Date', ee.Date(img.get('system:time_start')).format('YYYY-MM-DD'))
+};
+
+// get imagery - L7
+var l7 = ee.ImageCollection(L7)
+    .select(['B4', 'B3', 'pixel_qa'])
+    .filterDate('2017-01-01', '2017-12-31')
+    .filterBounds(saocristovao)
+
+// get imagery - L8
+var l8 = ee.ImageCollection(L8)
+    .select(['B5', 'B4', 'pixel_qa'])
+    .filterDate('2017-01-01', '2017-12-31')
+    .filterBounds(saocristovao)
+
+// get imagery - Modis - Resample and Reproject 30m
+var modis_pair = ee.ImageCollection(modis)
+    .filterDate(date_pair, date_pair.advance(1, 'day')).filterBounds(saocristovao)
+    .map(function(img) {
+      return img.normalizedDifference(['sur_refl_b02','sur_refl_b01']).rename('NDVI') })
+    .map(function(img) {
+      return img.resample(interpolation_method).reproject({crs: ee.Image(l8.first()).select('B5').projection()})})
+    .map(function(img) {
+      return img.addBands(ee.Image.pixelLonLat())
+    })
+    
+
+var modis_predicted = ee.ImageCollection(modis)
+    .filterDate(date_predicted, date_predicted.advance(1, 'day')).filterBounds(saocristovao)
+    .map(function(img) {
+    return img.resample(interpolation_method).reproject({crs: ee.Image(l8.first()).select('B5').projection()})})
+    .map(function(img) {
+      return img.normalizedDifference(['sur_refl_b02','sur_refl_b01']).rename('NDVI')})
+    .map(function(img) {
+      return img.addBands(ee.Image.pixelLonLat())
+    })
+
+// merge and sort the pair
+var L7L8_pair = ee.ImageCollection(l7.merge(l8)).filterDate(date_pair, date_pair.advance(1, 'day')).map(maskClouds)
+    .map(addNDVI).map(addTime).map(function(img) {
+      return img.addBands(ee.Image.pixelLonLat())
+    }).sort("system:time_start")
+    
+// merge and sort the predicted
+var L7L8_reference = ee.ImageCollection(l8.merge(l7)).filterDate(date_predicted, date_predicted.advance(1, 'day')).map(maskClouds)
+    .map(addNDVI).map(addTime).map(function(img) {
+      return img.addBands(ee.Image.pixelLonLat())
+    }).sort("system:time_start").map(function(img) { return img.unmask(ee.Image(L7L8_pair.first()))})
+
+var L7L8_predicted = ee.Image(0).set('system:time_start', date_predicted.millis())
+
+var spectralDifference = function(img_modis, img_landsat) {
+  
+  return img_landsat.select('NDVI').subtract(img_modis.select('NDVI')).abs().rename(['SpectralDiff'])
+
+}
+
+var temporalDifference = function(img_modis_pair, img_modis_predicted) {
+  var diff = (date_predicted.millis()).subtract(date_pair.millis())
+  
+  return ee.Image(diff).rename(['TempDiff']);
+} 
+
+var clustering = function(img) {
+  
+// Make the training dataset.
+var training = img.select('NDVI').sample({
+  region: saocristovao,
+  scale: 30
+});
+
+print(training.limit(100))
+
+// Instantiate the clusterer and train it.
+var clusterer = ee.Clusterer.wekaKMeans(8).train(training);
+
+// Cluster the input 
+var result = ee.Image(img).cluster(clusterer);
+
+return img.addBands(result,['cluster'])
+
+}
+
+var tempDiff= temporalDifference(ee.Image(modis_pair.first()), ee.Image(modis_predicted.first()));
+var spectralDiff = spectralDifference(ee.Image(modis_pair.first()), ee.Image(L7L8_pair.first()));
+var clusterPixel = clustering(ee.Image(L7L8_pair.first()))
+
+
+//var predict_landsat = function() {
+var img = ee.Image(L7L8_pair.first()).addBands(tempDiff, ['TempDiff']).addBands(spectralDiff, ['SpectralDiff']).addBands(ee.Image(modis_pair.first()), ['NDVI'])
+.addBands(ee.Image(modis_predicted.first()), ['NDVI'])
+var img_clustering = clustering(img);
+
+var candidates = img_clustering.select(['NDVI', 'longitude', 'latitude', 'TempDiff', 'SpectralDiff', 'cluster', 'NDVI_1', 'NDVI_2']).neighborhoodToArray(
+  ee.Kernel.square({ radius: radius, units: 'pixels', normalize: true})).rename(['NDVI_candidates','longitude_candidates', 'latitude_candidates',
+  'TempDiff_candidates', 'SpectralDiff_candidates', 'cluster_candidates', 'NDVIModisPair_candidates', 'NDVIModisPredicted_candidates'])
+
+var pair_landsat = img_clustering.select(['NDVI','longitude','latitude','TempDiff', 'SpectralDiff', 'cluster'])
+.addBands(candidates,['NDVI_candidates','longitude_candidates', 'latitude_candidates',
+  'TempDiff_candidates', 'SpectralDiff_candidates', 'cluster_candidates', 'NDVIModisPair_candidates', 'NDVIModisPredicted_candidates'])
+  .rename(['NDVI_LSTPair', 'longitude', 'latitude','TempDiff', 'SpectralDiff','cluster', 'NDVILSTPair_candidates', 'longitude_candidates', 'latitude_candidates','TempDiff_candidates', 'SpectralDiff_candidates', 'cluster_candidates',
+'NDVIModisPair_candidates', 'NDVIModisPredicted_candidates'])
+
+Map.addLayer(candidates.clip(saocristovao), {}, 'Neighboors'); 
+
+
+var euclideanDistance = function(lat_candi, long_candi, lat, long) {
+  
+  var point1 = ee.Algorithms.GeometryConstructors.Point([lat_candi, long_candi])
+  var point2 = ee.Algorithms.GeometryConstructors.Point([lat, long])
+  
+  return point1.distance(point2).divide(70).add(1)
+  
+}
+
+var computeC = function(spectDiff, tempDiff, distance) {
+  
+  var CSpectral = (spectDiff.multiply(10000).add(1)).log()
+  var CTemp = (tempDiff.multiply(10000).add(1)).log()
+          
+  return  CSpectral.multiply(CTemp).multiply(distance)
+ 
+}
+
+
+
+// FeatureCollection with all of the pixels from SaoCristovao
+var pixels = pair_landsat.sample({region: saocristovao,scale: 30, projection: ee.Image(l8.first())
+              .select('B5').projection(), numPixels: 10 })
+
+var returnCandidatesList = function(latitudec, longitudec, latitude, longitude, SpectralDiffC, 
+                  TempDiffC, NDVIModisPair_candidates, NDVILSTPair_candidates,NDVIModisPredicted_candidates  ) {
+  
+      var distance = euclideanDistance(latitudec, longitudec, latitude, longitude);
+      var  c = computeC(SpectralDiffC, TempDiffC, distance);
+      var normalizedC = ee.Number(1).divide(c);
+      var array_candidate = ee.Array([normalizedC, NDVIModisPair_candidates, NDVILSTPair_candidates,NDVIModisPredicted_candidates]); 
+      
+  
+return  ee.Algorithms.If(ee.Algorithms.IsEqual(latitudec,latitude), ee.List([]),array_candidate)
+      
+}
+
+var sampleFiltering = function(candidates_list, array) {
+  
+  return ee.Algorithms.If(ee.Algorithms.IsEqual(array, ee.List([])), candidates_list, ee.List(candidates_list).add(array))
+}
+
+var predictValue = function(candidates_list, sumC) {
+  
+ var candidates = ee.List(candidates_list).map(function(i) {
+    
+    var weight = ee.Array(i).get([0]).divide(sumC);
+    var ndviModisTk = ee.Array(i).get([1])
+    var ndviModisT0 = ee.Array(i).get([2])
+    var ndviLSTTk = ee.Array(i).get([3])
+    var predicted = weight.multiply((ndviModisT0.add(ndviLSTTk).subtract(ndviModisT0)));
+    return predicted
+})
+
+ return candidates;
+} 
+
+var getSumC = function(array) {
+  return ee.Algorithms.If(ee.Algorithms.IsEqual(array, ee.List([])), ee.Number(0), ee.Array(array).get([0]))
+}
+
+var predPixels= pixels.map(function(list) {
+
+var candidates_list = ee.List([])
+var predicted = ee.Number(0);
+var sumC = ee.Number(0);
+
+for(var i=0; i < window_pixels; i++) {
+    
+ for(var j=0; j < window_pixels; j++) {
+  
+  var latitude_candidates = list.toDictionary(['latitude_candidates']).toArray(['latitude_candidates']).get([i,j])
+  var longitude_candidates = list.toDictionary(['longitude_candidates']).toArray(['longitude_candidates']).get([i,j])
+  var TempDiff_candidates = list.toDictionary(['TempDiff_candidates']).toArray(['TempDiff_candidates']).get([i,j])
+  var SpectralDiff_candidates = list.toDictionary(['SpectralDiff_candidates']).toArray(['SpectralDiff_candidates']).get([i,j])
+  var cluster_candidates = list.toDictionary(['cluster_candidates']).toArray(['cluster_candidates']).get([i,j])
+  var NDVIModisPair_candidates = list.toDictionary(['NDVIModisPair_candidates']).toArray(['NDVIModisPair_candidates']).get([i,j])
+  var NDVIModisPredicted_candidates = list.toDictionary(['NDVIModisPredicted_candidates']).toArray(['NDVIModisPredicted_candidates']).get([i,j])
+  var NDVILSTPair_candidates = list.toDictionary(['NDVILSTPair_candidates']).toArray(['NDVILSTPair_candidates']).get([i,j])
+  
+  // Each Pixel Property
+  var NDVI_LSTPair = list.get("NDVI_LSTPair")
+  var NDVI_ModisPair = list.get("NDVI_ModisPair")
+  var NDVI_ModisPredicted = list.get("NDVI_ModisPredicted")
+  var SpectralDiff = list.get("SpectralDiff")
+  var TempDiff = list.get("TempDiff")
+  var cluster = list.get("cluster")
+  var latitude = list.get("latitude")
+  var longitude = list.get("longitude")
+  
+   var array =  ee.Algorithms.If(ee.Algorithms.IsEqual(cluster_candidates, cluster),
+     returnCandidatesList(latitude_candidates, longitude_candidates, latitude, longitude, SpectralDiff_candidates, TempDiff_candidates, NDVIModisPair_candidates, NDVILSTPair_candidates,NDVIModisPredicted_candidates), ee.List([])) 
+     
+  sumC = sumC.add(getSumC(array))
+
+  candidates_list = sampleFiltering(candidates_list,array)
+
+}
+}
+
+return list.set('NDVI_Predicted', predictValue(candidates_list, sumC).reduce(ee.Reducer.sum()))
+
+})
+
+/*var predictedImage = L7L8_predicted.addBands(ee.Image(predPixels), 'NDVI_Predicted')
+.addBands(ee.Image(modis_predicted.first()), ['NDVI'])
+.addBands(ee.Image(L7L8_reference.first()), ['NDVI'])
+.addBands(ee.Image(modis_pair.first()), ['NDVI'])
+.addBands(ee.Image(L7L8_pair.first()), ['NDVI'])
+.rename(['NDVI_Predicted', 'NDVI_ModisPredicted', 'NDVI_LSTReference', 'NDVI_ModisPair', 'NDVI_LSTPair'])
+
+print(predictedImage)*/
+
+Map.addLayer(predPixels, {}, 'predictedFinal')
+
+//////// Visualization ///////////
+var ndviPalette = ['#ffffe5', '#f7fcb9', '#d9f0a3', '#addd8e', '#78c679', '#41ab5d', '#238443', '#006837','#004529']
+               
+var divergentColors = ['#d8b365','#f5f5f5','#5ab4ac']
+
+var delta_min = -0.32;
+var delta_max = 0.17;
+
+var ndvi_min = 0.20;
+var ndvi_max= 0.80;
+
+
+Map.addLayer(ee.Image(L7L8_pair.first()).clip(saocristovao), {bands: 'NDVI',min: ndvi_min, max: ndvi_max, palette: ndviPalette}, 'NDVI_l8_020817', false);
+Map.addLayer(ee.Image(modis_pair.first()).select('NDVI').clip(saocristovao), {min: ndvi_min, max: ndvi_max, palette: ndviPalette}, 'NDVI_MODIS_020817', false);
+
+Map.addLayer(ee.Image(modis_predicted.first()).select('NDVI').clip(saocristovao), {min: ndvi_min, max: ndvi_max, palette: ndviPalette}, 'NDVI_MODIS_100817', false);
+Map.addLayer(ee.Image(L7L8_reference.first()).select('NDVI').clip(saocristovao), {min: ndvi_min, max: ndvi_max, palette: ndviPalette}, 'NDVI_L7_100817', false);
+
+Map.addLayer(pair_landsat.clip(saocristovao), {bands:'SpectralDiff', min: ndvi_min, max: ndvi_max, palette: ndviPalette}, 'predicted', false);
+
+// Display the clusters with random colors.
+Map.addLayer(clusterPixel.select('cluster').randomVisualizer().clip(saocristovao), {}, 'clusters', false);
+Map.addLayer(spectralDiff.clip(saocristovao), {}, 'SpectralDiff', false);
+Map.addLayer(tempDiff.clip(saocristovao), {}, 'TempDiff', false);

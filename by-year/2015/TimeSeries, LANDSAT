@@ -1,0 +1,20 @@
+// TimeSeries, LANDSAT
+// Plot Landsat 8 band value means in a section of San Francisco.
+
+var bounds = Map.getBounds();
+print(bounds)
+var center = ee.Geometry.Rectangle(
+  bounds[0] + 0.48 * (bounds[2] - bounds[0]), 
+  bounds[1] + 0.48 * (bounds[3] - bounds[1]),
+  bounds[0] + 0.52 * (bounds[2] - bounds[0]),
+  bounds[1] + 0.52 * (bounds[3] - bounds[1]));
+addToMap(center);
+
+var landsat8Toa = ee.ImageCollection('LC8_L1T_TOA')
+    //.filterDate('2012-12-25', '2013-12-25')
+    .select('B[1-7]');
+
+var sfTimeSeries = Chart.image.series(landsat8Toa, center, ee.Reducer.median(), 200);
+
+print(sfTimeSeries);
+

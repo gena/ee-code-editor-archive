@@ -1,0 +1,457 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var canvasback = /* color: #d63000 */ee.Geometry.Point([-146.3648662197728, 66.38839409421432]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var g = require('users/gena/packages:grid')
+var style = require('users/gena/packages:style')
+var palettes = require('users/gena/packages:palettes')
+var utils = require('users/gena/packages:utils')
+
+// -----------------------------------------------------------------
+// Load Points (Lakes) and Polygons (Study Area)
+// -----------------------------------------------------------------
+
+// Study bounds
+var ABOVE = ee.FeatureCollection('users/kuhniculous/ABoVE_Study_Domain')
+
+
+// Bring in Lakes to Sample
+var hydroLakes = ee.FeatureCollection('users/kuhniculous/ABOVE/HydroLAKES_points_v10')
+var circumpolarLakes = hydroLakes.filterBounds(ABOVE)
+
+
+// Select which lakes to sample
+var studyLakes = circumpolarLakes
+var lakesName = '_circumpolarLakes' // 
+
+print('Study Lakes Size:', studyLakes.size())
+print('Example Lake:', studyLakes.first())
+
+Map.addLayer(studyLakes.style({pointSize: 1, width: 0, color: '00ffff' }), {}, 'Study Lakes', true, 0.5)
+
+// Map.centerObject(canvasback,12);
+Map.setOptions('HYBRID')
+
+
+// compute bounds and use it instead of geometry with many vertices
+var bounds = studyLakes.geometry().bounds()
+
+Map.addLayer(bounds, {}, 'bounds', true, 0.2)
+var grid = g.generateGridForGeometryN(bounds, 10, 10)
+Map.addLayer(grid, {}, 'grid')
+
+Map.centerObject(bounds)
+
+// show number of lakes per tile
+var gridWithLakes = grid.map(function(cell) {
+  var lakeCount = studyLakes.filterBounds(cell.geometry()).size()
+  return cell.set({ lakeCount: lakeCount })
+})
+
+gridWithLakes = gridWithLakes.filter(ee.Filter.gt('lakeCount', 0))
+
+Map.addLayer(style.Feature.histogram(gridWithLakes, 'lakeCount', { palette: palettes.colorbrewer.YlOrBr[9].slice(0).reverse(), width: 1, opacity: 0.8 }), {}, 'cells')
+Map.addLayer(style.Feature.label(gridWithLakes, 'lakeCount', { textColor: 'ffffff', outlineColor: '000000', alignX: 'center', alignY: 'center' }), {}, 'labels')
+
+
+// -----------------------------------------------------------------
+// Filter to Year and Date of Interest
+// -----------------------------------------------------------------
+
+// Five-year chunks: 1984 - 1990, 1990-1995, 1995 -2000, 2000-2005, 2005-2010, 2010-2015, 2015-2018
+
+var startYear = 2018
+var endYear = 2019
+
+var start = startYear.toString()
+var finish =  endYear.toString()
+
+var selectedYears = ee.List.sequence(startYear,endYear);
+
+// // Select which collection
+var collection = 'JJL5L7L8_' + start + '_' + finish
+var years = selectedYears
+print('Landsat Collection:', collection)
+
+function exportTile(tile, i) {
+  var bounds = ee.Geometry(tile.geometry)
+
+  var nameSuffix = utils.pad(i, 3)
+
+  print(nameSuffix)
+  print(bounds)
+  // -----------------------------------------------------------------
+  // Load Landsat Collection
+  // -----------------------------------------------------------------
+
+  // Filter Landsat Imagery
+
+  var l5 = ee.ImageCollection('LANDSAT/LT05/C01/T1_SR')
+          .filterBounds(bounds)
+          .filter(ee.Filter.lt('SOLAR_ZENITH_ANGLE', 60))
+          //.filter(ee.Filter.lt('CLOUD_COVER', 50))
+          .select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'pixel_qa', 'sr_atmos_opacity', 'sr_cloud_qa', 'radsat_qa']);
+  
+  var l7 =  ee.ImageCollection('LANDSAT/LE07/C01/T1_SR')
+          .filterBounds(bounds)
+          .filter(ee.Filter.lt('SOLAR_ZENITH_ANGLE', 60))
+          //.filter(ee.Filter.lt('CLOUD_COVER', 50))
+          .select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'pixel_qa', 'sr_atmos_opacity', 'sr_cloud_qa', 'radsat_qa']);
+          
+  var l8 = ee.ImageCollection('LANDSAT/LC08/C01/T1_SR')
+          .filterBounds(bounds)
+          .filter(ee.Filter.lt('SOLAR_ZENITH_ANGLE', 60))
+          //.filter(ee.Filter.lt('CLOUD_COVER', 50))
+          .select(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'pixel_qa', 'sr_aerosol', 'radsat_qa']);
+  
+  // Make an original collection for visualization later
+  
+  var l5_og = l5.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'pixel_qa']);
+  var l7_og = l7.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'pixel_qa']);
+  var l8_og = l8.select(['B2','B3','B4','B5','B6','B7', 'pixel_qa'],['B1', 'B2', 'B3', 'B4', 'B5', 'B7','pixel_qa'])
+  
+  var landsatOriginal = l5_og.merge(l7_og).merge(l8_og)
+  
+  
+  // -----------------------------------------------------------------
+  // Harmonize Landsat Collection
+  // -----------------------------------------------------------------
+  
+  // slope and intercept citation: Roy, D.P., Kovalskyy, V., Zhang, H.K., Vermote, E.F., Yan, L., Kumar, S.S, Egorov, A., 2016, Characterization of Landsat-7 to Landsat-8 reflective wavelength and normalized difference vegetation index continuity, Remote Sensing of Environment, 185, 57-70.(http://dx.doi.org/10.1016/j.rse.2015.12.024); Table 2 - reduced major axis (RMA) regression coefficients
+  // harmonize oli to tm
+  
+  var oli2tm = function(oli) {
+    var slopes = ee.Image.constant([0.9785, 0.9542, 0.9825, 1.0073, 1.0171, 0.9949]);
+    var itcp = ee.Image.constant([-0.0095, -0.0016, -0.0022, -0.0021, -0.0030, 0.0029]);
+    var y = oli.select(['B2','B3','B4','B5','B6','B7'],['B1', 'B2', 'B3', 'B4', 'B5', 'B7'])
+               .resample('bicubic')
+               .subtract(itcp.multiply(10000)).divide(slopes)
+               .set('system:time_start', oli.get('system:time_start'))//;
+    var y_1 = y.toShort()
+    var y_2 = y_1.addBands(oli.select('pixel_qa')).addBands(oli.select('sr_aerosol').addBands(oli.select('radsat_qa')));
+    return y_2.copyProperties(oli);
+  };
+  
+  
+  // map over collection
+  var l8 = l8.map(oli2tm);
+  
+  
+  // -----------------------------------------------------------------
+  // Landsat-8 processing
+  // -----------------------------------------------------------------
+  
+  // Landsat-8 has one unique band: sr_aerosol
+  // sr_aerosol is the aerosol attributes
+  
+  // Do best to get rid of smoke
+  var maskAerosolsL8 = function(image){
+    // make a new single band image from the pixel qa band
+    var aerosols = image.select('sr_aerosol'); 
+    // keep only pixels that are not clouds (pixel value = 8) and not cloud shadows (16)
+    return image.updateMask((aerosols.neq(8)).and(aerosols.neq(16))).copyProperties(image);   
+  };
+  
+  var l8 = l8.map(maskAerosolsL8)
+  
+  
+  // -----------------------------------------------------------------
+  // Landsat 5 & 7 processing
+  // -----------------------------------------------------------------
+  
+  // L5 and L7 have unique bands: sr_atmos_opacity and sr_cloud_qa
+  // sr_atmos_opacity - should be below 0.03
+  // sr_cloud_qa - clouds have a value of 8 
+  
+  // using LEDAPS sr_cloud_qa
+  var cloudMask_LEDAPS = function(image){
+    
+      // bit positions 
+    var cloudBit = Math.pow(2, 1); 
+    var shadowBit = Math.pow(2, 2); 
+    var snowBit = Math.pow(2, 4);
+    var fillBit = Math.pow(2,0); // 0 here is dark dense vegation
+    
+    // make a new single band image from the cloud qa band
+     var qa = image.select('sr_cloud_qa'); 
+    // keep only clear pixels over land or water
+     var mask = qa.bitwiseAnd(cloudBit).eq(0).and(  // no clouds
+                qa.bitwiseAnd(shadowBit).eq(0)).and( // no cloud shadows
+                qa.bitwiseAnd(snowBit).eq(0)).and(   // no snow
+                qa.bitwiseAnd(fillBit).eq(0))   ; // no fill
+    return image.updateMask(mask).copyProperties(image);      
+  };
+  
+  
+  // Do best to get rid of smoke
+  var maskAerosolsL57 = function(image){
+    // make a new single band image from the pixel qa band
+    var atmos = image.select('sr_atmos_opacity').multiply(0.0001); 
+    // keep only clear pixels over land or water
+      return image.updateMask((atmos.lt(0.03))).copyProperties(image);   
+  };
+   
+   
+  var l5 = l5.map(cloudMask_LEDAPS).map(maskAerosolsL57)
+  var l7 = l7.map(cloudMask_LEDAPS).map(maskAerosolsL57)
+  
+  
+  // -----------------------------------------------------------------
+  // Combined Processing
+  // -----------------------------------------------------------------
+  
+  // Surface reflectance products come with a 'pixel_qa' band
+  // that is based on the cfmask. Read more here: 
+  // https://landsat.usgs.gov/landsat-surface-reflectance-quality-assessment
+  
+  // This example demonstrates the use of the Landsat 4, 5 or 7
+  // surface reflectance QA band to mask clouds.
+  
+  var maskClouds = function(image){
+    // bit positions 
+    var cloudBit = Math.pow(2, 5); //32
+    var shadowBit = Math.pow(2, 3); // 8
+    var snowBit = Math.pow(2, 4); //16
+    var fillBit = Math.pow(2,0); // 1
+    // extra pixel quality band
+    var qa = image.select('pixel_qa');    
+    // create and apply mask
+    var mask = qa.bitwiseAnd(cloudBit).eq(0).and(  // no clouds
+                qa.bitwiseAnd(shadowBit).eq(0)).and( // no cloud shadows
+                qa.bitwiseAnd(snowBit).eq(0)).and(   // no snow
+                qa.bitwiseAnd(fillBit).eq(0))   ; // no fill
+    return image.updateMask(mask).copyProperties(image);   
+  };  
+  
+  
+  // Mask saturated pixels. 
+  var maskSaturatedPixels= function(image){
+      // make a new single band image from the qa band
+    var radsat = image.select('radsat_qa'); 
+    // keep only valid pixels
+     return image.updateMask((radsat.eq(0))).copyProperties(image);
+  };
+  
+  // Mask negative pixels. 
+  var maskNegativePixels= function(image){
+      // make a new single band image from the qa band
+    var blue = image.select('B1'); 
+    var green = image.select('B2'); 
+    // keep only valid pixels
+     return image.updateMask((green.gt(0)).and(blue.gt(0))).copyProperties(image);
+  };
+  
+  
+  var l5 = l5.map(maskClouds).map(maskSaturatedPixels).map(maskNegativePixels).select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'pixel_qa'])
+  var l7 = l7.map(maskClouds).map(maskSaturatedPixels).map(maskNegativePixels).select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'pixel_qa'])
+  var l8 = l8.map(maskClouds).select(['B1', 'B2', 'B3', 'B4', 'B5', 'B7', 'pixel_qa'])
+  
+  
+  // -----------------------------------------------------------------
+  // Add sensor metadata as separate bands
+  // -----------------------------------------------------------------
+  
+  // Store satellite name as a separate band
+  var l5 = l5.map(function(image) {
+    return image.set('sensor', 5).copyProperties(image);
+  });
+  
+  // Store satellite name as a separate band
+  var l7 = l7.map(function(image) {
+    return image.set('sensor', 7).copyProperties(image);
+  });
+  
+  // Store satellite name as a separate band
+  var l8 = l8.map(function(image) {
+    return image.set('sensor', 8).copyProperties(image);
+  });
+  
+  
+  var cloudSmokeMasked = l5.merge(l7).merge(l8)
+  
+  
+  // Store satellite sensing time metadata as a separate band
+  var addTime = function(image) {
+    return image.addBands(image.metadata('system:time_start').rename('image_time')).copyProperties(image);
+  };
+  
+  // // Store satellite name as a separate band
+  var addSensor = function(image) {
+    return image.addBands(image.metadata('sensor').rename('sensor')).copyProperties(image);
+  };
+  
+  // use "map" to apply the function to each image in the collection
+  var landsatMasked = cloudSmokeMasked.map(addTime).map(addSensor);
+  
+  
+  
+  // // ---------------------------------------------------------------------
+  // // Visualize Final Masked Composite
+  // // ---------------------------------------------------------------------
+  
+  
+  // visualize the collection, pre- and post- mask
+  var visParams = {bands: ['B3','B2','B1'], min: 150, max: 1000}
+  
+  // // Visualize the collection before cloud masking
+  // Map.addLayer(ee.Image(landsatOriginal.mosaic()), visParams, 'original mosaic')
+  
+  // //Visualize the collection after cloud masking
+  // Map.addLayer(ee.Image(landsatMasked.mosaic()), visParams, 'clouds masked')
+  
+  
+  // ERL PAPER IMAGE ID LIST
+  var start=ee.Date.fromYMD(2018,06,1) // Start in June
+  var end = start.advance(2, 'month'); // Through July end (2 months, June and July)
+  var id = ee.Number(2018).format("%04d_")
+  var annual_images = landsatMasked.filterDate(start, end);
+  
+  print(annual_images, 'annual_images')
+  
+  var computedIds = annual_images.reduceColumns(ee.Reducer.toList(), ['LANDSAT_ID']);
+  
+  print(computedIds, 'ids')
+  
+  // Make a feature without geometry and set the properties to the dictionary of means.
+  var feature = ee.Feature(null,  computedIds);
+  
+  // Wrap the Feature in a FeatureCollection for export.
+  var featureCollection = ee.FeatureCollection([feature]);
+  
+  // Export the FeatureCollection.
+  Export.table.toDrive({
+    collection: featureCollection,
+    description: '2018_Tile_IDs_' + nameSuffix,
+    fileFormat: 'CSV'
+  });
+  
+  
+  // ---------------------------------------------------------------------
+  // Make a "Greenest Pixel" Composite for ROI
+  // ---------------------------------------------------------------------
+  
+  // calculate peak greenness for each year's growing season  
+  var yearlySummerComposites = ee.ImageCollection.fromImages(years.map(function(year) {
+  
+      // Create Reducers
+    var reducers = ee.Reducer.mean().combine({
+      reducer2: ee.Reducer.stdDev(),
+        sharedInputs: true
+        }).combine({
+      reducer2: ee.Reducer.median(),
+        sharedInputs: true
+        }).combine({
+      reducer2: ee.Reducer.count(),
+        sharedInputs: true
+        });
+  
+      // Filter to the summer months using FilterDate
+      var start=ee.Date.fromYMD(year,06,1) // Start in June
+      var end = start.advance(2, 'month'); // Through July end (2 months, June and July)
+      var id = ee.Number(year).format("%04d_")
+      var annual_images = landsatMasked.filterDate(start, end);
+      // Create an image where each pixel value is the number of clear observations
+      // This tells you how many clear "glances" there were that summer
+      var numObs =  annual_images.select('B2').reduce(ee.Reducer.count()).rename('numObser')
+      var countMask = ee.Image().rename('numObser')
+      var count = countMask.addBands(numObs, null, true)//.rename(bandsForMask)
+      // Smooth the count image with a 3 X 3 box
+      var kernelPeakNoObservs = count.select( 'numObser').reduceNeighborhood({
+          reducer: ee.Reducer.mean(), kernel: ee.Kernel.square(45, "meters"),})
+      
+      // Calculate the peak greenness
+      // This selects the greenest value for each pixel
+      // And brings along the other bands associated with that value
+      var bands = ['B2', 'B1', 'B3', 'B4', 'B5',  'B7', 'pixel_qa', 'image_time', 'sensor']//, 'sensor'
+      var restofBands = ['B1', 'B3', 'B4', 'B5',  'B7']
+  
+      // Finds greenest pixel
+      var peak_zero = annual_images.select(bands).reduce(ee.Reducer.median()).rename(bands)
+  
+      // Make an empty image as a placeholder for null values
+      var bandsForMask = ['constant', 'B2', 'B1', 'B3', 'B4', 'B5',  'B7', 'pixel_qa', 'image_time', 'sensor']
+      var doyMask = ee.Image().rename('doy')
+      var sensorMask = ee.Image().rename('sensor')
+      var qaMask = ee.Image().rename('pixel_qa')
+      var timeMask = ee.Image().rename('image_time').addBands(ee.Image().rename('B1'))
+          .addBands(ee.Image().rename('B3')).addBands(ee.Image().rename('B4'))
+          .addBands(ee.Image().rename('B5')).addBands(ee.Image().rename('B7'))
+      var mask = ee.Image().rename('B2').addBands([doyMask, sensorMask, qaMask, countMask, timeMask])
+      var peak = mask.addBands(peak_zero, null, true)//.rename(bandsForMask)
+      
+      
+      // Extract doy and sensor bands from peak image
+      // This tells you which DOY and sensor the peak green pixel was selected from
+      var doy = peak.select('image_time').rename('peakGreenDOY')
+      var sensor = peak.select('sensor').rename('sensor')
+    
+      // Pixel QA Band - calculate the mode
+      var qaBand = peak.select( 'pixel_qa').reduceNeighborhood({
+          reducer: ee.Reducer.mode(), kernel: ee.Kernel.square(45, "meters"),}).rename('pixel_qa_mode')
+      
+      // Create a kernel and smooth the peak green image with it
+      var kernelPeakGreen = peak.select( 'B2').multiply(0.0001).reduceNeighborhood({
+          reducer: reducers, kernel: ee.Kernel.square(45, "meters"),})
+      
+      var kernelPeakRestofBands = peak.select(restofBands).multiply(0.0001).reduceNeighborhood({
+          reducer: ee.Reducer.median(), kernel: ee.Kernel.square(45, "meters"),})
+  
+      // Make a new image that contains stats for each VIS band, plus count, plus DOY
+      var peakImage = kernelPeakGreen.addBands(kernelPeakRestofBands).addBands(kernelPeakNoObservs).addBands(doy).addBands(qaBand).addBands(sensor).set("system:index", id)
+      return peakImage.set('year', year);
+  }));
+  
+  
+  // print(yearlySummerComposites, "YearsStackedAsImages")
+  
+  // Optional Code for Looking at Each Year
+  // for (var i = 0; i < 35; i++) {
+  //   Map.addLayer(ee.Image(ee.ImageCollection(yearlySummerComposites).toList(36).get(i)), visParams, 'Peak-Green-' + i);
+  // }
+  
+  
+  // Turn each image into a band
+  var ArcticMaxGreenStacks = yearlySummerComposites.toBands();
+  
+  
+  // // Unmask it - masked pixels become zeros but will still be sampled
+  // // This prevents skipping an entire year if the first feature returns a null
+  var ArcticMaxGreenStacks = ArcticMaxGreenStacks.unmask();
+  // print(ArcticMaxGreenStacks, 'YearsStackedAsBands');
+  
+  
+  // // ---------------------------------------------------------------------
+  // // Sample with Lakes Centroids
+  // // ---------------------------------------------------------------------
+  
+  // Sample this new raster 
+  var neighborhoodSample = ArcticMaxGreenStacks.sampleRegions({
+    collection: studyLakes, 
+    scale:30, 
+    tileScale: 16 
+  })
+  
+  // Print the first feature, to illustrate the result.
+  // print('Example Lake Greennest:', neighborhoodSample.first())
+  // print('Output Size:', neighborhoodSample.size())
+  
+  
+  // // ---------------------------------------------------------------------
+  // // Export to Drive
+  // // ---------------------------------------------------------------------
+  
+  // Export the FeatureCollection.
+  Export.table.toDrive({
+    collection: neighborhoodSample,
+    folder: 'NASA ABOVE',
+    description: collection + '_Peak_Green' + lakesName + '_v6_' + nameSuffix,
+    fileFormat: 'CSV'
+  });
+}
+
+// var cell = gridWithLakes.first().getInfo()
+// exportTile(cell, 0)
+
+gridWithLakes.evaluate(function(grid) {
+  print('Number of non-empty cells: ', grid.features.length)
+  grid.features.forEach(exportTile)
+})

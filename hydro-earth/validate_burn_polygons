@@ -1,0 +1,75 @@
+// test multiply and burn featureCollection with residential buildings from OSM
+
+// step 1 filter
+var filter_fc = function(fc,keys,values){
+  // fc is feature collection with property keys and values must be defined as list:
+  // var keys = ['highway']
+  // var values = [['primary']]
+  
+  // define filter function; inside loop because otherwise keys and props are not regocnized
+  var filter_multiple = function(i, fc){
+  return ee.FeatureCollection(fc).filter(ee.Filter.inList(keys.get(i), values.get(i)))};
+  
+  // declare keys and props as list and make index
+  var keys = ee.List(keys);
+  var values = ee.List(values);
+  var index = ee.List.sequence(0,null,1, keys.length());
+  
+  // iterate over keys and props and return filtered fc
+  return ee.FeatureCollection(index.iterate(filter_multiple,fc))
+  
+}
+
+// step2: set default value
+var add_property = function(fc, key, value){
+  // add a property with a constant value to featureCollection
+  var fc_prop_check = fc.map(function(f){return f.set('has_prop', f.propertyNames().contains(key))});
+  var fc_prop_exists = fc_prop_check.filter(ee.Filter.eq('has_prop', true));
+  var fc_prop_notexists = fc_prop_check.filter(ee.Filter.eq('has_prop', false))
+    .map(function(f){return f.set(key, value)});
+  return fc_prop_notexists.merge(fc_prop_exists)
+}
+
+var multiply_property = function(fc, src_prop, trg_prop, multiplier){
+  var fc_mult = fc.map(function(f){
+    return f.set(trg_prop,
+      ee.Number(f.get(src_prop))
+        .multiply(multiplier))
+
+  })
+  return fc_mult
+}
+
+var burn_map = function(fc, prop, resolution) {
+  //make a map with zeroes
+  var blank = ee.Image(0);
+  // reduce fc to image and burn
+  var fc_burn = fc.reduceToImage([prop], ee.Reducer.mean());
+  fc_burn = blank.where(fc_burn.gte(1), fc_burn)
+    .reproject('EPSG:4326', null, resolution);
+  return fc_burn
+}
+
+
+var burn_all_buildings = function(fc_list, prop_list, prop_default_list, multiply_list, resolution){
+  // define function to burn one FeatureCollection
+  var burn_buildings = function(i){
+    // input is an index value
+    // get the inputs for build_buildings with index
+    var fc = ee.FeatureCollection(ee.List(fc_list).get(i));
+    var prop = ee.List(prop_list).get(i);
+    var prop_default = ee.List(prop_default_list).get(i);
+    var multiply = ee.Number(ee.List(multiply_list).get(i));
+    // fill in missings with a default value
+    fc = add_property(fc, prop, prop_default);
+    // multiply number of storeys with height per storey, map to 'height'
+    fc = multiply_property(fc, prop, 'height', multiply);
+    // return a burned map of 'height'
+    return burn_map(fc, 'height', resolution);
+  }
+
+  // function maps a list of FeatureCollections, props, default props and multipliers
+  // to burn_buildings and returns an ImageCollection of returned images
+  var index = ee.List.sequence(0, ee.Number(ee.List(fc_list).length()).subtract(1))
+  return ee.ImageCollection(index.map(burn_buildings));
+}

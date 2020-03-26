@@ -1,0 +1,78 @@
+// 1. Fetch the plot information already uploaded to Google Drive from Collect Earth
+var plots = ee.FeatureCollection("ft:1m2ognPCFZZnM6D4qxNFcK2tlm1RfCvlbGD5_269n");
+//print(plots.getInfo());
+//Map.addLayer(plots);
+
+Map.centerObject(plots)
+
+
+// 2. Get a list of countries with a boundary geometry
+// Country boundaries are stored in a fusion table
+var countries = ee.FeatureCollection("ft:1uL8KJV0bMb7A8-SkrIe0ko2DMtSypHX52DatEE4");
+//print(countries.getInfo());
+//Map.addLayer(countries);
+
+// 3. Filter the countries by name
+var filterPerCountry = ee.Filter.eq("OBJECTID",44);
+var country = countries.filter(filterPerCountry).first();
+//print(country.getInfo());
+
+// 4. Load the Landsat 8 Greenest pixel available and filter is to get the 2015 image
+var landsat8GreenestCollection = ee.ImageCollection("LANDSAT/LC8_L1T_ANNUAL_GREENEST_TOA").filterDate("2015-01-01","2015-12-31");
+//Map.addLayer(landsat8GreenestCollection);
+//print(landsat8GreenestCollection.getInfo());
+
+// 5. Reduce (obtain) the 2015 Image from the ImageCollection 
+var landsat4greenest2015 = ee.Image( landsat8GreenestCollection.toList(1).get(0) );
+//print( landsat4greenest2015.getInfo() );
+//Map.addLayer(landsat4greenest2015);
+
+// 6. Clip the 2015 image using the country boundaries
+var region =  country.get("geometry");
+var countrylandsat4greenest2015 = landsat4greenest2015.clip(region )
+//print( countrylandsat4greenest2015.getInfo() );
+//Map.addLayer(countrylandsat4greenest2015);
+//Map.addLayer(countrylandsat4greenest2015, {'bands': ['B5', 'B6', 'B4'] });
+
+
+////--------------------------------------------------////--------------------------------------------//
+
+// Create a function that trains a classifier and applies it to an image.
+// Select a fusion table containing training polygons. Select the field
+// "_land_use_category_class" to assign classes.
+// Train the classifier with specified inputs.
+
+function Classify(countrylandsat4greenest2015,plots){
+   var classifier = countrylandsat4greenest2015.trainClassifier({
+    training_features: plots,
+    training_property:'_land_use_category_class',
+    classifier_name: 'RifleSerialClassifier',
+    crs:'EPSG:4326',
+    crs_transform: [8.9831528411952135e-05, 0, -180, 0, -8.9831528411952135e-05, 90]
+  });
+  
+  // Apply the trained classifier by calling classify() on the image.
+  var classified = countrylandsat4greenest2015.classify(classifier);
+  return classified;
+}
+
+// Select bands for an image.
+
+var countryfinal = countrylandsat4greenest2015.select([1,0,4,2,3,5]);
+
+// Run the classification function on the image.
+var classimg = Classify(countryfinal);
+
+// Create a palette to display the classes.
+var palette =['006400','32CD32','EEE8AA','8B4513','98FB98','00FA9A','90EE90'];
+
+
+Map.addLayer(countryfinal, {'bands': ['B5', 'B6', 'B4'] });
+Map.addLayer(classimg, {'palette':palette}, 'Vegetation');
+
+//exportImage(countryfinal, 'chile_image_classified', {
+  //'region': region.get('coordinates').get(1),
+  //'maxPixels': 10e9});
+  
+  
+Map.addLayer(plots, {}, 'plots');

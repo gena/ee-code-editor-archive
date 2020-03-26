@@ -1,0 +1,209 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var Rainfall_TRMM3B43 = ee.ImageCollection("TRMM/3B43V7");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+
+
+
+//----------------------------------visualization------------------------------------------//
+
+// var temporalFilter= Rainfall_TRMM3B43.filterDate('2010-08-04', '2010-08-13')
+// print ('temporal',temporalFilter)
+// Map.addLayer(temporalFilter.select('precipitation'), {}, 'precipitation_per',false)
+
+//------------------------------visualization----------------------------------------------//
+
+
+//  (2) Add  landslides ocurrences 
+
+// var events = ee.FeatureCollection('ft:1B6LxrrIRytfR_HOoTCVEeRD5luO-Op2WIB7xJKhV', 'latitude')
+var events = ee.FeatureCollection('ft:1Md4KIpfOIw2hjI5Fzhl2UNbRhHypDqDzjpyEfrHl', 'latitude')  //landslides_ocurrences_2019
+
+// print(events.distinct('landslide_size').aggregate_array('landslide_size'))
+// print(events.distinct('landslide_id').aggregate_array('landslide_id'))
+// print(events.distinct('location_accuracy').aggregate_array('location_accuracy'))
+
+// add readable date/time
+events = events.map(function(f) {
+    return f.set({t: ee.Date(f.get('event_date'))}) 
+    .set({event_date: ee.Number(f.get('event_date'))})
+  })
+
+// events = events.filter(ee.Filter.inList('landslide_size', ['very_large', 'catastrophic'])) //filter by landslide size
+// events = events.filter(ee.Filter.gt('event_date', ee.Date('2017-07-01').millis())) 
+
+// events = events.filter(ee.Filter.lte('location_accuracy', ee.Number(25)))   // location accuracy 25, greater than and lower than
+// events = events.filter(ee.Filter.notEquals('location_accuracy', ee.Number(2)))
+
+// events = events.filter(ee.Filter.equals('location_accuracy', ee.Number(2)))//unknown 50000
+
+events = events.filter(ee.Filter.gt('location_accuracy', ee.Number(25))) //accuracy dependent 
+
+//location accuracy values: 25 = 25Km, 1=1Km, k=5km, 3=unknown, 2= unknown
+
+// events = events.filter(ee.Filter.inList('landslide_id', [759]))//filter by landslide_id
+
+print ('size', events.size())
+// Map.addLayer(events, {color: 'blue'}, 'landslide point')
+
+
+ //-----------------------------------//---------------------------//---------------------------------------
+
+//(3function to calculate the mean:
+
+var calStatsW = function (image,buffer) {
+  var listVar= [25]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  // reducer: ee.Reducer.stdDev(),
+  // reducer: ee.Reducer.median(),
+    reducer: ee.Reducer.mode(),
+    
+  geometry: buffer_processed.geometry(),
+  scale: 30000,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+var calStatsUW = function (image,buffer) {
+  var listVar= [75]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  // reducer: ee.Reducer.stdDev().unweighted(),
+  // reducer: ee.Reducer.std().unweighted(),
+  // reducer: ee.Reducer.median().unweighted(),
+    reducer: ee.Reducer.max(),// calculate max
+    
+  geometry: buffer_processed.geometry(),
+  scale: 30000,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+
+
+
+var dateRange= function (landslide) {
+
+    var event_date = ee.Date(landslide.get('event_date'))  
+
+  
+    // var event_date= ee.Date.fromYMD (event_date.get ('Year'), 
+    // event_date.get ('Month'), event_date.get ('Day'))
+    
+    var event_month_init= ee.Date.fromYMD (event_date.get ('Year'), 
+    event_date.get ('Month'), 1)
+
+    var event_month_end= ee.Date.fromYMD (event_date.get ('Year'), 
+    event_date.get ('Month'), 28)
+    // print (event_month_init)
+    
+    return [event_month_init,event_month_end]}
+ // return {'event_month_init':event_month_init, 'event_month_end':event_month_end}}
+
+
+//(III) function to calculate buffer
+
+var calcBuffer = function(landslide){
+  var location_accuracy= landslide.get('location_accuracy')
+  
+  var buffer_radius=  ee.Number.parse(location_accuracy).multiply(1000) //buffer radius in meters 
+  // var buffer_radius= 100000
+    // var buffer_radius= 25000
+    return buffer_radius
+  }
+
+
+// (IV) Function to calculate values 10 previous days before landslide ocurrence
+
+var setStats_rainfall = function (landslide) {
+
+    var event_date1 =ee.Date(landslide.get('t')) 
+    // var previous_tenDays= dateRange(landslide)
+
+    var dates_list = dateRange(landslide)
+    var event_month_init = dates_list[0]
+    var event_month_end = dates_list[1]
+
+    var four_previous_months= ee.Date(event_month_init).advance(-4,'month')
+    
+// (V) function to calculated values per day
+
+    var day_mean = ee.List.sequence(0, 4).map(function(n) { // .sequence: number of days from 10 days before landslide occurrence 
+    var start = four_previous_months.advance(n, 'month'); // Starting date
+    var end = start.advance(1, 'month'); // Step by each iteration
+    var end2 = end.advance(-5, 'day'); //find a day within the month range ( )
+
+  return Rainfall_TRMM3B43.select ('precipitation').filterDate(start, end2).mean().multiply(24).set('system:time_start', start)
+    })
+    
+  var collection = ee.ImageCollection(day_mean)
+  
+  
+//calculate the mean by day using the buffer
+ 
+  var collectionTolist= collection.toList(collection.size())
+
+  var month_minus4W = calStatsW(ee.Image(collectionTolist.get(0)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var month_minus3W = calStatsW(ee.Image(collectionTolist.get(1)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var month_minus2W = calStatsW(ee.Image(collectionTolist.get(2)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var month_minus1W = calStatsW(ee.Image(collectionTolist.get(3)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var month_0W = calStatsW(ee.Image(collectionTolist.get(4)),landslide.geometry().buffer(calcBuffer(landslide)))
+ 
+ 
+  var month_minus4UW = calStatsUW(ee.Image(collectionTolist.get(0)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var month_minus3UW = calStatsUW(ee.Image(collectionTolist.get(1)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var month_minus2UW = calStatsUW(ee.Image(collectionTolist.get(2)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var month_minus1UW = calStatsUW(ee.Image(collectionTolist.get(3)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var month_0UW = calStatsUW(ee.Image(collectionTolist.get(4)),landslide.geometry().buffer(calcBuffer(landslide)))
+ 
+ 
+ 
+  return  landslide.set({ month_minus4W: month_minus4W, date_minus4:ee.Date(ee.Image(collectionTolist.get(0)).get('system:time_start')),
+                          month_minus3W: month_minus3W,date_minus3:ee.Date(ee.Image(collectionTolist.get(1)).get('system:time_start')),
+                          month_minus2W: month_minus2W,date_minus2:ee.Date(ee.Image(collectionTolist.get(2)).get('system:time_start')), 
+                          month_minus1W: month_minus1W,date_minus1:ee.Date(ee.Image(collectionTolist.get(3)).get('system:time_start')),
+                          month_0W: month_0W,date_0:ee.Date(ee.Image(collectionTolist.get(4)).get('system:time_start')),
+                          
+                          month_minus4UW: month_minus4UW, date_minus4:ee.Date(ee.Image(collectionTolist.get(0)).get('system:time_start')),
+                          month_minus3UW: month_minus3UW,date_minus3:ee.Date(ee.Image(collectionTolist.get(1)).get('system:time_start')),
+                          month_minus2UW: month_minus2UW,date_minus2:ee.Date(ee.Image(collectionTolist.get(2)).get('system:time_start')), 
+                          month_minus1UW: month_minus1UW,date_minus1:ee.Date(ee.Image(collectionTolist.get(3)).get('system:time_start')),
+                          month_0UW: month_0UW,date_0:ee.Date(ee.Image(collectionTolist.get(4)).get('system:time_start')),
+              
+                          date_landslide: event_date1,
+                          buffer_radius:calcBuffer(landslide)
+                          
+    
+  })
+  
+  }
+    
+  events = events.map(setStats_rainfall)
+  
+  // print (events)
+
+ //(V)export the file 
+
+Export.table.toDrive({
+  collection: events, 
+  description: 'Rainfall_TRMM3B43_perc_acc', 
+  fileFormat: 'CSV',
+  selectors:(["landslide_id","date_landslide","country_code", "longitude", "location_accuracy","buffer_radius",
+  "date_0", "month_0W","month_0UW", "date_minus1","month_minus1W","month_minus1UW", 
+  "date_minus2", "month_minus2W","month_minus2UW","date_minus3", "month_minus3W" , "month_minus3UW" ,
+  "date_minus4","month_minus4W", "month_minus4UW"]),
+
+});
+
+
+
+
+
+

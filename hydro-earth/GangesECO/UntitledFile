@@ -1,0 +1,35 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var S1 = ee.ImageCollection("COPERNICUS/S1_GRD"),
+    zones = ee.FeatureCollection("users/gerben199066/Zonation_Gangabasin_Complete");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var aoi = Map.getBounds(true)
+Map.addLayer(zones,{},'Zones')
+
+zones = zones.filterBounds(aoi)
+aoi = zones
+// Filter on specific zone
+// var zonesI = zones.filterMetadata('Zones','equals','I')
+// Map.addLayer(zonesI,{},'Zones I')
+
+function clip(image){
+  return image.clip(aoi).select('VV');
+}
+
+S1 = S1.filterBounds(aoi).select('VV').map(function(i) { return i.clip(i.geometry().buffer(-10000))});
+
+var vis = {min:-25, max:-5}
+
+// Add Sentinel 1 image
+var image = ee.Image(S1.filterDate('2016-01-01','2016-04-01').min())
+// var imageclipped = image.clip(zones)
+Map.addLayer(image,vis,'S1 jan-apr')
+
+var image = ee.Image(S1.filterDate('2016-04-01','2016-08-01').min())
+// var imageclipped = image.clip(zones)
+Map.addLayer(image,vis,'S1 apr-aug')
+
+var image = ee.Image(S1.filterDate('2016-08-01','2016-12-01').min())
+// var imageclipped = image.clip(zones)
+Map.addLayer(image,vis,'S1 aug-dec')
+
+Map.addLayer(zones, {color: 'yellow'}, 'zones', true, 0.5)

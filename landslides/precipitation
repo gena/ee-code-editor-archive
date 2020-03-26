@@ -1,0 +1,143 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var south = /* color: #98ff00 */ee.Geometry.Polygon(
+        [[[-122.24536782286447, 47.19691240989517],
+          [-121.30796215616658, 47.318699102999574],
+          [-117.00062957614887, 46.372099161265105],
+          [-117.22213784038132, 47.7557275734316],
+          [-118.96371578744845, 48.3237014712121]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+var collections = [
+  // { 
+  //   name: 'CHIRPS', scale: 5000, 
+  //   collection: ee.ImageCollection('UCSB-CHG/CHIRPS/PENTAD')
+  // },
+  { 
+    name: 'CHIRPS', scale: 5000, 
+    collection: ee.ImageCollection('UCSB-CHG/CHIRPS/PENTAD')
+      .map(function(i) {
+        return i.divide(5) // these were mm per pentad
+          .copyProperties(i, ['system:time_start'])
+      })
+  },
+  {
+    name: 'PERSIANN', scale: 5000,
+    collection: ee.ImageCollection('NOAA/PERSIANN-CDR')
+  },
+  // { 
+  //   name: 'CFSV2', scale: 30000,
+  //   collection: ee.ImageCollection('NOAA/CFSV2/FOR6H')
+  //     .select('Precipitation_rate_surface_6_Hour_Average')
+  //     .map(function(i) { 
+  //       return i.multiply(60 * 60 * 6) // convert to mm
+  //         .copyProperties(i, ['system:time_start'])
+  //     })
+  // },
+  { 
+    name: 'CFSV2', scale: 30000,
+    collection: ee.ImageCollection('NOAA/CFSV2/FOR6H')
+      .select('Precipitation_rate_surface_6_Hour_Average')
+      .map(function(i) { 
+        return i.multiply(60 * 60 * 24) // convert to mm
+          .copyProperties(i, ['system:time_start'])
+      })
+  },
+  // {
+  //   name: 'TRMM42', scale: 30000,
+  //   collection: ee.ImageCollection('TRMM/3B42')
+  //   .select('precipitation')
+  //     .map(function(i) { 
+  //       return i.multiply(3) // convert to mm
+  //         .copyProperties(i, ['system:time_start'])
+  // })
+  // },
+  {
+    name: 'TRMM42', scale: 30000,
+    collection: ee.ImageCollection('TRMM/3B42')
+     .select('precipitation')
+      .map(function(i) { 
+        return i.multiply(24) // convert to mm
+          .copyProperties(i, ['system:time_start'])
+  })
+  },
+  // {
+  //   name: 'TRMM43', scale: 30000,
+  //   collection: ee.ImageCollection('TRMM/3B43V7')
+  //   .select('precipitation')
+  //     .map(function(i) { 
+  //       return i.multiply(24 * 60) // convert to mm
+  //         .copyProperties(i, ['system:time_start'])
+  // })
+  // },
+{
+    name: 'TRMM43', scale: 3000,
+    collection: ee.ImageCollection('TRMM/3B43V7')
+     .select('precipitation')
+      .map(function(i) { 
+        return i.multiply(24) // convert to mm
+          .copyProperties(i, ['system:time_start'])
+  })
+   },
+  // { 
+  //   name: 'GLDAS', scale: 30000,
+  //   collection: ee.ImageCollection('NASA/GLDAS/V021/NOAH/G025/T3H')
+  //     .select('Rainf_tavg')
+  //     .map(function(i) { 
+  //       return i.multiply(60 * 60 * 3) // convert to mm
+  //         .copyProperties(i, ['system:time_start'])
+  //     })
+  // }
+  { 
+    name: 'GLDAS', scale: 30000,
+    collection: ee.ImageCollection('NASA/GLDAS/V021/NOAH/G025/T3H')
+      .select('Rainf_tavg')
+      .map(function(i) { 
+        return i.multiply(60 * 60 * 24) // convert to mm
+          .copyProperties(i, ['system:time_start'])
+      })
+   }
+  ];
+  
+function getDates(start, stop, step) {
+  return ee.List.sequence(start, stop).map(function(year) {
+    return ee.List.sequence(1, 12, step).map(function(month) {
+      return ee.Date.fromYMD(year, month, 1)
+    })
+  }).flatten()
+}
+print(collections)
+function compute(start, stop, step) {
+  var dates = getDates(start, stop, step)
+
+  var features = collections.map(function(c) {
+    return dates.map(function(d) {
+      var p = c.collection
+        .filterDate(d, ee.Date(d).advance(step, 'month'))
+        .sum()
+        .reduceRegion(ee.Reducer.mean(), south, c.scale).values().get(0)
+        
+      return ee.Feature(null)
+        .set('system:time_start', ee.Date(d).millis())
+        .set(c.name, p)        
+    })
+  })
+  
+  return ee.FeatureCollection(ee.List(features).flatten())
+}
+
+var monthly = compute(2001, 2015, 1)
+var annual = compute(2001, 2015, 12)
+
+function chart(features, title) {
+  var chart = ui.Chart.feature.byFeature(features, 'system:time_start')
+  chart.setOptions({
+    vAxis: { title: 'Precipitation [mm]' },
+    title: title
+  })
+  print(chart)
+}
+
+Map.addLayer(south)
+
+chart(monthly, 'Monthly precipitation  (Washington State)')
+chart(annual, 'Annual precipitation (Washington State)')

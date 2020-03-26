@@ -1,0 +1,74 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var table = ee.FeatureCollection("TIGER/2016/States");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+var counties=ee.FeatureCollection('TIGER/2016/Counties') 
+var CA=ee.FeatureCollection('TIGER/2016/States').filter(ee.Filter.eq('STATEFP','06'))
+var FL=ee.FeatureCollection('TIGER/2016/States').filter(ee.Filter.eq('STATEFP','12'))
+
+ var columnlist=ee.List(['COUNTYFP','STATEFP','NAME'])
+  var columnlist2=ee.List(['COUNTYFP','STATEFP','NAME','mode'])
+ var CAcounties=counties.filter(ee.Filter.eq('STATEFP','06')).select(columnlist)
+var FLcounties=counties.filter(ee.Filter.eq('STATEFP','12')).select(columnlist)
+
+print(CAcounties)
+Map.addLayer(CAcounties)
+Map.addLayer(CA)
+
+
+// get the resovle dataset.  change ot imate
+var resolve = ee.FeatureCollection('RESOLVE/ECOREGIONS/2017') ;
+var resolveFL=resolve.filterBounds(FL)
+var resolveCA=resolve.filterBounds(CA)
+var visParams = {
+  palette: [
+    '0080D4', ' D88000', ' 7A32C1', ' A2007F', ' ffc0e8', ' f5ff64', ' b5ffb4',
+    ' beeaff', ' ffc0e8', ' 8e8dff', ' A2FF7F', ' 36807F', ' E5E8E6', ' cyan',
+    ' blue', ' orange', ' yellow', ' gray'
+  ],
+  min: 0.0,
+  max: 500.0,
+  opacity: 0.8,
+};
+var resolveimageCA = resolveCA.reduceToImage(['ECO_ID'], ee.Reducer.first());
+var resolveimageFL = resolveFL.reduceToImage(['ECO_ID'], ee.Reducer.first());
+  
+print(resolveimageCA)
+Map.addLayer(resolveimageCA, visParams, 'RESOLVE/ECOREGIONS/2017')
+print(resolveimageFL)
+Map.addLayer(resolveimageFL, visParams, 'RESOLVE/ECOREGIONS/2017')
+
+var resolvecountiesCA=resolveimageCA.reduceRegions({
+  collection:CAcounties,
+  reducer:ee.Reducer.mode(),
+  scale:30000
+})  
+var resolvecountiesFL=resolveimageFL.reduceRegions({
+  collection:FLcounties,
+  reducer:ee.Reducer.mode(),
+    selector: columnlist2,
+  scale:30000
+})  
+  
+ print(resolvecountiesFL)
+ print(resolvecountiesCA)
+ 
+ // Export the FeatureCollection.
+Export.table.toDrive({
+  collection: resolvecountiesCA,
+  description: 'resolvecountiesCAeco',
+  selector: columnlist2,
+  fileFormat: 'CSV'
+});
+Export.table.toDrive({
+  collection: resolvecountiesCA,
+  description: 'resolvecountiesCA',
+  fileFormat: 'KML'
+});
+ 
+Export.table.toDrive({
+  collection: resolvecountiesFL,
+  description: 'resolvecountiesFLeco',
+  fileFormat: 'CSV'
+});
+ 

@@ -1,0 +1,70 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var nhdMt = ee.FeatureCollection("users/nicksilver/NHD/NHDFlowline_MT"),
+    dem = ee.Image("USGS/NED"),
+    huc6 = ee.FeatureCollection("USGS/WBD/2017/HUC06"),
+    huc10 = ee.FeatureCollection("USGS/WBD/2017/HUC10"),
+    huc12 = ee.FeatureCollection("USGS/WBD/2017/HUC12"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([-112.44704246520996, 44.72203951434161]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// var huc6Mt = huc6
+  // .filter(ee.Filter.stringContains('states', 'MT'));
+// var huc12Mt = huc12
+  // .filter(ee.Filter.stringContains('states', 'MT'));
+  
+var testArea = huc10
+  .filter(ee.Filter.stringContains('huc10', '1002000109'));
+  
+testArea = huc12.filterBounds(geometry)  
+
+var slope = ee.Terrain.slope(dem);
+
+var fpAll = ee.ImageCollection(testArea.map(function(ws){
+  var flowlines = nhdMt
+    .filterBounds(ws.geometry())
+    .filter(ee.Filter.eq('FTYPE', 460));
+    
+  var fps = ee.ImageCollection(flowlines.map(function(reach){
+    // Create a source using flowlines
+    var source = ee.Image().byte();
+    source = source.paint(ee.FeatureCollection(reach), 1, 3);
+    
+    // Calculate cumulative cost from flowline and slope
+    var cost = slope.cumulativeCost(source, 200);
+    
+    // Create floodplain by selecting threshold of cost
+    var fp = cost.lt(50);
+    fp = fp.updateMask(fp.neq(0));
+    
+    var rCode = ee.Image.constant(ee.Number.parse(ee.String(reach.get('REACHCODE')).slice(-7)));
+    
+    fp = rCode.updateMask(fp).int64();
+    
+    return(fp);
+  }))
+  
+  var min = fps.reduce(ee.Reducer.min()).rename('min')
+  var max = fps.reduce(ee.Reducer.max()).rename('max')
+  
+  return min.addBands(max)
+  
+})).mosaic();
+
+Map.centerObject(geometry, 14);
+Map.addLayer(fpAll.select('min').randomVisualizer());
+Map.addLayer(fpAll.select('max').randomVisualizer());
+
+var confusion = fpAll.select('min').neq(fpAll.select('max'))
+
+Map.addLayer(confusion.mask(confusion.and(confusion.focal_min(1).not())), {palette: ['ffff00']}, 'confusion (edge)');
+
+// Export.image.toAsset({
+//   image: fpAll,
+//   description: 'floodplains_MT_Huc12',
+//   scale: 10,
+//   region: huc12Mt.geometry().bounds(),
+//   maxPixels: 4e11
+// }); 
+
+
+
+Map.setOptions('SATELLITE')

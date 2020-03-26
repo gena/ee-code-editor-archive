@@ -1,0 +1,32 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var Manila = /* color: #d6d6d6 */ee.Geometry.Polygon(
+        [[[119.97469955076417, 15.006493933604075],
+          [120.13400130857667, 13.926756239119326],
+          [121.92477279295167, 14.198511375249383],
+          [121.77096419920167, 15.214130375733086]]]),
+    point = /* color: #d63000 */ee.Geometry.Point([-90.14693806879359, 29.984090616559897]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+var l8 = ee.ImageCollection('LANDSAT/LC08/C01/T1_TOA');
+
+// Get the least cloudy image in 2015.
+var image = ee.Image(
+  l8.filterBounds(point)
+    .filterDate('2018-04-01', '2018-10-31')
+    .sort('CLOUD_COVER')
+    .first()
+    .resample('bicubic')
+);
+var visParams = {bands: ['B4', 'B3', 'B2'], max: 0.3};
+Map.addLayer(image, visParams, 'l8 collection');
+
+// Compute the Normalized Difference Vegetation Index (NDVI).
+var b8 = image.select('B5');
+var b4 = image.select('B4');
+var ndvi = b8.subtract(b4).divide(b8.add(b4)).rename('NDVI');
+
+// Display the result.
+Map.centerObject(image, 9);
+var ndviParams = {min: -1, max: 1, palette: ['blue', 'white', 'green']};
+Map.addLayer(ndvi, ndviParams, 'NDVI image');
+

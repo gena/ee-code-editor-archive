@@ -1,0 +1,219 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory"),
+    geometry = /* color: #d63000 */ee.Geometry.MultiPoint();
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Map.setCenter(30.05929112434387, -23.75707698066015, 16)
+
+// NCC paper
+var style = require('users/gena/packages:style')
+var hydro = require('users/gena/packages:hydro')
+var utils = require('users/gena/packages:utils')
+var assets = require('users/gena/packages:assets')
+
+// style map
+style.SetMapStyleDark()
+
+// add rivers
+var rivers = ee.FeatureCollection('ft:1yMXz_cItkAJFvmeXNcsuW2i7kK5i1iJ0QcYK3g')
+Map.addLayer(rivers, {color: 'lightblue'}, 'rivers (Natural Earth)', false)  
+
+// add basins
+var basins4 = hydro.getCatchments({level: 4});
+utils.Map.addAsImage(basins4, 'HydroBASINS L4', {outline: true, fill: false, palette: ['ffffff', 'ffffff'], layer: {visible: false}})
+
+// add Limpopo river and basins
+var limpopo = {
+  rivers: rivers.filter(ee.Filter.eq('name', 'Limpopo')),
+}
+
+// detect outlet
+var outlet = ee.Geometry.Point(limpopo.rivers.geometry().coordinates().get(-5))
+Map.addLayer(outlet, {color: 'red'}, 'outlet')
+
+
+// get catchments limited by the outlet
+limpopo.basins = hydro.getCatchments({level: 5, outlet: outlet})
+  //.map(function(f) { return f.buffer(500) })
+  
+
+// add DEM and HAND
+var hand = hydro.Map.addHand({region: limpopo.basins, layer: {visible: false, name: 'HAND'}})
+hydro.Map.addHand({region: limpopo.basins, styleAsDem: true, layer: {visible: false, name: 'HAND (DEM style)'}})
+var dem = hydro.Map.addDem({region: limpopo.basins, layer: {visible: false, name: 'DEM'}})
+
+Map.addLayer(ee.Image(1).clip(limpopo.basins), {palette:['000000']}, 'black', false, 0.3)
+
+// add Limpopo catchments
+utils.Map.addAsImage(limpopo.basins, 'Limpopo (basins)', {outline: true, fill: false, opacity: 0.9, palette: ['000000', 'ffffff']})
+
+// add rivers from HydroSHEDS
+hydro.Map.addRivers({catchments: limpopo.basins, layer: {visible: false, name: 'rivers'}})
+
+// add flow accumulation
+// hydro.Map.addFlowAccumulation({catchments: limpopo.basins})
+
+// add Limpopo rivers and basins (vectors)
+Map.addLayer(limpopo.rivers, {color: 'yellow'}, 'Limpopo (rivers), yellow', false, 0.6)
+Map.addLayer(limpopo.rivers, {color: 'red'}, 'Limpopo (rivers), red', true, 0.6)  
+
+// add existing dams
+var dams = hydro.getDams({region: limpopo.basins})
+Map.addLayer(dams, {color: 'white'}, 'dams (public databases), white', false)
+Map.addLayer(dams, {color: 'brown'}, 'dams (public databases), brown', false)
+// print('Known dams (public databases): ', dams.size())
+
+
+
+//var aoi = limpopo.basins.geometry()
+var aoi = ee.Geometry(Map.getBounds(true))
+
+var clean = true
+//var clean = false
+
+var clamp = true // clamp brightest values
+
+function exportImage(i, name, g) {
+  Export.image.toAsset({
+    image: i, 
+    description: name, 
+    assetId: name, 
+    region: g, 
+    scale: 10, 
+    crs: 'EPSG:4326', 
+    maxPixels: 1e13
+  })
+}
+
+/*
+images = images.map(function(i) {
+  var ndwi = i.normalizedDifference(['green','nir']).rename('ndwi')
+  var mndwi = i.normalizedDifference(['green','swir']).rename('mndwi')
+  var ndvi = i.normalizedDifference(['nir','red']).rename('ndvi')
+
+  return i.addBands(ee.Image([ndvi, ndwi, mndwi]))
+})
+*/
+
+function computeWaterIndexIntervalMean(images, pMin, pMax) {
+  var bandNames = ee.Image(images.first()).bandNames()
+  
+  var image = images.reduce(ee.Reducer.intervalMean(pMin, pMax)).rename(bandNames)
+  var ndwi = image.normalizedDifference(['green','nir']).rename('ndwi')
+  var mndwi = image.normalizedDifference(['green','swir']).rename('mndwi')
+  var ndvi = image.normalizedDifference(['nir','red']).rename('ndvi')
+  
+  return ee.Image([ndvi, ndwi, mndwi])
+}
+
+var ndwiMin = -0.15
+var ndwiMax = 0.25
+
+var ndviMin = -0.3
+var ndviMax = 0.15
+
+function computeWaterIndexOccurrence(g) {
+  return assets.computeQualityMeanComposite(g, function(image) {
+    var ndwi = image.normalizedDifference(['green','nir']).rename('ndwi')
+    var mndwi = image.normalizedDifference(['green','swir']).rename('mndwi')
+    var ndvi = image.normalizedDifference(['nir','red']).rename('ndvi')
+    
+    return ee.Image([ndvi.clamp(ndviMin, ndviMax), ndwi.clamp(ndwiMin, ndwiMax), mndwi.clamp(ndwiMin, ndwiMax)])
+  })
+}
+
+function computeWaterIndex(options) {
+  Map.addLayer(ee.Image(1).clip(aoi), {palette:['000000']}, 'black', false, 0.3)
+
+  if(options.pMin && options.pMax) {
+    var suffix = ', mean(' + options.pMin + '-' + options.pMax + ')'
+    var waterIndex = computeWaterIndexIntervalMean(images, options.pMin, options.pMax)
+  }
+  
+  if(options.occurrence) {
+    var suffix = ', occurrence'
+    var waterIndex = computeWaterIndexOccurrence(aoi)
+  }  
+  
+  var vis = options.vis || {min: ndwiMin, max:ndwiMax}
+  
+  Map.addLayer(waterIndex.clip(aoi), vis, 'water index' + suffix + ', unmasked', false)
+
+  var waterIndexMask = waterIndex.select([1,2]).reduce(ee.Reducer.sum()).add(0.3).multiply(5)
+  waterIndex = waterIndex.mask(waterIndexMask)
+
+  Map.addLayer(waterIndex.mask(waterIndexMask).clip(aoi), vis, 'water index' + suffix, true)
+
+  exportImage(waterIndex, 'Limpopo_water_index_combined_' + suffix, limpopo.basins.geometry().bounds())
+}
+
+// computeWaterIndex({pMin: 5, pMax: 25, vis:{min: -0.1, max:1}})
+// computeWaterIndex({occurrence: true, vis:{min: ndwiMin, max:ndwiMax}})
+
+
+// JRC layrs
+var waterOccurrence = jrc.select('occurrence').divide(100)
+Map.addLayer(waterOccurrence, {min:0, max: 1, palette: style.Palettes.WhiteToRed}, 'water (JRC) white to red', false)
+Map.addLayer(waterOccurrence, {min:0, max: 1, palette: style.Palettes.Water}, 'water (JRC) water', true)
+Map.addLayer(waterOccurrence, {min:0, max: 1, palette: style.Palettes.Hot}, 'water (JRC) hot', false)
+
+// add JRC water limited by Limpopo basins
+Map.addLayer(waterOccurrence.clip(aoi), {palette: style.Palettes.WhiteToRed, min:0, max:1}, 'water (JRC, Limpopo)', false)
+Map.addLayer(waterOccurrence.clip(aoi), {palette: style.Palettes.Hot, min:0, max:1}, 'water (JRC, Limpopo), hot', false)
+
+// HAND mask
+// var handMask = 
+
+print(Map.getCenter())
+
+
+ 
+// compute water occurrence using grid cells
+var grid = require('users/gena/packages:grid')
+
+// get a single large cell
+var aoi = grid.getGlobalGridCells(Map.getCenter(true), 1)
+var id = utils.pad(ee.Feature(aoi.first()).get('id').getInfo(), 5)
+
+aoi = aoi.geometry()
+
+Map.addLayer(aoi, {color: 'yellow'}, 'aoi', false)
+
+// use current map
+// COMMENT WHEN EXPORTING
+var aoi = ee.Geometry(Map.getBounds(true))
+
+// generate for AOI only
+var waterIndex = computeWaterIndexOccurrence(aoi)
+
+/*
+// smaller cells, filtered by large cell (aoi) or current map
+var cells = grid.generateGridUsingGlobal(limpopo.basins.geometry(), 3, 0.1, 0.1)
+  //.filterBounds(Map.getBounds(true))
+  .filterBounds(aoi)
+Map.addLayer(ee.Image().paint(cells,1,1), {palette:['ffffff']}, 'cells')
+
+var waterIndex = cells.map(function(cell) {
+  return computeWaterIndexOccurrence(cell.geometry())
+})
+
+waterIndex = ee.ImageCollection(waterIndex).mean()
+
+// generate for current map only
+waterIndex = computeWaterIndexOccurrence(ee.Geometry(Map.getBounds(true)))
+*/
+
+// add mask using NDWI and MNDWI
+var waterIndexMask = waterIndex.select([1,2]).reduce(ee.Reducer.sum()).add(0.3).multiply(10)
+waterIndex = waterIndex.mask(waterIndexMask)
+
+// Map.addLayer(waterIndexMask, {min:0, max:0.5}, 'water index mask')
+
+Map.addLayer(waterIndex.clip(aoi), {min: ndwiMin, max:ndwiMax}, 'water index', true)
+Map.addLayer(waterIndex.select('ndwi').clip(aoi), {min: ndwiMin, max:ndwiMax, palette: style.Palettes.Water}, 'ndwi', false)
+Map.addLayer(waterIndex.select('mndwi').clip(aoi), {min: ndwiMin, max:ndwiMax, palette: style.Palettes.Water}, 'mndwi', false)
+
+
+Map.addLayer(grid.getGlobalGrid(), {}, 'global grid', false)
+
+exportImage(waterIndex, 'Limpopo_occurrence_' + id, aoi.bounds())

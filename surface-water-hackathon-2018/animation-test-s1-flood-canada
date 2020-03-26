@@ -1,0 +1,104 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var alaska = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-158.01429748535156, 64.79781874626237],
+          [-158.0115509033203, 64.73371077379488],
+          [-157.78152465820312, 64.73371077379488],
+          [-157.78427124023438, 64.79811112776754]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+var palettes = require('users/gena/packages:palettes').cb
+var thresholding = require('users/gena/packages:thresholding')
+
+
+var bounds = ee.Geometry(Map.getBounds(true))
+var scale = Map.getScale()
+
+// skip partial
+function addAllNonZero(i) { 
+  return i.set('all', i.select(0).mask().reduceRegion(ee.Reducer.allNonZero(), bounds, scale).values().get(0))
+}
+
+//var band = 'VV'
+//var band = 'HH'
+//var band = 'HV'  
+
+var images = ee.ImageCollection("COPERNICUS/S1_GRD")
+  //.filter(ee.Filter.listContains('transmitterReceiverPolarisation', band))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'HV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'HH'))
+  //.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  //.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  //.filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'))
+  //.filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'))
+  
+  // Filter to get images collected in interferometric wide swath mode.
+  //.filter(ee.Filter.eq('instrumentMode', 'IW'))
+  //.filterDate('2017-04-01', '2017-08-01')
+  //.filterDate('2016-01-01', '2018-01-01')
+  .filterBounds(bounds.centroid(1))
+  //.map(addAllNonZero).filter(ee.Filter.eq('all', 1))
+
+  .sort('system:time_start')
+  
+print(images.size())  
+print(images.first())
+
+// median
+var min = -20, max = -5
+var min = 0, max = 0.1
+var median = images.map(toNatural).reduce(ee.Reducer.median()).rename(ee.Image(images.first()).bandNames())
+// Map.addLayer(median, {min: min, max: max, bands: ['VH', 'VH', 'VV']}, 'median', false)
+
+// visualize  
+images = images.map(function(i) {
+  var mask = ee.List(i.select(0).mask().reduceRegion(ee.Reducer.sum(), bounds, Map.getScale() * 50).values()).get(0)
+  
+  var date = i.date().format('YYYY-MM-dd')
+  
+  // i = toNatural(i.select(band))
+  // var min = 0.0, max = 0.2
+  // return i
+  //   .visualize({min: min, max: max, palette: palettes.BrBG[9].reverse() })
+  //   .set({label: date})
+  //   .set({mask: mask})
+  
+  //var min = -20, max = -5
+  var min = 0, max = [0.1, 0.1, 0.2]
+  
+  var image = toNatural(i)
+  var output = image
+    //.visualize({min: min, max: max, bands: ['VH', 'VH', 'VV']})
+    //.visualize({min: min, max: max, bands: ['HV', 'HV', 'HH']})
+    .visualize({min: min, max: max, bands: ['HH', 'HV', 'HH']})
+    
+  //var th = thresholding.computeThresholdUsingOtsu(image.select('VV').focal_median(3), 10, Map.getBounds(true), 0.5, 2, -10)
+  
+  // output = image.select('VH').gt(0.05)
+    
+  // output = ee.ImageCollection.fromImages([
+  //   output,
+  //   toNatural(i.select('VV')).cumulativeCost(ee.Image().paint(geometry, 1), 3000)
+  //   ]).mosaic()
+
+  return output
+    .set({label: i.date().format('YYYY-MM-dd')})
+    
+    
+})//.filter(ee.Filter.lt('mask', 10))
+
+print(images.aggregate_array('mask'))
+
+animation.animate(images, {label: 'label', maxFrames: 150})
+
+// export video
+var utils = require('users/gena/packages:utils')
+utils.exportVideo(images, {bounds: bounds, label: 'label', maxFrames: 600, name: 'animation', label: 'label' })
+
+
+
+// Functions to convert from dB
+function toNatural(i) {
+  return ee.Image(ee.Image.constant(10.0).pow(i.divide(10.0)).copyProperties(i, ['system:time_start']));
+}
+
+

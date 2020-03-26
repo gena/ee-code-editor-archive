@@ -1,0 +1,28 @@
+// Creates a checkboard pattern in a given projection (in this case, the
+// UTM projection of a Landsat image).
+
+// A random image to get the target projection from.
+var img = ee.Image('LC8_L1T/LC80030642015321LGN00');
+var l8_viz = {bands:['B6', 'B5', 'B4'], gamma:2};
+Map.addLayer(img, l8_viz,  'Landsat 8', true);
+
+Map.centerObject(img, 13)
+
+// Create a 0/1 checkerboard on a lon/lat grid: take the floor of lon and
+// lat, add them together, and take the low-order bit.
+var lon_lat_checks = ee.Image.pixelLonLat().floor().toInt()
+      .reduce(ee.Reducer.sum()).bitwiseAnd(1);
+Map.addLayer(lon_lat_checks, {min:0, max:1}, 'LonLat checks', false);
+
+
+// Now replace the projection with the desired projection
+var wgs84 = ee.Projection('EPSG:4326');
+// Note that not all bands have the same projection; pick one of the 30m
+// ones.
+var landsat_proj = img.select([0]).projection();
+var landsat_checks = lon_lat_checks.changeProj(wgs84, landsat_proj.scale(100, 100));
+Map.addLayer(landsat_checks, {min:0, max:1, opacity: 0.3}, 'Landsat checks', true);
+
+// Use the UTM checks to mask the original image.
+Map.addLayer(img.updateMask(landsat_checks), l8_viz, 'Masked Landsat 8', false);
+

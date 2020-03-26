@@ -1,0 +1,21 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var table = ee.FeatureCollection("users/gena/land_polygons");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var land = table.filter(ee.Filter.inList('FID', [261898, 260964, 261155]).not())
+
+Map.addLayer(land)
+
+var image = ee.Image().paint(land, 1)
+Map.addLayer(image)
+
+var region = ee.Geometry.Polygon([-180, 90, 0, 90, 180, 90, 180, -90, 10, -90, -180, -90], null, false)
+
+Export.image.toAsset({
+  image: image, 
+  description: 'land', 
+  assetId: 'users/gena/land_polygons_image', 
+  region: region, 
+  scale: 30, 
+  crs: 'EPSG:4326', 
+  maxPixels: 1e13
+})

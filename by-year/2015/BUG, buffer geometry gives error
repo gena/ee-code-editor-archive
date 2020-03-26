@@ -1,0 +1,36 @@
+// BUG: buffer geometry gives error
+
+/*
+var basins = ee.FeatureCollection('ft:1-aMEhsi4usdxVUSSjKkJGC8pir3duCi_5oItnxtT');
+var id = 5060087630;
+var basin = ee.Feature(basins.filter(ee.Filter.eq('HYBAS_ID', id)).first());
+*/
+
+var basins = ee.FeatureCollection('ft:1jVWsPL91fcIoLyNXE0DNEGrJPclOwbD2MTrwP2ve')
+var id = 6020006540;
+var basin = ee.Feature(basins.filter(ee.Filter.eq('HYBAS_ID', id)).first());
+
+Map.centerObject(basin, 5)
+
+Map.addLayer(basin, {}, 'basin')
+
+// error
+// Map.addLayer(basin, {}, 'basin (buffered)')
+
+print(basin)
+
+var proj = ee.Projection('EPSG:3395')
+
+print('Area: ', basin.area(1, proj))
+print('Pixels: ', basin.area(1, proj).getInfo() / (90.0 * 90.0))
+
+// no error
+var basin = basin.simplify(2000).buffer(3000, 500);
+print(basin)
+
+Map.addLayer(basin, {}, 'basin (buffered)')
+
+// get bounds
+print(basin.bounds());
+
+

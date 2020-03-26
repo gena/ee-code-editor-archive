@@ -1,0 +1,6 @@
+var skybox = ee.Image('GME/images/00979750194450688595-04594044960761723980');
+Map.addLayer(skybox, {'opacity':0.5});
+
+Map.centerObject(skybox, 17);
+
+Map.setStyle('SATELLITE'); // <--- THIS DOES NOT WORK

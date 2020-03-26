@@ -1,0 +1,60 @@
+// isolines
+
+// Mark pixels where the elevation crosses 1000m value and compare
+// that to pixels that are exactly equal to 1000m.
+
+//var elev = ee.Image('USGS/NED');
+var elev = ee.Image('USGS/SRTMGL1_003');
+//var elev = ee.Image('srtm90_v4');
+//var elev = ee.Image('NOAA/NGDC/ETOPO1').select('bedrock');
+//var elev = ee.Image('WWF/HydroSHEDS/03CONDEM');
+
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+  
+var azimuth = 60;
+var zenith = 50;
+  
+var terrain = ee.call('Terrain', ee.Image(elev));
+var slope = radians(terrain.select(['slope']));
+var aspect = radians(terrain.select(['aspect']));
+var hs = hillshade(azimuth, zenith, slope, aspect);
+
+// Map.setCenter(-121.68148, 37.50877, 9);
+
+var colors = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+var v = elev.mask(elev.gt(0)).visualize({palette:colors, min:100, max:1500, opacity: 1.0});
+
+var hsv  = v.unitScale(0, 255).rgbtohsv();
+var intensity = hs.multiply(1.2).multiply(hsv.select('value'));
+var huesat = hsv.select('hue', 'saturation');
+v = ee.Image.cat(huesat, intensity).hsvtorgb();
+
+Map.addLayer(v, {}, 'elevation');
+
+//var colors2 = ['023858', '045a8d', '0570b0', '3690c0', '74a9cf', 'a6bddb'/*, 'd0d1e6', 'ece7f2', 'fff7fb'*/];
+//Map.addLayer(elev.mask(elev.lt(0)), {palette:colors2, min:-100, max:0, opacity: 1.0}, 'bathymery');
+
+//Map.addLayer(hs, {opacity:0.5, gamma:0.5}, 'hillshade');
+
+/*
+var img = ee.Image().toByte();
+var addIso = function(level, color) {
+  var crossing = elev.subtract(level).zeroCrossing();
+  var exact = elev.eq(level);
+  Map.addLayer(elev.mask(crossing.or(exact)), 
+  {min: 0, max: 1, palette: color}, level + 'm');
+};
+
+var colors = ['ffffcc', 'ffeda0', 'fed976', 'feb24c', 'fd8d3c', 'fc4e2a', 'e31a1c', 'bd0026', '800026'];
+var levels = [0.1, 100, 200, 300, 400, 500, 600, 700, 800];
+
+for(var i = 0; i < levels.length; i++) {
+  addIso(levels[i], colors[i]);
+}
+*/

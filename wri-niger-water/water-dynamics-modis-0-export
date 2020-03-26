@@ -1,0 +1,92 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var aqua = ee.ImageCollection("MODIS/006/MYD09GQ"),
+    terra = ee.ImageCollection("MODIS/006/MOD09GQ"),
+    terra500 = ee.ImageCollection("MODIS/006/MOD09GA"),
+    aqua500 = ee.ImageCollection("MODIS/006/MYD09GA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var bands250 = ['sur_refl_b01', 'sur_refl_b02']
+
+// var bands = ['sur_refl_b01', 'sur_refl_b02']
+// var bandsVis = ['sur_refl_b02', 'sur_refl_b02', 'sur_refl_b01']
+// var modis = terra.merge(aqua)
+
+var bands = ['sur_refl_b06', 'sur_refl_b02', 'sur_refl_b04']
+var bandsVis = bands
+var modis = terra500.merge(aqua500)
+//var modis = terra500
+
+var vis = { bands: bandsVis, min: 300, max: 5000 }
+
+
+// HydroBASIS 6 (vector)
+var catchmentsUpperNiger = ee.FeatureCollection('users/gena/water-niger/wflow/catchments')
+Map.addLayer(catchmentsUpperNiger, {}, 'catchments')
+
+var bounds = catchmentsUpperNiger.geometry().dissolve(500).simplify(500)
+//Export.table.toAsset(ee.FeatureCollection(bounds), 'bounds', 'users/gena/water-niger/catchment')
+
+var dates = ee.List.sequence(1, 5).map(function(month) {
+  return ee.Date.fromYMD(2000, 1, 1).advance(month, 'month')
+})
+
+modis = modis.map(function(i) { return i.resample('bicubic') })
+
+var modis250 = terra.merge(aqua).map(function(i) { return i.resample('bicubic') })
+
+var images = dates.map(function(date) {
+  date = ee.Date(date)
+  
+  var image500 = modis
+    .filterDate(date, ee.Date(date).advance(1, 'month'))
+    .select(bands)
+    .reduce(ee.Reducer.percentile([25])) // cloud frequency = 30, median = 35
+    .rename(bands)
+  
+  var image250 = modis250
+    .filterDate(date, date.advance(1, 'month'))
+    .select(bands250)
+    .reduce(ee.Reducer.percentile([15])) // cloud frequency = 30, median = 35
+    .rename(bands250)
+  
+  return ee.Image([image500.select('sur_refl_b06'), image250.select('sur_refl_b02'), image500.select('sur_refl_b04'), image250.select('sur_refl_b01')])
+    .clip(bounds)
+    .set({ 
+      'system:time_start': date.millis(),   
+      percentile: 15 
+    })
+})
+
+vis.bands = ['sur_refl_b06', 'sur_refl_b02', 'sur_refl_b04']
+
+images = ee.ImageCollection(images)
+
+var image = images.first()
+Map.addLayer(image.normalizedDifference(['sur_refl_b01', 'sur_refl_b02']), {min: 0, max: 0.35}, 'NDVI') 
+Map.addLayer(image.normalizedDifference(['sur_refl_b04', 'sur_refl_b06']), {min: 0, max: 0.35}, 'MNDWI')
+Map.addLayer(image.normalizedDifference(['sur_refl_b04', 'sur_refl_b02']), {min: 0, max: 0.35}, 'NDWI') 
+
+
+
+Export.image.toAsset({
+  image: images.first(), 
+  description: 'modis test', 
+  assetId: 'users/gena/water-niger/modis-test', 
+  region: bounds.bounds(), 
+  scale: 250, 
+  crs: 'EPSG:3857'
+})
+
+var animation = require('users/gena/packages:animation')
+
+images = images.map(function(i) { 
+  return i.set({ 
+    label: i.date().format('YYYY-MM-dd') 
+  })
+})
+
+animation.animate(images, { 
+  vis: vis,
+  label: 'label',
+  maxFrames: 100
+})
+

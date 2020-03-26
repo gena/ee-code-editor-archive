@@ -1,0 +1,44 @@
+// upscaling L8expansion
+//
+
+var input = ee.Image("LANDSAT/LC8_L1T_TOA/LC81890282014197LGN00");
+// Select multi-spectral band to pan_weight
+var xs = input.select(['B5','B6', 'B4']);
+var pan = input.select('B8');
+console.log(xs.getInfo());
+console.log(pan.getInfo());
+// Upscale XS to 4 times original resolution
+var xs_crs = xs.getInfo().bands[0].crs;
+var xs_res = xs.getInfo().bands[0].crs_transform[0];
+
+var xs_upscale = xs.reproject(xs_crs, null, xs_res/4);
+
+// Upscale XS to 2 times original resolution
+var p_crs = pan.getInfo().bands[0].crs;
+var p_res = pan.getInfo().bands[0].crs_transform[0];
+
+var p_upscale = pan.reproject(p_crs, null, p_res/2);
+
+var wght = 1.0/16.0;
+
+var meanKernel = ee.Kernel.fixed(4, 4,
+
+                         [[wght, wght, wght, wght],
+
+                          [wght, wght, wght, wght],
+
+                          [wght, wght, wght, wght],
+
+                          [wght, wght, wght, wght]]);
+// try this
+
+var pconv = p_upscale.convolve(meanKernel);
+
+var psh = xs_upscale.multiply(p_upscale.divide(pconv));
+console.log(psh.getInfo());
+addToMap(xs, {min: [0.0, 0.0, 0.0], max: [0.8, 0.5, 0.3] }, 'original');
+addToMap(pan, {min: 0.0, max: 0.3}, 'pan');
+addToMap(pconv, {min: 0.0, max: 0.3}, 'pconv');
+addToMap(psh, {min: [0.0, 0.0, 0.0], max: [0.8, 0.5, 0.3]}, 'upscaled');
+
+centerMap(17.67014,46.16985,14);

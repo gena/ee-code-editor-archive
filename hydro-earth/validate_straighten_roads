@@ -1,0 +1,191 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var srtm_30 = ee.Image("USGS/SRTMGL1_003"),
+    bounds = /* color: d63000 */ee.Geometry.Polygon(
+        [[[39.26033020019531, -6.868143527957247],
+          [39.29388999938965, -6.868654816279271],
+          [39.294190406799316, -6.8494811284248085],
+          [39.26118850708008, -6.849310692184702]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+
+
+
+// ***** some plot functionality ******
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+var azimuth = 90;
+var zenith = 60;
+
+// visualization settings (elevation)
+
+// function to visualize the specific DEM
+var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+var dem_min = 0;
+var dem_max = 100;
+
+var addDem = function(dem, name, visible) {
+  var im = dem.visualize({palette:colors_dem, min:dem_min, max:dem_max, opacity: 1.0});
+  var hillshade_im = hillshadeit(im, dem, 2.0, 2.0);
+  Map.addLayer(hillshade_im, {}, name, visible);
+  return hillshade_im;
+};
+
+
+// ******* functioanlity start here *******************
+/***
+ * filters fc based on property keys & (list of) values
+ */
+var filter_fc = function(fc, keys, values){
+  // function to loop over filters
+  var filter_multiple = function(i, fc){
+  return ee.FeatureCollection(fc).filter(ee.Filter.inList(keys.get(i), values.get(i)))};
+  // declare keys and props as list and make index
+  
+  keys = ee.List(keys);
+  values = ee.List(values);
+  var index = ee.List.sequence(0,null,1, keys.length());
+  // iterate over keys and props and return filtered fc
+  return ee.FeatureCollection(index.iterate(filter_multiple, fc));
+};
+
+
+/***
+ *split feature collection based on wheather property exist (isnull) 
+ */
+function splitIsNull(fc, prop) {
+  return [
+    fc.filter(ee.Filter.neq(prop, null)).cache(), // not NULL
+    fc.filter(ee.Filter.eq(prop, null)).cache()   // NULL
+    ];
+}
+
+
+/***
+ * Set property (trg_key)  to default if missing 
+ */
+var set_property_constant = function(fc, trg_key, default_value){
+  var split = splitIsNull(fc, trg_key);
+
+  var notnull = ee.FeatureCollection(split[0]);
+  var isnull = ee.FeatureCollection(split[1]);
+  
+  return notnull.merge(isnull.map(function(f){return f.set(trg_key, default_value)}));
+};
+
+
+/***
+ * Set property (trg_key) with multiply of other property
+ */
+var set_property_multiply = function(fc, trg_key, prop, multiplier){
+  
+  function compute_property(f) {
+    return f.set(trg_key, ee.Number(f.get(prop)).multiply(ee.Number(multiplier)));
+  }
+
+  var split = splitIsNull(fc, trg_key);
+  var notnull = ee.FeatureCollection(split[0]);
+  var isnull = ee.FeatureCollection(split[1]);
+  
+  return notnull.merge(isnull.map(compute_property));
+};
+
+
+/***
+ * function to set width properties of road
+*/
+var set_width_roads = function(fc, default_width) {
+  // add a default road width if value is null
+  fc = set_property_constant(fc, 'width', default_width);  
+  return fc
+};
+
+
+/***
+ * function makes dem straight (horizontal in perpendical direction
+ * for all lines (features in fc)
+*/
+var straighten_dem = function(dem, fc) {
+  var info = dem.getInfo().bands[0];
+  
+  // function creates dem clip image with straight elev for one line
+  // and adds to image collection
+  var straighten_single_road = function(f, ic) {
+    var width = ee.Number(f.get('width'));
+    var roadBuffer = ee.Feature(f).buffer(width);
+    var roadImage = 
+      dem.clip(roadBuffer)
+        .reduceNeighborhood(ee.Reducer.mean(), ee.Kernel.circle(width,'meters'));
+    
+    // weird bug in GEE requires axtra mask statemant, as otherwise the edge of the kernel is not written correctly
+    return ee.ImageCollection(ic).merge(ee.ImageCollection(roadImage.mask(roadImage)
+              .reproject(info.crs, info.crs_transform)));
+  };
+  
+  // get image collection with clips for for roads and reduce to single image
+  var roads_elev =  ee.ImageCollection(fc.iterate(straighten_single_road,ee.ImageCollection([])))
+                      .reduce(ee.Reducer.min());
+  
+  // fill missings with original dem
+  return roads_elev.unmask(ee.Image(dem), false)
+              .reproject(info.crs, info.crs_transform);
+};
+
+
+// ********* ALL INPUTS START HERE! *********************************
+
+// set main variables
+var res = ee.Number(0.5);
+Map.setCenter(39.28, -6.86, 16);
+addDem(srtm_30, 'srtm 30', false);
+var osm_lines = ee.FeatureCollection('ft:1SapB3BgtFH4koR8rCQrhsdpvshejKWsYV4mCNuVf');
+// var osm_polys = ee.FeatureCollection('ft:1RvpBw-GK43EV0CpXWi6La-txXdD-TE2xiy7JiGd1');
+
+
+//filter some features from lines and polygons
+var osm_nelsonM_road = ee.FeatureCollection(filter_fc(osm_lines,['highway', 'Name'], 
+                                                    [['primary'], ['Nelson Mandela Road']])
+                                                    .filterBounds(bounds))
+var osm_kilwa_road = ee.FeatureCollection(filter_fc(osm_lines, ['highway', 'Name'], 
+                                                    [['primary'], ['Kilwa Road']])
+                                                    .filterBounds(bounds))
+
+
+// set width property to roads
+var osm_roads = set_width_roads(osm_nelsonM_road, 10).merge(set_width_roads(osm_kilwa_road, 10));
+
+// simple but ugly resampling dem to 2m resolution
+var info = srtm_30.getInfo().bands[0];
+var dem = srtm_30.resample('bicubic').reproject(info.crs, null ,2);
+addDem(dem, 'dem', false);
+print(dem)
+
+
+// Map.addLayer(ee.Feature(osm_roads.first()), {}, 'test road');
+var dem_straightRoads = straighten_dem(dem, osm_roads);
+// print(roads_elev)
+addDem(ee.Image(dem_straightRoads), 'dem /w roads', true);
+
+Map.addLayer(osm_nelsonM_road,{}, 'osm_nelsonM_road', true);
+Map.addLayer(osm_kilwa_road,{color: 'FF0000'}, 'osm_kilwa_road', true);
+

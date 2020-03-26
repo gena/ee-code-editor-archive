@@ -1,0 +1,361 @@
+// L8, means
+
+// Common name mapping to the sensor-specific bands.
+var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8', 'B7'];
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+var bounds = Map.getBounds();
+print(bounds)
+var center = ee.Geometry.Rectangle(
+  bounds[0] + 0.3 * (bounds[2] - bounds[0]), 
+  bounds[1] + 0.3 * (bounds[3] - bounds[1]),
+  bounds[0] + 0.7 * (bounds[2] - bounds[0]),
+  bounds[1] + 0.7 * (bounds[3] - bounds[1]));
+addToMap(center);
+var region = '[['+bounds[0]+', '+bounds[1]+'], ['+bounds[2]+', '+bounds[1]+'], ['+bounds[2]+', '+bounds[3]+'], ['+bounds[0]+', ' + bounds[3] + ']]';
+
+// Apply an expression and linearly rescale the output.
+var rescale = function(img, exp, thresholds) {
+  return img.expression(exp, {img: img})
+    .subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+};
+
+var download = function(im, args) {
+  //var path = im.getDownloadURL(args);
+  //print(path);
+}
+      
+// 1. Manually compute a cloud score.
+var clouds = function(img) {
+  // Compute several indicators of cloudyness and take the minimum of them.
+  var score = ee.Image(1.0);
+  
+  // Clouds are reasonably bright in the blue band.
+  score = score.min(rescale(img, 'img.blue', [0.1, 0.3]));
+
+  // Clouds are reasonably bright in all visible bands.
+  score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8])); // try panchromatic?
+
+  // Clouds are reasonably bright in all infrared bands.
+  score = score.min(rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]));
+
+  // Clouds are reasonably cool in temperature.
+  score = score.min(rescale(img, 'img.temp', [300, 290]));
+
+  // However, clouds are not snow.
+  var ndsi = img.normalizedDifference(['green', 'swir1']);
+  score = score.min(rescale(ndsi, 'img', [0.8, 0.6]));
+
+  //Take care of shadows
+  //This is the piece that needs work
+  //var rescale_nir = rescale(img, 'img.nir', [1, -.1]);
+  //score = score.where(img.select('nir').lte(0.1), rescale_nir);
+
+  return score;
+
+  // var maskedImage = img.mask().and(score.gte(1895));
+  // return img.mask(maskedImage);
+  
+};
+
+// 2. Use BQA band to detect clouds
+var cloudsBQALandsat8 = function(img) {
+  var q = img.select( 'BQA' );
+  
+  // see http://landsat.usgs.gov/L8QualityAssessmentBand.php for bits
+/*  var cloud01 = quality.eq(61440);
+  var cloud02 = quality.eq(57344);
+  var cloud03 = quality.eq(53248);
+  var cloud04 = quality.eq(28672);
+  var cloud05 = quality.eq(31744); 
+
+  var cloud = cloud01.or(cloud02).or(cloud03).or(cloud04).or(cloud05);
+*/
+
+  var cloud = q.eq(61440)
+    .or(q.eq(59424))
+    .or(q.eq(57344))
+    .or(q.eq(56320))
+    .or(q.eq(39936))
+    .or(q.eq(36896))
+    .or(q.eq(36864))
+    .or(q.eq(53248))
+    .or(q.eq(31744))
+    .or(q.eq(28672));
+    
+    
+    //Take care of shadows
+    //This is the piece that needs work
+    var rescale_nir = rescale(img, 'img.nir', [1, -.1]);
+    cloud = cloud.where(img.select('nir').lte(0.1),rescale_nir);
+  
+    //cloud = cloud.reduceNeighborhood(ee.call("Reducer.max"), ee.call("Kernel.circle", 10)); // dilation
+
+    img = img.mask(cloud.not());
+  
+    return img;
+};
+
+var maskClouds = function(img, clouds) {
+    var maskedImage = img.mask().and(clouds.not());
+    return img.mask(maskedImage);
+};
+
+var showHistogram = function(img, region, name) {
+    //var histogram = Chart.image.histogram(img, region, 30);
+    //histogram = histogram.setOptions({title: name});
+    //print(histogram);
+}
+
+var show = function(img) {
+    var mosaic = img.mosaic();
+
+    // show false color image with better seen water
+    var params = {'bands':'nir,swir1,red', 'gamma':1.3};
+    // addToMap(mosaic, params, 'swir1,nir,blue');
+
+    // show cloudscore
+    //var clouds1 = img.map(clouds).mosaic();
+    //addToMap(maskClouds(mosaic, clouds1.lte(-2500)), params, 'clouds_method1');
+    
+    // var clouds2 = img.map(cloudsBQALandsat8).mosaic();
+    // addToMap(maskClouds(mosaic, clouds2), params, 'clouds_method2_BQA');
+
+    var i = img; //.map(cloudsBQALandsat8);
+
+    var ts = Chart.image.series(i.select(['pan','BQA']), center, ee.Reducer.median(), 30);
+    //print(ts);
+
+    var median = i.median();
+    
+    showHistogram(median.select('nir'), center, 'nir');
+    showHistogram(median.select('swir1'), center, 'swir1');
+    showHistogram(median.select('red'), center, 'red');
+    showHistogram(median.select('green'), center, 'green');
+    showHistogram(median.select('blue'), center, 'blue');
+    showHistogram(median.select('pan'), center, 'pan');
+    
+    var rgb_sum = median.expression(
+    '0.3333 * (red + green + blue)',
+    { red: median.select('red'), green: median.select('green'), blue: median.select('blue') });
+    showHistogram(rgb_sum, center, '0.3333*(red+green+blue)');
+
+    // EVI
+    /*
+    var evi = function(image) {
+      return ee.Image(0).expression(
+          '2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue + 1)',
+          {'nir': image.select('nir'), 'red': image.select('red'), 'blue': image.select('blue')});
+    };
+    evi = i.map(evi).median();
+    addToMap(evi, {}, 'evi', false);
+    */
+
+    // SAVI
+    var savi = function(image) {
+      return ee.Image(0).expression(
+          '(1 + L) * float(nir - red)/ (nir + red + L)',
+          {'nir': image.select('nir'), 'red': image.select('red'), 'L': 0.2});
+    };
+    savi = i.map(savi).median();
+    addToMap(savi, {}, 'savi', false);
+    showHistogram(savi, center, 'savi');
+
+    // NDWI
+    var ndwi = function(image) {
+      return ee.Image(0).expression('float(green - nir)/ (green + nir)',
+                {'nir': image.select('nir'), 'green': image.select('green') });
+    };
+    ndwi = i.map(ndwi).median();
+    addToMap(ndwi, {}, 'ndwi', false);
+    addToMap(ndwi.lte(0), {}, 'ndwi_water', false);
+    showHistogram(ndwi, center, 'ndwi');
+
+    // MNDWI
+    var mndwi_f = function(image) {
+      return ee.Image(0).expression('float(green - swir1)/ (green + swir1)',
+                {'swir1': image.select('swir1'), 'green': image.select('green') });
+    };
+    // mndwi = i.map(mndwi).median();
+    var mndwi = i.map(mndwi_f).median();
+    //mndwi = mndwi.reduceNeighborhood(ee.call("Reducer.min"), ee.call("Kernel.square", 1)); // erosion
+    //mndwi = mndwi.reduceNeighborhood(ee.call("Reducer.max"), ee.call("Kernel.square", 4)); // dilation
+    //mndwi = mndwi.reduceNeighborhood(ee.call("Reducer.min"), ee.call("Kernel.square", 2)); // erosion
+    addToMap(mndwi, {}, 'mndwi', false);
+    addToMap(mndwi.lte(0), {}, 'mndwi_water', false);
+
+    mndwi_f = function(image) {
+      return ee.Image(0).expression('float(green - swir1)/ (green + swir1)',
+                {'swir1': image.select('swir1_mean'), 'green': image.select('green_mean') });
+    };
+
+    var step = 1;
+    var start = 25;
+    var stop = 35;
+    for(var idx = start; idx < stop; idx+= step) {
+      var im = mndwi_f(i.reduce(ee.Reducer.intervalMean(idx, idx + step))).lte(0.1);
+      download(im, {'scale': 30, 'crs': 'EPSG:4326', 'region': region, 'name': idx.toString() + '_' + (idx+step).toString() });
+      addToMap(im.mask(im.not()), {palette:['1010aa']}, 'mndwi_water_' + idx + '_' + (idx + step).toString(), false);
+    }
+    //addToMap(i.map(mndwi_f).reduce(ee.Reducer.intervalMean(90, 100)).lte(0), {}, 'mndwi_water_90_100', false);
+    
+
+    
+    showHistogram(mndwi, center, 'mndwi');
+
+
+    // PNDWI
+    // MNDWI is (green - swir1)/ (green + swir1)
+    // pan ~= red + green + blue
+    // 1. caluculate the ratio_green = green / (red + blue + green)
+    // 2. green_pan = pan * ratio_green
+    // 3. PMNDWI = (green_pan - swir1)/ (green_pan + swir1)
+    var pmndwi = function(image) {
+      return ee.Image(0).expression('float(float(pan * green) / float(red + green + blue) - float(swir1)) / (float(pan * green) / float(red + green + blue) + float(swir1))',
+                {'swir1': image.select('swir1'), 
+                'pan': image.select('pan'),
+                'red': image.select('red'),
+                'green': image.select('green'),
+                'blue': image.select('blue')
+                 });
+    };
+    pmndwi = i.map(pmndwi).median();
+    addToMap(pmndwi, {}, 'pndwi', false);
+    addToMap(pmndwi.lte(-0.5), {}, 'pmndwi_water', false);
+    showHistogram(pmndwi, center, 'pmndwi');
+
+    addToMap(i.median().select(['pan']), {min:7500, max:15000, 'gamma':1.2}, 'median_pan',false);
+
+    //var params2 = {'bands':'nir,swir1,red', 'gamma':1.3, min: '5000,5000,6000', max: '20000, 19200, 13000'};
+    //addToMap(i.median(), params, 'median',false);
+
+    //var params2 = {'bands':'red,green,blue', 'gamma':1.3, min: '5000,5000,6000', max: '20000, 19200, 13000'};
+
+    /* does not work :(
+    var rgb = median.select('red', 'green', 'blue').unitScale(0, 255);
+    var pan = median.select('pan').unitScale(0, 255);
+    
+    // Convert to HSV, swap in the pan band, and convert back to RGB.
+    var huesat = rgb.rgbtohsv().select('hue', 'saturation');
+    addToMap(huesat, {'bands':'hue'}, 'hue', false);
+    addToMap(huesat, {'bands':'saturation'}, 'saturation', false);
+    var upres = ee.Image.cat(huesat, pan).hsvtorgb();
+
+    var visparams = {min: 0, max: 65535, gamma: 1.0};
+    addToMap(rgb, visparams, 'Original', false);
+    visparams = {min: 0.4, max: 2.0, gamma: 1.0};
+    addToMap(upres, visparams, 'Pansharpened');
+    */
+    
+    
+    addToMap(i.median(), params, 'median',false);
+    addToMap(i.median(), {'bands':'red,green,blue', //, min:'6000,7600,8900', max:'15000,13000,14000', 
+    'gamma':1.3}, 'median_rgb',false);
+
+    addToMap(i.mode(), params, 'mode', false);
+
+    var params3 = {'bands':['swir1_mean', 'nir_mean', 'green_mean'], 'gamma':1.3};
+    //var params3 = {'bands':'swir1_mean, nir_mean, green_mean', 'min':'', 'max':'', 'gamma':1.3};
+    //var params3 = {'bands':'red_mean,green_mean,blue_mean', 'gamma':2.0};
+
+    for(var idx = start; idx < stop; idx+= step) {
+      im = i.reduce(ee.Reducer.intervalMean(idx, idx + step));
+      download(im.select(['swir1_mean', 'nir_mean', 'green_mean']).visualize(params3), {'scale': 30, 'crs': 'EPSG:4326', 'region': region, 'name': 'false_' + idx.toString() + '_' + (idx+step).toString() });
+      addToMap(im, params3, idx + '_' + (idx + step).toString(), false);
+    }
+
+    addToMap(i.max(), params, 'max', false);
+
+    //params = {'bands':'nir,swir1,red', 'gamma':1.3, min: '6600,5200,6600', max: '16000, 15000, 11500'};
+    addToMap(i.min(), params, 'min', false);
+
+    // addToMap(img.map(maskClouds).mosaic(), params, 'clouds_method1');
+    // addToMap(img.map(maskCloudsBQALandsat8).mosaic(), params, "clouds_method2 (BQA)", true);
+
+    //showCurrentMapHistogram(clouds1, "clouds1");
+
+    //addToMap(img.mosaic(), params, 'true_color');
+}
+
+// Define image collection and map bands
+//var landsat8 = ee.ImageCollection('LANDSAT/LC8_L1T')
+var landsat8 = ee.ImageCollection('LC8_L1T_TOA')
+  .select(LC8_BANDS, STD_NAMES)
+  //.filterDate(new Date('1/1/2013'), new Date('1/1/2015'))
+  .filterBounds(Map.getBounds(true))
+  //.filterMetadata('catalog_cloud_cover', 'less_than', 70)
+  ;
+
+
+var landsat8 = ee.ImageCollection('LANDSAT/LE7_L1T_8DAY_TOA')
+  .select(LC7_BANDS, STD_NAMES)
+  .filterDate(new Date('1/1/1999'), new Date('1/1/2003'))
+  .filterBounds(Map.getBounds(true))
+  
+  // .sort('date_range');
+  //.filter(ee.Filter.calendarRange(100, 250, 'day_of_year'));
+
+//print(landsat8)
+
+show(landsat8);
+
+// Hillshade example.
+
+function radians(img) {
+  return img.toFloat().multiply(Math.PI).divide(180);
+}
+
+// Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  // Hillshade = cos(Azimuth - Aspect) * sin(Slope) * sin(Zenith) +
+  //     cos(Zenith) * cos(Slope)
+  return azimuth.subtract(aspect).cos()
+    .multiply(slope.sin())
+    .multiply(zenith.sin())
+    .add(
+      zenith.cos().multiply(slope.cos()));
+}
+
+//var dem = ee.Image('USGS/NED');
+var dem = ee.Image('CGIAR/SRTM90_V4');
+//var dem = ee.Image('USGS/SRTMGL1_003');
+
+var radius = 120;
+var sigma = 30;
+var units = "meters";
+var normalize = false;
+var magnitude = 1;
+var k = ee.Kernel.gaussian(radius, sigma, units, normalize, magnitude)
+var gdem = dem.convolve(k);
+
+var terrain = ee.Algorithms.Terrain(gdem);
+var slope = radians(terrain.select('slope'));
+var aspect = radians(terrain.select('aspect'));
+var h = terrain.select('hillshade');
+
+var angle = 45;
+
+var hs_i;
+var hs_min;
+for (var i = 0; i < 360; i += 60) {
+  hs_i = hillshade(i, 70, slope, aspect)
+  // addToMap(hs_i, {}, i + ' deg');
+  
+  if (i > 0) {
+    hs_min = hs_min.min(hs_i);
+  }
+  else {
+    hs_min = hs_i;
+  }
+}
+
+addToMap(hs_min, {min:0.0, max:0.3}, "1", false)
+addToMap(hs_min, {min:0.25, max:0.35}, "2", false)
+addToMap(hs_min, {min:0.3, max:0.35}, "3", false)
+addToMap(dem, {min:0, max:1000}, "dem", false)
+
+download(dem, {'scale': 30, 'crs': 'EPSG:4326', 'region': region, 'name': 'dem' });
+//print(gdem.getDownloadURL({'scale': 30, 'crs': 'EPSG:4326', 'region': region, 'name': 'gdem'  }));

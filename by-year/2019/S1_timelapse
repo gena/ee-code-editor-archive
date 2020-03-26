@@ -1,0 +1,30 @@
+
+
+var s1 = ee.ImageCollection("COPERNICUS/S1_GRD")
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'))
+  // Filter to get images collected in interferometric wide swath mode.
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  //.filterDate('2017-08-01', '2018-02-27')
+  .filterBounds(Map.getCenter())
+  .select("V.*")
+  .map(toNatural)
+
+
+// Functions to convert from dB
+function toNatural(img) {
+  return ee.Image(10.0).pow(img.divide(10.0)).copyProperties(img, ['system:time_start']);
+}
+
+var m = s1.median()
+
+
+var s1_vv_vh = s1.map(function(x){
+  return ee.Image([x.select('VV'), x.select('VH'), x.subtract(m).reduce(ee.Reducer.max()).abs()])
+    .visualize({min:[0,0,0], max:[0.2,0.2,0.2]}).set({label: x.date().format('YYYY-MM-dd')})
+})
+
+print(s1_vv_vh)
+
+require('users/gena/packages:animation').animate(s1_vv_vh, {label: 'label', maxFrames: 100})

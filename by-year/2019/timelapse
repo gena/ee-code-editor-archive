@@ -1,0 +1,13 @@
+var assets =require('users/gena/packages:assets')
+var animation =require('users/gena/packages:animation')
+
+var bounds = Map.getBounds(true)
+
+var images = assets.getImages(bounds, { filter: ee.Filter.date('2017-01-01', '2018-01-01'), filterMasked: true})
+
+images = assets.getMostlyCleanImages(images, bounds)
+  .sort('system:time_start')
+
+
+animation.animate(images, {vis: { min: 0.05, max: 0.35 }})
+

@@ -1,0 +1,204 @@
+//**********Step (1)********************************************************************
+// Read Daymet and TRMM and GPM
+
+var Daymet = ee.ImageCollection("NASA/ORNL/DAYMET_V3");                                
+
+var TRMM = ee.ImageCollection("TRMM/3B42");
+
+var GPM = ee.ImageCollection("NASA/GPM_L3/IMERG_V04");
+
+//**********Step (2)********************************************************************
+// Read Weather Station Data From Fusion Table
+ 
+var WS_Data = ee.FeatureCollection('ft:1pIUwt3ZGCxMh-3SSTjQXyi-Ry5DbftqvPswNhWZC');   
+print(WS_Data);
+
+// Weather Station (WS) Location
+
+var WS =ee.Geometry.Point([-107.181, 40.499]);                                           
+
+
+//**********Step (3)********************************************************************
+// Define the range of Date
+
+var startyear = 2015; 
+var endyear = 2015; 
+
+var startdate = ee.Date.fromYMD(startyear, 1, 1);
+print(startdate);
+
+var enddate = ee.Date.fromYMD(endyear + 1, 1, 1);
+print(enddate);
+
+
+var years = ee.List.sequence(startyear, endyear);
+print(years);
+
+var months = ee.List.sequence(1, 12);
+print(months.get(0));
+
+//var days = ee.List.sequence(1, 31);
+//print(days);
+
+// Get Days in month
+var getDaysInMonth=function(y,m){
+  var dt = ee.Date.fromYMD(y,m,1);
+  var n = dt.advance(1,"month").difference(dt,'day');
+  return ee.List.sequence(1,n);
+}
+
+
+/*
+  var aa = ee.Date.fromYMD(2015,1,1);
+  print(aa,'aa');
+  var bb = aa.advance(1,"month");
+  print(bb,'bb');
+  var cc =bb.difference(aa,'day');
+  print(cc,'cc');
+  var dd =ee.List.sequence(1,cc);
+  print(dd,'cc');
+  print(getDaysInMonth(2015,1));
+ 
+ */ 
+
+
+
+//**********Step (4)********************************************************************
+// Extract Daymet and TRMM and GPM at the WS Location
+
+var Daymet_filtered = Daymet.filterBounds(WS).filterDate('2015-01-01', '2016-01-01').select('prcp');  
+//print(Daymet_filtered)
+
+var TRMM_filtered = TRMM.filterBounds(WS).filterDate('2015-01-01', '2016-01-01').select('precipitation');  
+//print(TRMM_filtered)
+
+var GPM_filtered = GPM.filterBounds(WS).filterDate('2015-01-01', '2016-01-01').select('precipitationCal');  
+//print(GPM_filtered)
+
+
+print (Daymet_filtered, 'Daymet_Daily');
+print (TRMM_filtered,   'TRMM_NotDaily');
+//print (GPM_filtered,    'GPM_NotDaily');
+
+//**********Step (5)********************************************************************
+// Convert GPM and TRMM data from "mm/hr" to "mm/day"
+
+//TRMM
+
+var TRMM_Prcp_Daily =  ee.ImageCollection.fromImages(
+  years.map(function (y) {
+     return months.map(function(m) {
+        var days = getDaysInMonth(y,m) // Get List of days for each month
+        return days.map(function(d) {
+          var TRMM_filtered_Daily = ee.Image(TRMM_filtered.filter(ee.Filter.calendarRange(y, y, 'year'))
+                    .filter(ee.Filter.calendarRange(m, m, 'month'))
+                    .filter(ee.Filter.calendarRange(d, d, 'day_of_month'))
+                    .sum());
+        return TRMM_filtered_Daily
+              .set('year', y)
+              .set('month', m)
+              .set('day', d)
+              .set('system:time_start', ee.Date.fromYMD(y, m, d));
+                        
+    });
+    });
+  }).flatten()
+);
+
+print (TRMM_Prcp_Daily, 'TRMM_Daily');
+
+
+// GPM
+var GPM_Prcp_Daily =  ee.ImageCollection.fromImages(
+  years.map(function (y) {
+     return months.map(function(m) {
+      var days = getDaysInMonth(y,m) 
+      return days.map(function(d) {
+      var GPM_filtered_Daily = ee.Image(GPM_filtered.filter(ee.Filter.calendarRange(y, y, 'year'))
+                    .filter(ee.Filter.calendarRange(m, m, 'month'))
+                    .filter(ee.Filter.calendarRange(d, d, 'day_of_month'))
+                    .sum());
+      return GPM_filtered_Daily.set('year', y)
+                               .set('month', m)
+                               .set('day', d)
+                               .set('system:time_start', ee.Date.fromYMD(y, m, d));
+    });
+    });
+  }).flatten()
+);
+
+print (GPM_Prcp_Daily,'GPM_Daily');
+
+var scale = Map.getScale()
+
+//**********Step (6)********************************************************************
+// Daymet and TRMM and GPM TimeSries at the WS Location
+
+var Daymet_TimeSeries=ui.Chart.image.series(Daymet_filtered,WS, null, scale);
+print (Daymet_TimeSeries);
+
+var TRMM_TimeSeries=ui.Chart.image.series(TRMM_Prcp_Daily,WS, null, scale);
+print (TRMM_TimeSeries);
+
+var GPM_TimeSeries=ui.Chart.image.series(GPM_Prcp_Daily,WS, null, scale);
+print (GPM_TimeSeries)
+
+//**********Step (7)********************************************************************
+// WS TimeSries
+
+var WS_TimeSeries = ui.Chart.feature.byFeature(
+    WS_Data, 'system:index', 'prcp');
+WS_TimeSeries.setChartType('LineChart');
+print(WS_TimeSeries);
+
+//**********Step (8)********************************************************************
+// WS vs Daymet and TRMM and GPM
+var join = function(leftCollection, rightCollection, newproperty) {
+  var filter = ee.Filter.equals({
+    leftField: 'system:time_start', 
+    rightField: 'system:time_start'});
+  
+  return ee.Join.saveAll({
+    matchesKey: newproperty,
+    ordering: 'system:time_start', 
+    }).apply({
+    primary: leftCollection, 
+    secondary: rightCollection, 
+    condition: filter
+  });
+};
+
+var joined = join(WS_Data, Daymet_filtered, 'Daymet')
+print(joined)
+
+var test = joined.map(function(x){
+  var feat = ee.Image(ee.Number(x.get('prcp')))
+  var Daymet = ee.Image(ee.List(x.get('Daymet')).get(0))
+  Daymet = Daymet.addBands(feat)
+  return Daymet.copyProperties(x, ['system:time_start'])
+  
+})
+print(test)
+
+/*var new_TimeSeries=ui.Chart.image.series(test,WS, ee.Reducer.first());       
+print (new_TimeSeries);*/
+
+
+var options = {
+vAxis: { maxValue: 30 },
+colors: ['red', 'blue'],
+series: {
+            0: { lineDashStyle: [1, 1], lineWidth: 2},
+            1: { lineDashStyle: [2, 2], lineWidth: 2},
+},
+};
+var new_TimeSeries=ui.Chart.image.series(test,WS, ee.Reducer.first(), scale);
+new_TimeSeries.setChartType('LineChart');
+new_TimeSeries.setOptions(options);
+print (new_TimeSeries);
+
+
+
+
+
+

@@ -1,0 +1,12 @@
+// compute minimum cloud cover
+
+var images = ee.ImageCollection('LANDSAT/LE7_L1T') 
+    .filterDate('2000-01-01','2001-01-02')
+    .map(function(img) {
+      var cloudCover = ee.Image(img.getInfo().properties['CLOUD_COVER'])
+        .select([0], ['cloud_cover'])
+      
+      return img.addBands(cloudCover);
+    });
+
+addToMap(collection.reduce('min'));

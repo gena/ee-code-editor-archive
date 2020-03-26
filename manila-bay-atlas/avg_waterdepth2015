@@ -1,0 +1,17 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var table = ee.FeatureCollection("users/hendriksengerrit/depthavg");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var fc = ee.FeatureCollection(table);
+Map.setCenter(120.703,14.300, 9);
+//Map.addLayer(fc, {}, 'Average model depth');
+
+// Create an empty image into which to paint the features, cast to byte.
+var empty = ee.Image().byte();
+
+// Paint the edges with different colors, display.
+var fills = empty.paint({
+  featureCollection: fc,
+  color: 'DepthAVG'
+});
+var palette = ['#f1eef6','#d0d1e6','#a6bddb','#74a9cf','#2b8cbe','#045a8d'];
+Map.addLayer(fills, {palette: palette, min: 0, max: 4}, 'different color edges');

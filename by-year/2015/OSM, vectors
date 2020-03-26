@@ -1,0 +1,248 @@
+// OSM, vectors
+
+// 0. ============= helper functions
+
+// adds vectors as rasters to map
+var addToMapAsRaster = function(shapes, name, palette, width, opacity, filled, visible) {
+  var outline = width;
+  var img; 
+  
+  if (filled) {
+    img = ee.Image().toByte();
+    img = img.paint(shapes, 1); // paint fill
+    img = img.paint(shapes, 0, outline + 1); // paint outline
+  } else {
+    img = ee.Image(0).mask(0);
+    img = img.paint(shapes, 0, width);
+  }
+
+  var options = {
+    palette: palette,
+    max: 1,
+    opacity: opacity
+  };
+
+  Map.addLayer(img, options, name, visible);
+
+  return img;
+}
+
+// 1. ============== catchments for different Pfefstetter levels
+
+var au = [
+  null, // 0
+  null, // 1
+  ee.FeatureCollection('ft:1Dq_Q2JvvYkYO-kFX7L4E4Nzycwc50j9hfhSsBQJW'), // 2
+  ee.FeatureCollection('ft:1778IyIZLZKSKVgko9X3aIV94E7jcm28uniyD6ycp'), // 3
+  ee.FeatureCollection('ft:1WZ4Utbbatdl3vFVK7kTmAyHDyRjhMVfXeJeJTnBa'), // 4
+  ee.FeatureCollection('ft:1rrk-yEOb8ILSolV_kSVD1qGxszHcy0cSL9UnUxIh'), // 5
+  ee.FeatureCollection('ft:1-aMEhsi4usdxVUSSjKkJGC8pir3duCi_5oItnxtT'), // 6
+  ee.FeatureCollection('ft:1YDeXF2LN8gDeJAOJTX0Kwp9QwV_-ZFI2llKilTGu'), // 7
+  ee.FeatureCollection('ft:1YQ1qpXis4Z9z0NvKLdz-FjxFP5q2_fABi6aNSFn0') // 8
+];
+
+// 2. ================ region selection
+
+// REGION1 Murray & Darling Catchment
+var region = { catchments: au[3], main: 5030073410, sub_min: 5640000, sub_max: 5649999, zoom: 6 };
+
+// REGION2 Smaller catchment on Murrumbidgee, near Canbera
+//var region = { catchments: au[5], main: 5050597410, sub_min: 5642900, sub_max: 5642999, zoom: 8 };
+
+var aoi_features = region['catchments'];
+var aoi = aoi_features.filter(ee.Filter.eq('HYBAS_ID', region['main']));
+var not_aoi = aoi_features.filter(ee.Filter.neq('HYBAS_ID', region['main']));
+var main_catchment_pfaf_min = region['sub_min'];
+var main_catchment_pfaf_max = region['sub_max'];
+Map.centerObject(aoi, region['zoom']);
+
+// 3. =============== add rivers and basins to map, perform analysis
+
+var subcatchments = au[7].filter(ee.Filter.rangeContains('PFAF_ID', main_catchment_pfaf_min, main_catchment_pfaf_max));
+
+var addLayersCatchments = function() {
+  addToMapAsRaster(not_aoi, 'not aoi', '000000,101010', 0, 0.5, true, true);
+  addToMapAsRaster(subcatchments, 'AU, level 07', '101030,000000', 1, 0.9, false, true);
+}
+
+var rivers_lines_osm_all = ee.FeatureCollection('ft:1nlWWjT4VkGjkp-kXKroFuyUuKDUSTqce_DDtmOt1')
+  .filter(ee.Filter.bounds(aoi.geometry()));
+
+var rivers_lines_osm = rivers_lines_osm_all
+  .filter(ee.Filter.inList('waterway', ['river', 'stream', 'drain', 'canal', 'drain', 'creek', 'ditch']));
+  
+var rivers_polygons_osm = ee.FeatureCollection('ft:1gUbHjPLpeC4Vzi59vE5JSFfLRDtcrngyWfSn8mQC')
+  .filter(ee.Filter.bounds(aoi.geometry()));
+
+var printStats = function() {
+  print('water (lines) count: ', rivers_lines_osm_all.aggregate_count('osm_id'));
+  print('river (lines) count: ', rivers_lines_osm.aggregate_count('osm_id'));
+  print('river (polygon) count: ', rivers_polygons_osm.aggregate_count('osm_id'));
+  print('catchment count: ', subcatchments.aggregate_count('HYBAS_ID'));
+}
+
+var osm_color = '6666aa';
+
+var addLayersOsm = function() {
+  Map.addLayer(ee.Image(0).mask(0).toByte()
+    .paint(rivers_lines_osm, 0, 1.0), 
+    {palette:osm_color}, 'rivers_lines');
+  
+  Map.addLayer(ee.Image(0).mask(0).toByte()
+    .paint(rivers_polygons_osm, 'fill')
+    .paint(rivers_polygons_osm, 1, 1), 
+    {palette: osm_color + ',0000c6,0000c6,0000c6', 'opacity': 1.0}, 'rivers_polygons', false);
+}
+
+// add river polyline length field
+// rivers_lines_osm = rivers_lines_osm.map(function(f) { return f.set('length', f.geometry().length(1e-5));});
+
+// 4. ==================== compute total river length per catchment
+
+var riverLengthPerCatchment_UsingJoin = function() {
+  var intersectSaveAll = ee.Join.saveAll({ matchesKey: 'rivers', measureKey: 'distance' });
+  var intersectsFilter = ee.Filter.intersects({ leftField: '.geo', rightField: '.geo', maxError: 0.01 });
+  var intersectJoined = intersectSaveAll.apply(subcatchments, rivers_lines_osm, intersectsFilter);
+  
+  print(intersectJoined.first())
+
+  return intersectJoined.map(function(feature) {
+      // TODO: compute geo length of intersected river polylines
+      
+      // var rivers = ee.FeatureCollection(feature.get('rivers'));
+      // return feature.set('river_length', rivers.aggregate_sum('length'))
+  
+      var rivers = ee.List(feature.get('rivers'));
+      return feature.set('river_length', rivers.length())
+    }
+  );
+}
+
+var riverLengthPerCatchment_UsingList = function() {
+  return subcatchments.map(function(feature) {
+    // compute number of rivers intersecting polygon
+    
+    // TODO: compute geo length of intersected river polylines
+    
+    //var geometry = feature.geometry();
+
+    var riversPerCatchment = rivers_lines_osm.filter(ee.Filter.bounds(feature.geometry())).toList(100000,0);
+    var length = riversPerCatchment.length();
+    
+    //rivers_lines_osm = rivers_lines_osm.map(function(f) { return f.set('length', f.geometry().length(1e-5));});
+    // var length = 1
+    
+    var intersectedRiverParts = riversPerCatchment.map(function(river) { 
+        return feature.intersection(river);
+    });
+
+    var intersectedRivers = riversPerCatchment.map(function(river) { 
+        return river;
+    });
+
+    return feature
+      .set('river_length', length)
+      //.set('intersected_river_parts', intersectedRiverParts)
+      //.set('intersected_rivers', intersectedRivers);
+  });
+}
+
+var result = null;
+
+var addLayersRiverCount = function() {
+  // switch between JOIN / LIST.
+  result = riverLengthPerCatchment_UsingList();
+  // result = riverLengthPerCatchment_UsingJoin();
+
+  print(result.first())
+
+  // aggregate does not work either for too large collection :(
+  var min = 0; // result.aggregate_min('river_length').getInfo();
+  var max = 200; // result.aggregate_max('river_length').getInfo();
+
+  var palette = ['fff5eb', 'fee6ce', 'fdd0a2', 'fdae6b', 'fd8d3c', 'f16913', 'd94801', 'a63603', '7f2704'];
+  Map.addLayer(result.reduceToImage(['river_length'], ee.Reducer.first()), {min:min, max: max, palette: palette, opacity: 0.9}, 'river length');
+};
+
+// 5. ================== charts / tables
+
+var printChartsAndTables = function() {
+  if(result === null) 
+    return;
+  
+  var result_list = ee.List(result.reduceColumns(ee.Reducer.toList().repeat(2), ['HYBAS_ID', 'river_length']).get('list')).getInfo();
+  var rows = result_list[0].map(function(v,i) { return {c: [{v: v}, {v: result_list[1][i]}]} });
+  
+  var cols = [
+      {id: 'ID', label: 'ID', type: 'string'},
+      {id: 'count', label: 'Count', type: 'number'}
+  ];
+  
+  var options = {   
+    bar: { 
+      groupWidth: '90%' // space between bars
+    }
+  }
+  print(Chart({cols: cols, rows: rows}, 'ColumnChart', options));
+  print(Chart({cols: cols, rows: rows}, 'Histogram'))
+  print(Chart({cols: cols, rows: rows}, 'Table'))
+}
+
+// 6. ================== dem
+
+var addDem = function() {
+  var azimuth = 90;
+  var zenith = 60;
+  
+  function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+  
+  function hillshade(az, ze, slope, aspect) {
+    var azimuth = radians(ee.Image(az));
+    var zenith = radians(ee.Image(ze));
+    return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+        .add(zenith.cos().multiply(slope.cos()));
+  }
+  
+  function hillshadeit(image, elevation, weight) {
+    var hsv  = image.unitScale(0, 255).rgbtohsv();
+  
+    var terrain = ee.call('Terrain', elevation);
+    var slope = radians(terrain.select(['slope']));
+    var aspect = radians(terrain.select(['aspect']));
+    var hs = hillshade(azimuth, zenith, slope, aspect);
+  
+    var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+    var huesat = hsv.select('hue', 'saturation');
+    
+    return ee.Image.cat(huesat, intensity).hsvtorgb();
+  }
+  
+  var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+  var elev = ee.Image('USGS/SRTMGL1_003');
+  var v = elev.mask(elev.gt(0)).visualize({palette:colors_dem, min:100, max:1500, opacity: 1.0});
+  Map.addLayer(hillshadeit(v, elev, 1.8), {gamma:0.6}, 'elevation');
+}
+
+// 7. ================= compose!
+
+printStats()
+
+addDem()
+addLayersRiverCount()
+addLayersCatchments()
+addLayersOsm()
+
+printChartsAndTables()
+
+
+
+// TODO: perform tests with rasters 
+// var area = areaImage2000.reduceRegion( {
+//  'reducer': ee.Reducer.sum(),
+//  'geometry': feature.geometry(),
+//  'scale': 30,
+//  'maxPixels': 1e10
+//});
+// return feature.set('area', ee.Number(area.get('treecover2000')).divide(1e6));
+
+

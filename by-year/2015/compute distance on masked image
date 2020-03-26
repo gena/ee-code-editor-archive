@@ -1,0 +1,29 @@
+// compute distance on masked image
+
+// get L8 image
+print(ee.Geometry(Map.getBounds(true)).centroid(1e-3))
+Map.setCenter(148.92, -35, 13)
+
+var images = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+      .filterBounds(Map.getBounds(true))
+      .filterMetadata('CLOUD_COVER', 'less_than', 1);
+
+var image = ee.Image(images.toList(30, 0).get(13));
+Map.addLayer(image.select('B7', 'B6', 'B3'), {gamma:1.2}, 'L8', false)
+
+var water = image.normalizedDifference(['B6', 'B3']).lt(0.1);
+
+var distance = 300;
+var mask = water.focal_max(distance, 'circle', 'meters')
+Map.addLayer(mask, {opacity: 0.5}, 'mask', false)
+
+water = water.mask(mask); // masks pixels where mask == 0 as well
+
+// compute distance on masked image, oops, result is also masked
+var waterDistance = water.distance(ee.Kernel.euclidean(distance, 'meters'));
+
+Map.addLayer(waterDistance, {min:0, max:500, opacity: 0.7}, 'water distance')
+
+Map.addLayer(water, {palette: ['000000', '0000ff'], opacity: 0.7}, 'water (with mask)', false)
+Map.addLayer(water.mask(water), {palette: ['0000ff'], opacity: 0.9}, 'water')
+

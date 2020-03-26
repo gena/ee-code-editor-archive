@@ -1,0 +1,71 @@
+var assets = require('users/gena/packages:assets')
+var animation = require('users/gena/packages:animation')
+
+var region = Map.getBounds(true)
+var scale = Map.getScale()
+
+var stop = ee.Date(Date.now())
+var start = stop.advance(-1, 'year')
+
+var images = assets.getImages(region, {
+  resample: true,
+  filter: ee.Filter.date(start, stop),
+  missions: [
+    // 'L8', 
+    'S2'
+]
+})
+
+print('Image count: ', images.size())
+
+images = assets.getMostlyCleanImages(images, region, {
+   cloudFrequencyThresholdDelta: 0 //0.15
+})
+
+print('Clean image count: ', images.size())
+
+var waterMin = -0.1
+var waterMax = 0.4
+
+images = images.map(function(i) {
+  return i.set({ label: i.date().format('YYYY-MM-dd') })
+})
+
+// var i = images.filterDate('2019-03-19', '2019-03-20').first()
+// Map.addLayer(i, { min: 0, max: 0.35 }, 'strange')
+// Map.addLayer(i.normalizedDifference(['green', 'nir']), {}, 'strange (NDWI)')
+// Map.addLayer(i.normalizedDifference(['green', 'swir']), {}, 'strange (MNDWI)')
+
+images = images.sort('system:time_start')
+
+var blendWithImage = true
+// var blendWithImage = false
+
+var bands = ['red', 'green', 'blue']
+// var bands = ['swir', 'nir', 'red']
+var min = 0.05
+var max = 0.35
+var gamma = 1.4
+
+images = images.map(function(i) {
+  var ndwi = i.normalizedDifference(['green', 'nir'])
+  var mndwi = i.normalizedDifference(['green', 'swir'])
+  var wndvi = i.normalizedDifference(['red', 'nir'])
+  var water = ee.Image([ndwi, wndvi, mndwi])
+  var mask = water.reduce(ee.Reducer.max()).unitScale(waterMin, waterMax)//.multiply(4)
+
+  var waterRGB = water.mask(mask).visualize({ min: waterMin, max: waterMax })
+
+  var result = waterRGB
+  
+  if(blendWithImage) {
+    var imageRGB = i.visualize({ min: min, max: max, gamma: gamma, bands: bands })
+    var blackRGB = ee.Image(1).visualize({ palette: ['000000'], opacity: 0.15 })
+    
+    result = imageRGB.blend(blackRGB).blend(waterRGB)
+  }  
+  
+  return result.copyProperties(i, ['label'])
+})
+
+animation.animate(images, { label: 'label', maxFrames: 100 })

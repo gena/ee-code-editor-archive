@@ -1,0 +1,58 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var mangroves = ee.ImageCollection("LANDSAT/MANGROVE_FORESTS");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var style = require('users/gena/packages:style')
+style.SetMapStyleDark()
+
+var assets = require('users/gena/packages:assets')
+var palettes = require('users/gena/packages:palettes')
+
+var bounds = Map.getBounds(true)
+var scale = Map.getScale()
+
+var images = assets.getImages(bounds, {
+  resample: true,
+  missions: [
+    'L8',
+    'L7',
+    'S2',
+    'L5',
+    'L4'
+  ]
+})
+
+// filter out noisy images
+images = assets.getMostlyCleanImages(images, bounds, {
+    scale: scale * 10, 
+    
+    // how much should we deviate from cloud frequency when filtering images, use negative value to allow more (cloudy) images
+    cloudFrequencyThresholdDelta: 0.20,
+
+    // percentile and band used for cloudness, usually enough to choose one like green    
+    scorePercentile: 95,
+    qualityBand: 'green',
+  })
+
+print('Count: ', images.size())
+
+var bands = ['swir', 'nir', 'green', 'red']
+images = images.select(bands)
+
+var image1985 = images.filterDate('1985-01-01', '1995-01-01').reduce(ee.Reducer.percentile([35])).rename(bands)
+var image2000 = images.filterDate('2000-01-01', '2002-01-01').reduce(ee.Reducer.percentile([35])).rename(bands)
+var image2016 = images.filterDate('2016-01-01', '2018-01-01').reduce(ee.Reducer.percentile([35])).rename(bands)
+
+Map.addLayer(image1985, { min: 0.05, max: 0.35, gamma: 1.4 }, '1985-1995')
+Map.addLayer(image2000, { min: 0.05, max: 0.35, gamma: 1.4 }, '2000-2002')
+Map.addLayer(image2016, { min: 0.05, max: 0.35, gamma: 1.4 }, '2016-2018')
+Map.addLayer(image1985.normalizedDifference(['nir', 'red']), { min: -0.5, max: 0.5, palette: palettes.cb.BrBG[9] }, '1985-1995 (NDVI)', false)
+Map.addLayer(image2000.normalizedDifference(['nir', 'red']), { min: -0.5, max: 0.5, palette: palettes.cb.BrBG[9] }, '2000-2002 (NDVI)', false)
+Map.addLayer(image2016.normalizedDifference(['nir', 'red']), { min: -0.5, max: 0.5, palette: palettes.cb.BrBG[9]  }, '2016-2018 (NDVI)', false)
+
+mangroves = mangroves.max()
+var mangrovesEdges = ee.Algorithms.CannyEdgeDetector(mangroves, 0.1, 0)
+
+Map.addLayer(mangroves, { palette: ['#addd8e'] }, 'mangroves')
+Map.addLayer(mangrovesEdges.mask(mangrovesEdges), { palette: ['#ff0000'] }, 'mangroves (edges)')
+
+

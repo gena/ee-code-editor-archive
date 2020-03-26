@@ -1,0 +1,457 @@
+//Map.setCenter(0, 25, 3)
+// Map.setCenter(21.5, 2.3, 4)
+Map.setCenter(25, 10, 3)
+Map.setOptions('HYBRID')
+
+/***
+ * Configures layer options
+ */
+function getLayerOptions(options) {
+  var layer = {
+    visible: true,
+    opacity: 1.0,
+    name: '<layer name>'
+  }  
+  
+  if(options && typeof(options.layer) !== 'undefined') {
+    layer.visible = typeof(options.layer.visible) !== 'undefined' ? options.layer.visible : layer.visible
+    layer.opacity = typeof(options.layer.opacity) !== 'undefined' ? options.layer.opacity : layer.opacity
+    layer.name = typeof(options.layer.name) !== 'undefined' ? options.layer.name : layer.name
+  }
+  
+  return layer
+}
+
+/*** 
+ * Convet image from degrees to radians
+ */
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+/***
+ * Computes hillshade
+ */
+var hillshade = function(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image.constant(az));
+  var zenith = radians(ee.Image.constant(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+/***
+ * Styles RGB image using hillshading, mixes RGB and hillshade using HSV<->RGB transform
+ */
+function hillshadeRGB(image, elevation, weight, height_multiplier, azimuth, zenith, castShadows, proj) {
+  weight = weight || 2.5
+  height_multiplier = height_multiplier || 15
+  azimuth = azimuth || 0
+  zenith = zenith || 45
+
+  var hsv = image.visualize().unitScale(0, 255).rgbToHsv();
+ 
+  var z = elevation.multiply(ee.Image.constant(height_multiplier))
+
+  var terrain = ee.Algorithms.Terrain(z)
+  var slope = radians(terrain.select(['slope']));
+
+  var aspect = radians(terrain.select(['aspect'])).resample('bicubic');
+  var hs = hillshade(azimuth, zenith, slope, aspect).resample('bicubic');
+
+  if(castShadows) {
+    var hysteresis = true
+    var neighborhoodSize = 100
+
+    var hillShadow = ee.Algorithms.HillShadow(z, azimuth, zenith, neighborhoodSize, hysteresis).float().not()
+    
+    // opening
+    // hillShadow = hillShadow.multiply(hillShadow.focal_min(3).focal_max(6))    
+  
+    // cleaning
+    hillShadow = hillShadow.focal_mode(3)
+  
+    // smoothing  
+    hillShadow = hillShadow.convolve(ee.Kernel.gaussian(5, 3))
+  
+    // transparent
+    hillShadow = hillShadow.multiply(0.4)
+  
+    hs = ee.ImageCollection.fromImages([
+      hs.rename('shadow'), 
+      hillShadow.mask(hillShadow).rename('shadow')
+    ]).mosaic()
+  }
+
+  var intensity = hs.multiply(ee.Image.constant(weight)).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+
+  return ee.Image.cat(huesat, intensity).hsvToRgb();
+}
+
+var land = ee.Image("users/gena/land_polygons_image").mask()
+
+var palettes = {
+  Black: [/*"d9d9d9",*/"bdbdbd","969696","737373","525252","252525","101010"].reverse(),
+  Blues: ["f7fbff","deebf7","c6dbef","9ecae1","6baed6","4292c6","2171b5","08519c","08306b"],
+  Hot: ["ffffcc","ffeda0","fed976","feb24c","fd8d3c","fc4e2a","e31a1c","bd0026","800026"].reverse().slice(1)
+}
+
+var demLayer = null
+
+function addDem(options) {
+    var region = null
+    var mask = null
+    
+    if(options) {
+      if(options.region) {
+        region = options.region
+      }
+      
+      if(options.mask) {
+        mask = options.mask
+      }
+    }
+    
+    var dems = ee.ImageCollection.fromImages([
+        ee.Image('JAXA/ALOS/AW3D30_V1_1').select('MED').resample('bicubic').float(),
+        ee.Image('USGS/NED').resample('bicubic').float(),
+        ee.Image('AHN/AHN2_05M_RUW').resample('bicubic').float(),
+        ee.Image('UMN/PGC/ArcticDEM/V2/5m').select('elevation').resample('bicubic').float()
+    ])
+    
+    // dems = dems.merge(ee.ImageCollection('NRCan/CDEM').map(function(i) { return i.resample('bicubic').float() }))
+
+    var dems = ee.ImageCollection([ee.Image('JAXA/ALOS/AW3D30_V1_1').select('MED').resample('bicubic').float()])
+      
+    
+    var image = dems.map(function(i) {
+      var rgb = i.visualize({min: options.min, max: options.max, palette: palettes.Black})
+
+      var azimuth = 315;
+      var zenith = 35;
+      var weight = 1.3;
+      var heightMultiplier = 30;
+      
+      if(options.heightMultiplier) {
+        heightMultiplier = options.heightMultiplier
+      }
+      
+      var shadows = true
+      var image = hillshadeRGB(rgb, i, weight, heightMultiplier, azimuth, zenith, shadows) 
+      
+      return image
+    }).mosaic()
+    
+
+    if(region) {
+      image = image.clip(region)
+    }
+    
+    if(mask) {
+      image = image.updateMask(mask)
+    }
+
+    image = image.updateMask(land)
+  
+    var layer = getLayerOptions(options)  
+    
+    if(!demLayer) {
+      demLayer = ui.Map.Layer(image, {}, layer.name, layer.visible, layer.opacity)
+      Map.layers().add(demLayer)
+    } else {
+      demLayer.setEeObject(image)
+    }
+
+    return image
+  }
+
+
+addDem({min: -500, max: 2000, heightMultiplier: 30, layer: { name: 'DEM' }})
+
+var sliderHeightMultiplier = ui.Slider(1, 50, 30, 1, function(value) {
+  addDem({min: -500, max: 3500, heightMultiplier: value, layer: { name: 'DEM' }})
+})
+
+var label = ui.Label('Exaggregation: ')
+
+label.style()
+  .set({
+    width: '100px'
+  })
+
+var panel = ui.Panel([/*label, */sliderHeightMultiplier])
+
+panel.style()
+  .set({
+    position: 'bottom-left',
+    width: '130px'
+  })
+
+// Map.widgets().add(panel)
+
+//Map.addLayer(ee.Image(1), { palette: ['000000'] }, 'black', true, 0.3)
+
+var waterOccurrence = ee.Image('JRC/GSW1_0/GlobalSurfaceWater')
+  .select('occurrence')
+  .divide(100)
+  .unmask(0)
+  .resample('bilinear')
+  
+waterOccurrence = waterOccurrence
+  .mask(waterOccurrence.multiply(2).multiply(land))
+
+var bg = ee.Image(1).visualize({ palette: ['000000'], forceRgbOutput: true, opacity: 0.3 })
+
+var waterOccurrenceBlue = bg
+  .blend(waterOccurrence.visualize({min: 0, max: 1, palette: palettes.Blues }))
+
+var waterOccurrenceLava = bg
+  .blend(waterOccurrence.visualize({min: 0, max: 1, palette: palettes.Hot }))
+
+// Map.addLayer(waterOccurrenceBlue, {}, 'water occurrence', false)
+Map.addLayer(waterOccurrenceLava, {}, 'water occurrence (lava)')
+
+
+
+/***
+ * from https://snazzymaps.com
+ */
+var MAP_STYLES = {
+  Dark: [
+    {
+        "featureType": "all",
+        "elementType": "labels.text.fill",
+        "stylers": [
+            {
+                "saturation": 36
+            },
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 40
+            }
+        ]
+    },
+    {
+        "featureType": "all",
+        "elementType": "labels.text.stroke",
+        "stylers": [
+            {
+                "visibility": "on"
+            },
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 16
+            }
+        ]
+    },
+    {
+        "featureType": "all",
+        "elementType": "labels.icon",
+        "stylers": [
+            {
+                "visibility": "off"
+            }
+        ]
+    },
+    {
+        "featureType": "administrative",
+        "elementType": "geometry.fill",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 20
+            }
+        ]
+    },
+    {
+        "featureType": "administrative",
+        "elementType": "geometry.stroke",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 17
+            },
+            {
+                "weight": 1.2
+            }
+        ]
+    },
+    {
+        "featureType": "administrative",
+        "elementType": "labels.text.fill",
+        "stylers": [
+            {
+                "visibility": "on"
+            },
+            {
+                "lightness": "32"
+            }
+        ]
+    },
+    {
+        "featureType": "administrative.country",
+        "elementType": "geometry.stroke",
+        "stylers": [
+            {
+                "visibility": "on"
+            },
+            {
+                "weight": "2.28"
+            },
+            {
+                "saturation": "-33"
+            },
+            {
+                "lightness": "24"
+            }
+        ]
+    },
+    {
+        "featureType": "landscape",
+        "elementType": "geometry",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 20
+            }
+        ]
+    },
+    {
+        "featureType": "landscape",
+        "elementType": "geometry.fill",
+        "stylers": [
+            {
+                "lightness": "0"
+            }
+        ]
+    },
+    {
+        "featureType": "landscape",
+        "elementType": "labels.text.fill",
+        "stylers": [
+            {
+                "lightness": "69"
+            }
+        ]
+    },
+    {
+        "featureType": "poi",
+        "elementType": "geometry",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 21
+            }
+        ]
+    },
+    {
+        "featureType": "road",
+        "elementType": "geometry.fill",
+        "stylers": [
+            {
+                "lightness": "63"
+            }
+        ]
+    },
+    {
+        "featureType": "road.highway",
+        "elementType": "geometry.fill",
+        "stylers": [
+            {
+                "color": "#2d2d2d"
+            },
+            {
+                "lightness": 17
+            }
+        ]
+    },
+    {
+        "featureType": "road.highway",
+        "elementType": "geometry.stroke",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 29
+            },
+            {
+                "weight": 0.2
+            }
+        ]
+    },
+    {
+        "featureType": "road.arterial",
+        "elementType": "geometry",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 18
+            }
+        ]
+    },
+    {
+        "featureType": "road.local",
+        "elementType": "geometry",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 16
+            }
+        ]
+    },
+    {
+        "featureType": "transit",
+        "elementType": "geometry",
+        "stylers": [
+            {
+                "color": "#000000"
+            },
+            {
+                "lightness": 19
+            }
+        ]
+    },
+    {
+        "featureType": "water",
+        "elementType": "geometry",
+        "stylers": [
+            {
+                "color": "#0f252e"
+            },
+            {
+                "lightness": 17
+            }
+        ]
+    },
+    {
+        "featureType": "water",
+        "elementType": "geometry.fill",
+        "stylers": [
+            {
+                "lightness": "-100"
+            },
+            {
+                "gamma": "0.00"
+            }
+        ]
+    }
+]
+}
+
+
+Map.setOptions('Dark', MAP_STYLES)

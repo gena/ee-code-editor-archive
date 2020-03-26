@@ -1,0 +1,116 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var catchmentsHomogenized = ee.FeatureCollection("users/gena/water-niger/catchments-homogenized"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([-4.855360441008088, 14.525766639886026]),
+    modisMonthly = ee.ImageCollection("users/gena/water-niger/modis-monthly-upper-niger"),
+    terra250 = ee.ImageCollection("MODIS/006/MOD09GQ");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var assets = require('users/gena/packages:assets')
+  
+Map.addLayer(catchmentsHomogenized)
+
+var catchment = catchmentsHomogenized
+  //.filterBounds(Map.getCenter())
+  .filterBounds(geometry)
+  .first()
+  
+catchment = ee.Feature(catchment).geometry()
+  
+Map.addLayer(catchment, { color: 'yellow' }, 'selection', true, 0.5)
+
+
+function printImageSampleHistogram(image, vis, N, scale, width, height) {
+  var imageRGB = image.visualize(vis)
+  var imageHSV = imageRGB.unitScale(0, 255).rgbToHsv()
+  
+  var samples = image.addBands(imageHSV).select(vis.bands.concat(['hue']))
+    .sample({ 
+      region: catchment, 
+      scale: scale, 
+      numPixels: N, 
+      dropNulls: true
+    })
+  
+  samples = samples.sort('hue')
+  //samples = samples.sort('value')
+  //samples = samples.sort('NDVI')
+  //samples = samples.sort('MNDWI')
+  
+  N = samples.size()
+  
+  var y0 = 0
+  var y1 = height
+  
+  samples = samples.toList(N)
+  samples = samples.zip(ee.List.sequence(0, width, ee.Number(width).divide(N)))
+      
+  samples = samples.map(function(o) {
+    o = ee.List(o)
+    var f = ee.Feature(o.get(0))
+    var offset = ee.Number(o.get(1))
+  
+    var x0 = offset
+    var x1 = offset
+  
+    var geom = ee.Geometry.LineString([x0, y0, x1, y1], 'EPSG:3857', false)
+    
+    return f.setGeometry(geom)
+  })
+  
+  samples = ee.FeatureCollection(samples)
+  
+  //var percentile = 50
+  //var reducer = ee.Reducer.percentile([percentile]).forEach(vis.bands)
+  var reducer = ee.Reducer.mean().forEach(vis.bands)
+  
+  var samplesImage = samples.reduceToImage(vis.bands, reducer).rename(vis.bands)
+    // .convolve(ee.Kernel.gaussian(3, 2))
+  
+  var rect = ee.Geometry.Rectangle([[0, 0], [width, height]], 'EPSG:3857', false)
+  
+  samplesImage = samplesImage.visualize(vis).clip(rect)
+  
+  print(ui.Thumbnail(samplesImage, { dimensions: width + 'x' + height }))
+}
+
+var vis = { min: 300, max: 5000, bands: ['sur_refl_b06', 'sur_refl_b02', 'sur_refl_b04'] }
+
+var N = 5000
+
+var width = 500
+var height = 20
+
+var scale = 50
+
+var imageCount = 200
+var list = modisMonthly
+  .filterDate('2015-01-01', '2019-01-01')
+  .toList(imageCount)
+
+for(var i=0; i<imageCount; i++) {
+  var image = ee.Image(list.get(i))
+  print(image.date())
+  printImageSampleHistogram(image, vis, N, scale, width, height)  
+}
+
+throw(0)
+
+// LANDSAT and MODIS
+var images = assets.getImages(catchment, {
+  filterMasked: true,
+  missions: ['S2', 'L8', 'L7', 'L5', 'L4'],
+  filter: ee.Filter.date('2018-09-01', '2019-01-01')
+})
+print('Count (LANDSAT, SENTINEL)', images.size())
+
+images = assets.getMostlyCleanImages(images, catchment, { percentile: 75 })
+
+images = images.sort('system:time_start')
+
+var vis = { min: 0.03, max: 0.5, bands: ['swir', 'nir', 'green'] }
+
+list = images
+  .toList(imageCount)
+
+for(var i=0; i<imageCount; i++) {
+  printImageSampleHistogram(ee.Image(list.get(i)), vis, N, scale, width, height)  
+}

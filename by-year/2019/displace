@@ -1,0 +1,14 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var dem = ee.Image("AHN/AHN2_05M_INT");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var bounds = Map.getBounds()
+var xmin = bounds[0]
+var ymin = bounds[1]
+var xmax = bounds[2]
+var xmax = bounds[3]
+var displacement = ee.Image.pixelLonLat().subtract(xmin).divide(xmax - xmin)
+  .multiply(50000).sin()
+
+Map.addLayer(displacement)
+Map.addLayer(ee.Terrain.hillshade(dem), {min: 130, max: 220})
+Map.addLayer(ee.Terrain.hillshade(dem.displace(displacement.multiply(40))), {min: 130, max: 220})

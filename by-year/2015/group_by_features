@@ -1,0 +1,31 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var counties = ee.FeatureCollection("ft:1v5OEHqR7rg425zEMjCYiCZLnWkZEP4clwZG2btvZ");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// calculate pixelArea by class
+var fc = ee.FeatureCollection('ft:1vwqLLqsPKEQjs1l8CH8q53g6MYQreDVnWuX51lH7'); // Africa Countries bounds
+
+var globcov2009 = ee.Image('ESA/GLOBCOVER_L4_200901_200912_V2_3').select('landcover');
+var globcov2009 = globcov2009.mask(globcov2009.lt(40));
+var area = ee.Image.pixelArea().multiply(0.0001).addBands(globcov2009);
+
+var fc = counties
+
+// use reduceRegions
+var results = area.reduceRegions(fc, ee.Reducer.sum().group({ groupField: 1, groupName: 'class'}), 1000)
+print(results.first())
+
+// custom reduceRegions
+var result = ee.FeatureCollection(fc.map(function(feature) {
+  var geom = feature.geometry();
+  var areas = area.reduceRegion({
+    reducer: ee.Reducer.sum().group({ groupField: 1, groupName: 'class'}), 
+    geometry: geom, 
+    scale: 1000, 
+    maxPixels: 1e8});
+    
+  return ee.Feature(feature).set('land_class_areas', areas);
+}));
+
+print(result.first());
+
+

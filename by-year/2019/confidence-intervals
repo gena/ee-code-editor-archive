@@ -1,0 +1,53 @@
+// This function adds a time band to the image.
+var createTimeBand = function(image) {
+  // Scale milliseconds by a large constant to avoid very small slopes
+  // in the linear regression output.
+  return image.addBands(image.metadata('system:time_start').divide(1e18));
+};
+
+// Load the input image collection: projected climate data.
+var collection = ee.ImageCollection('NASA/NEX-DCP30_ENSEMBLE_STATS')
+  .filter(ee.Filter.eq('scenario', 'rcp85'))
+  .filterDate(ee.Date('2006-01-01'), ee.Date('2016-01-01'))
+  // Map the time band function over the collection.
+  .map(createTimeBand);
+  
+Map.addLayer(collection, {}, 'collection', false)  
+
+// Reduce the collection with the linear fit reducer.
+// Independent variable are followed by dependent variables.
+var linearFit = collection.select(['system:time_start', 'pr_mean'])
+  .reduce(ee.Reducer.linearFit());
+
+// Display the results.
+Map.setCenter(-100.11, 40.38, 6);
+Map.addLayer(linearFit, {min: 0, max: [-0.9, 8e-5, 1], bands: ['scale', 'offset', 'scale']}, 'fit');
+
+var tmean = collection.select('system:time_start').mean()    
+    
+collection = collection.map(function(i) {
+  var pr_mean_model = linearFit.select('offset').add(i.select('system:time_start').multiply(linearFit.select('scale')))
+  
+  var se = i.select('pr_mean').subtract(pr_mean_model).pow(2).rename('pr_mean_redisual_squared')
+  var sxx = i.select('system:time_start').subtract(tmean).pow(2).rename('sxx')
+  
+  return i.addBands(se).addBands(sxx)
+})    
+
+var sxx = collection.select('sxx').sum()
+var mse = collection.select('pr_mean_redisual_squared').sum().divide(collection.size().subtract(2))
+Map.addLayer(mse, {min: 1.2e-11, max: 5e-10}, 'pr_mean MSE')
+
+// ... INCOMPLETE ...
+
+var seSlope = mse.divide(sxx).sqrt()
+
+var seOffset = tmean.pow(2).divide(sxx).add(ee.Image.constant(1).divide(collection.size()))
+  .multiply(mse).sqrt()
+  
+
+Map.addLayer(seSlope, {}, 'SE(slope)')
+Map.addLayer(seOffset, {}, 'SE(offset)')  
+
+
+

@@ -1,0 +1,42 @@
+
+// Train Classifier Example
+
+var date = '2000-01-01';
+var image_source = 'LANDSAT/LT5_L1T_ANNUAL_GREENEST_TOA';
+var ft_training = 'ft:1CTTgRRXJAwTOyMOm2aVpRLMDXqMjZqXA2cetYE7r';
+
+// get an image to classify
+var img = ee.Image(ee.ImageCollection(image_source)
+    .filterDate(date)
+    .first());
+
+// load training data
+// 6 points loaded into FT with shpescape.com
+// 2 points in each of three classes 0,1,2
+var vector_training = ee.FeatureCollection(ft_training);
+
+// Train a classifier
+var trained = img.trainClassifier(
+  null,
+  null,
+  null,
+  null,
+  vector_training,
+  'class_int',
+  'EPSG:4326',
+  img.projection().atScale(90).getInfo()['transform']
+);
+
+// Apply the classifier to the same image we used to train it
+var classified = img.classify(trained);
+
+Map.addLayer(classified, {
+  palette: 'FF0000,00FF00,0000FF',
+  max: 2
+});
+
+Map.addLayer(vector_training, {
+  color: 'ff00ff' 
+});
+
+Map.setCenter(-81.47, 38.01, 14);

@@ -1,0 +1,96 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var hand = ee.Image("users/gena/GlobalHAND/30m/hand-1000"),
+    hand100 = ee.ImageCollection("users/gena/global-hand/hand-100");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.addLayer(ee.Image(1), {palette:['000000']}, 'black', true, 0.5)
+
+// var handMask = hand.lt(90)
+var handMask = hand100.mosaic().lt(90)
+
+var style = require('users/gena/packages:style')
+var jrc = ee.Image('JRC/GSW1_0/GlobalSurfaceWater')
+
+var jrcWaterOccurrence = jrc.select('occurrence').divide(100)
+  .visualize({palette: style.Palettes.RedToBlue, min:0, max:1})
+
+Map.addLayer(jrcWaterOccurrence, {}, 'water occurrence (JRC)', false)
+
+var jrcMonthly = ee.ImageCollection('JRC/GSW1_0/MonthlyHistory')
+
+var assets = require('users/gena/packages:assets')
+
+var bandNames = ['swir', 'nir', 'green']
+var images = assets.getImages(Map.getBounds(true), {missions: ['L5','L7','L8'], resample: true})
+  .select(bandNames)
+
+var years = {begin: 2000, end: 2015}
+var frames = ee.List.sequence(years.begin, years.end).map(function(year) { 
+  return ee.List.sequence(5, 9).map(function(month) {
+    var begin = ee.Date.fromYMD(year, month, 1)
+    var end = begin.advance(1, 'month')
+
+    // composite
+    var image = images.filterDate(begin, end).reduce(ee.Reducer.percentile([20]))
+      .rename(bandNames)
+
+    var jrcWater = jrcMonthly.filterDate(begin, end)
+    
+    jrcWater = ee.Image(ee.Algorithms.If(ee.Algorithms.IsEqual(jrcWater.size(), 0), ee.Image(), jrcWater.max().eq(2)))
+
+    
+    // 0 - no data, 1 - not water, 2 - water
+    var occurrence = jrcWaterOccurrence.updateMask(jrcWater)
+
+    var jrcWaterBoundary = ee.Algorithms.CannyEdgeDetector(jrcWater, 0.5)
+      
+    jrcWaterBoundary = jrcWaterBoundary.mask(jrcWaterBoundary)
+
+    // var ndwi = image.normalizedDifference(['green', 'nir'])
+
+    var ndwi = images.filterDate(begin, end).map(function(i) {
+      return i.normalizedDifference(['green', 'nir']).clamp(-0.1, 0.5)
+        .updateMask(i.select('green').mask().multiply(i.select('nir').mask()).focal_min(5))
+    }).reduce(ee.Reducer.percentile([50]))
+
+    // Laplace distribution, b = 0.1
+    var b = 0.01
+    var waterBoundaryMask = ndwi.abs().divide(b).multiply(-1).exp().divide(2*b)
+    var waterBoundary = ndwi.abs().updateMask(waterBoundaryMask)
+    waterBoundary = ee.Image(ee.Algorithms.If(ee.Algorithms.IsEqual(image.bandNames().size(), 0), ee.Image(), waterBoundary))
+
+    // var waterBoundary = ee.Algorithms.CannyEdgeDetector(ndwi, 0.3, 0.7)
+
+    var waterBoundary = images.filterDate(begin, end).map(function(i) {
+      var ndwi = i.normalizedDifference(['green', 'nir']).clamp(-0.2, 0.4)
+      var edge = ee.Algorithms.CannyEdgeDetector(ndwi, 0.25, 0)
+      return edge.mask(edge).updateMask(i.select('green').mask().multiply(i.select('nir').mask()).focal_min(2))
+    }).reduce(ee.Reducer.max())
+      .updateMask(handMask)
+
+    waterBoundary = ee.Image(ee.Algorithms.If(ee.Algorithms.IsEqual(image.bandNames().size(), 0), ee.Image(), waterBoundary))
+      
+    waterBoundary = waterBoundary.mask(waterBoundary/*.multiply(2)*/)
+    //  .updateMask(handMask)
+
+    
+    return ee.ImageCollection.fromImages([
+      image.visualize({min:0.05, max:0.45, forceRgbOutput: true}), 
+      /*occurrence,*/
+      //ndwi.visualize({min:-0.2, max: 0.3, forceRgbOutput: true}),
+      jrcWater.mask(jrcWater).visualize({palette:['0000ff'], opacity: 0.1, forceRgbOutput: true}),
+      jrcWaterBoundary.visualize({palette:['000000', 'ffffff'], forceRgbOutput: true}),
+      waterBoundary.visualize({palette:['ffff00'], forceRgbOutput: true})
+    ]).mosaic()
+      .set({label: begin.format('YYYY-MM-dd').cat(' - ').cat(end.format('YYYY-MM-dd'))})
+  })
+}).flatten()
+
+frames = ee.ImageCollection(frames)
+
+var animation = require('users/gena/packages:animation')
+animation.animate(frames, {maxFrames:30, label: 'label'})
+
+var utils = require('users/gena/packages:utils')
+utils.exportVideo(frames, {/*label: 'label', */previewFrames: 5, framesPerSecond: 3})
+
+

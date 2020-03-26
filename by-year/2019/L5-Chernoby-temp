@@ -1,0 +1,125 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var tempRect = 
+    /* color: #d63000 */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[30.074482506897766, 51.41676200018372],
+          [30.074482506897766, 51.296915776105344],
+          [30.23996407428058, 51.296915776105344],
+          [30.23996407428058, 51.41676200018372]]], null, false),
+    geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[30.136967248108704, 51.36180887604062],
+          [30.135250634339172, 51.37445501056356],
+          [30.118427819397766, 51.384526550803315],
+          [30.113277978089172, 51.39266787809456],
+          [30.10057503619464, 51.3958811611783],
+          [30.070705956604797, 51.40209286851018],
+          [30.035343712952454, 51.39095403483073],
+          [30.102291649964172, 51.32492224486114],
+          [30.18503243365558, 51.304106807012744],
+          [30.175076073792297, 51.32256220604414],
+          [30.166149682190735, 51.329641958173795],
+          [30.148640221741516, 51.3324306513545],
+          [30.155849999573547, 51.33907992757658]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.centerObject(geometry)
+          
+var bounds = ee.Geometry(Map.getBounds(true))
+
+Map.setOptions('HYBRID')
+
+
+
+var images2 = ee.ImageCollection('LANDSAT/LT04/C01/T1_TOA').select(['B5', 'B4', 'B2', 'B6'], ['swir1', 'nir', 'green', 'temp']).filterBounds(bounds.centroid(1))
+var images3 = ee.ImageCollection('LANDSAT/LT04/C01/T2_TOA').select(['B5', 'B4', 'B2', 'B6'], ['swir1', 'nir', 'green', 'temp']).filterBounds(bounds.centroid(1))
+var images4 = ee.ImageCollection('LANDSAT/LT05/C01/T1_TOA').select(['B5', 'B4', 'B2', 'B6'], ['swir1', 'nir', 'green', 'temp']).filterBounds(bounds.centroid(1))
+var images5 = ee.ImageCollection('LANDSAT/LT05/C01/T2_TOA').select(['B5', 'B4', 'B2', 'B6'], ['swir1', 'nir', 'green', 'temp']).filterBounds(bounds.centroid(1))
+
+
+var images = images2.merge(images3).merge(images4).merge(images5)
+  .filterDate('1986-01-01', '1988-01-01')
+
+print(images.size())
+
+// LANDSAT/LT05/C01/T1_TOA 
+// LANDSAT/LT05/C01/T2_TOA 
+// LANDSAT/LE07/C01/T1_TOA 
+// LANDSAT/LE07/C01/T2_TOA 
+
+// var assets = require('users/gena/packages:assets')
+// images = assets.getMostlyCleanImages(images, geometry, {
+//   cloudFrequencyThresholdDelta: 0.15
+// })
+
+print(images.size())
+
+images = images.sort('system:time_start')
+
+var scale = Map.getScale()
+
+var water = images.map(function(i) {
+  var water = i.normalizedDifference(['green', 'swir1']).unitScale(0, 0.5)
+  return water
+}).mean()
+
+var nonWater = ee.Image(0).float().paint(geometry, 1)
+    
+
+water = water.updateMask(
+    water.gt(0.5).focal_max(1).focal_min(1)
+    .and(nonWater.not())
+)
+
+  
+Map.addLayer(water, { min: 0, max: 1, palette: ['00ffff'] }, 'water')
+
+images = images.map(function(i) {
+  var temp = i.select('temp')
+  
+  // var water = i.normalizedDifference(['green', 'nir']).unitScale(0.05, 1)
+
+  var minMax = temp.updateMask(water.and(i.select('green').lt(0.15))).reduceRegion(ee.Reducer.percentile([2, 98]), tempRect, scale)
+  var tmin = minMax.get('temp_p2') 
+  var tmax = minMax.get('temp_p98')
+  
+  return i
+    .set({
+      tmin: tmin,
+      tmax: tmax
+    })
+}).filter(ee.Filter.notNull(['tmin', 'tmax']))
+
+print(images.first())
+print(images.size())
+
+images = images.map(function(i) { 
+  var label = i.date().format()
+
+  i = i.resample('bicubic')
+  
+  var temp = i.select('temp')
+  
+  var tmin = i.get('tmin') 
+  var tmax = i.get('tmax')
+
+  //var water = i.normalizedDifference(['green', 'nir']).unitScale(0.05, 1)
+
+  var s = Map.getScale()
+  var r = s * 4
+  var ss = s * 2
+  i = i.subtract(i.convolve(ee.Kernel.gaussian(r, ss, 'meters')).convolve(ee.Kernel.laplacian8(2))) // LoG
+    .visualize({ min: 0.05, max: 0.4, gamma: 1.5 }).blend(
+        i.select('temp').unitScale(tmin, tmax).visualize({palette: ['0000ff', 'ff0000', 'ffff00', 'ffffff'], min: 0, max: 1 } )
+          .updateMask(water.and(i.select('green').lt(0.25)).multiply(0.75))
+        )
+
+  return i.set({ label: label }) 
+})
+
+var animation = require('users/gena/packages:animation')
+animation.animate(images, { label: 'label', maxFrames: 150 })
+          

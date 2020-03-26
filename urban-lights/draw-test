@@ -1,0 +1,10 @@
+
+
+Map.onClick(function(coords){
+  var point = ee.Geometry.Point(coords.lon, coords.lat);
+  var bounds = Map.getBounds()
+  var width = bounds[2] - bounds[0]
+  var scale = Map.getScale() * 22
+  var circle = point.buffer(scale, scale/32)  
+  Map.addLayer(circle, {}, 'circle')
+})

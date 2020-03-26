@@ -1,0 +1,194 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var waterbodies = ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies_Limpopo_JRC_fixed_buffer"),
+    jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var style = require('users/gena/packages:style')
+var colorbrewer = require('users/gena/packages:colorbrewer')
+
+var hydro = require('users/gena/packages:hydro')
+  
+style.SetMapStyleDark()
+
+
+var hydroLakes = ee.FeatureCollection("users/gena/HydroLAKES_polys_v10")
+Map.addLayer(hydroLakes, {color: 'yellow'}, 'HydroLAKES (features)', false)
+Map.addLayer(ee.Image().paint(hydroLakes, 1, 1), {palette:['ffffff']}, 'HydroLAKES', true, 0.5)
+
+var fa = ee.Image('WWF/HydroSHEDS/15ACC')
+
+Map.addLayer(waterbodies, {color: 'white'}, 'waterbodies (vector)', false)
+Map.addLayer(ee.Image().paint(waterbodies, 1, 1), {palette:['ffffff']}, 'waterbodies')
+
+Map.addLayer(fa.mask(fa.gt(100)), {min:100, max: 10000, palette: style.Palettes.Water}, 'flow accumulation (HS 450m)', false)
+
+var Pw = jrc.select('occurrence').divide(100)
+
+Map.addLayer(Pw, {palette: colorbrewer.Palettes.RdBu[11], min:0, max:1}, 'water (JRC) RdBu', true)
+Map.addLayer(Pw, {palette: style.Palettes.Hot, min:0, max:1}, 'water (JRC), Limpopo, hot', false)
+
+
+ 
+// limit number of waterbodies
+// waterbodies = waterbodies.filterBounds(Map.getBounds(true))
+
+// for every waterbody, compute A(P) curves
+var p = ee.List.sequence(0, 1, 0.1)
+var areaPercentile = waterbodies.map(function(f) {
+  var area = p.map(function(p) {
+    return Pw.clip(f).gt(ee.Image.constant(p)).multiply(ee.Image.pixelArea())
+      .reduceRegion(ee.Reducer.sum(), f.geometry(), 30).values().get(0)
+  })
+  
+  var faMax = fa.reduceRegion(ee.Reducer.max(), f.geometry(), 30).values().get(0)
+  
+  return f.set({
+    area: area,
+    faMax: faMax
+  })
+})
+ 
+Export.table.toDrive({
+  collection: areaPercentile, 
+  description: 'waterbody_area', 
+  folder: 'Limpopo', 
+  fileNamePrefix: 'waterbody_area', 
+  fileFormat: 'GeoJSON'
+})
+
+
+// months
+var months = jrcMonthly.map(function(i) { 
+  return ee.Feature(null, { date: ee.Image(i).date() }) 
+})
+
+Export.table.toDrive({
+  collection: ee.FeatureCollection(months), 
+  description: 'water_body_area_monthly_dates', 
+  folder: 'Limpopo', 
+  fileNamePrefix: 'water_body_area_monthly_dates', 
+  fileFormat: 'GeoJSON'
+})
+
+// monthly time series of surface area for all waterbodies
+
+function computeMonthlyWaterAreaAtScale(scale, computePercentiles) {
+  return function computeMonthlyWaterArea(f) {
+    var area = jrcMonthly.map(function(i) {
+      // get water mask
+      var water = i.clip(f).eq(2)
+      
+      // compute water area
+      var waterArea = water.multiply(ee.Image.pixelArea())
+        .reduceRegion(ee.Reducer.sum(), f.geometry(), scale).values().get(0)
+        
+      var result = ee.Feature(null, {
+        time: i.date(),
+        water_area: waterArea,
+      })
+      
+      if(computePercentiles) {
+        // get probability of water as a histogram for detected water pixels
+        var waterPw = Pw.updateMask(water).reduceRegion(ee.Reducer.histogram(50), f.geometry(), scale) // 50 buckets, 2% precision
+  
+        result = result
+          .set({ water_area_percentiles: waterPw.values().get(0) })
+      }
+
+      return result
+    })
+
+    area = ee.FeatureCollection(area)
+      .filter(ee.Filter.gt('water_area', 0))
+      
+    f = f.set({
+      time: area.aggregate_array('time'),
+      water_area: area.aggregate_array('water_area'),
+    })
+    
+    if(computePercentiles) {
+      f = f.set({
+        water_area_percentiles: area.aggregate_array('water_area_percentiles'),
+      })
+    }
+
+    return f
+  }
+}
+
+//waterbodies = waterbodies.filterBounds(Map.getBounds(true))
+
+var count = 1000
+var max = waterbodies.size().divide(count)
+ee.List.sequence(0, max).evaluate(function(indices) {
+  indices.map(function(i) {
+    waterbodies = ee.FeatureCollection(waterbodies.toList(count, i * count))
+    
+    var computePercentiles = false
+    var areaMonthly = waterbodies.map(computeMonthlyWaterAreaAtScale(30, computePercentiles))
+    
+    var name = 'waterbody_area_monthly_' + (i * count)
+    
+    Export.table.toDrive({
+      collection: areaMonthly, 
+      description: name, 
+      folder: 'Limpopo', 
+      fileNamePrefix: name, 
+      fileFormat: 'GeoJSON'
+    })
+  })
+})
+
+var color = colorbrewer.Palettes.Blues[5][4]
+var selection = ee.FeatureCollection([])
+var selectionLayer = ui.Map.Layer(selection, {color: color}, 'selected waterbody (click)')
+Map.layers().add(selectionLayer)
+
+
+Map.onClick(function(pt) {
+  pt = ee.Geometry.Point(ee.Dictionary(pt).values().reverse())
+
+  selection = ee.Feature(waterbodies.filterBounds(pt).first())
+  
+  // use HydroLAKES if there is no pre-defined waterbody found
+  selection = ee.Algorithms.If(ee.Algorithms.IsEqual(selection, null), 
+    ee.Feature(hydroLakes.filterBounds(pt).first()).buffer(Map.getScale()*20),
+    selection)
+  
+  selection = ee.Feature(selection)
+  
+  selectionLayer.setEeObject(selection)
+  
+  print("Map scale: ", Map.getScale())
+  
+  print("Name: ", ee.Feature(hydroLakes.filterBounds(pt).first()).get('Lake_name'))
+
+  var ts = computeMonthlyWaterAreaAtScale(Map.getScale())(selection)
+  var area = ee.List(ts.get('water_area'))
+  var time = ee.List(ts.get('time'))
+
+  // convert to features, somehow ui.Chart.array can't interpret dates :(  
+  ts = time.zip(area).map(function(o) { 
+    var o = ee.List(o)
+    return ee.Feature(null, {
+      time: o.get(0),
+      water_area: o.get(1)
+    })
+  })
+  
+  print(ui.Chart.feature.byFeature(ts, 'time', ['water_area']))
+})
+
+
+
+/*
+months.limit(10).evaluate(function(m) {
+  m.map(function(m) {
+    var t0 = ee.Date(m.get('date'))
+    var t1 = t0.advance(1, 'month')
+    var water = jrcMonthly.filterDate(t0, t1)
+    Map.addLayer(water.mask(water.eq(2)), {palette: [style.Colors.Blue[0]]}, )
+  })
+})
+
+*/

@@ -1,0 +1,46 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([39.38232632711674, 13.177161272388151]),
+    fa90 = ee.Image("users/gena/fa90");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var utils = require('users/gena/packages:utils')
+var hydro = require('users/gena/packages:hydro')
+var palettes = require('users/gena/packages:palettes')
+
+Map.setOptions('SATELLITE')
+
+var land = ee.Image('users/gena/land_polygons_image').mask()
+var dem = ee.Image('JAXA/ALOS/AW3D30_V1_1').select('MED').resample('bicubic').updateMask(land)
+var palette = palettes.cb.Greys[7].slice(2).reverse()
+var demRgb = dem.visualize({min: 0, max: 3500, palette: palette})
+
+var azimuth = 315;
+var zenith = 30;
+var weight = 2.0;
+var heightMultiplier = 50;
+var demRgb3D = utils.hillshadeit(demRgb, dem, weight, heightMultiplier, azimuth, zenith) 
+
+Map.addLayer(demRgb3D)
+
+// Map.addLayer(fa90.mask(fa90.gt(100)), { palette: ['0099CC']}, 'FA')
+var rivers = ee.FeatureCollection('users/gena/HydroEngine/riv_15s_lev05')
+//rivers = rivers.filter(ee.Filter.gt('UP_CELLS', 10))
+Map.addLayer(rivers.style({color: '0099CC', width: 1}), {}, 'rivers')
+
+// hydro.Map.addRivers({ maxFA: 1000, layer: { name: 'rivers, FA > 1000' } })
+
+var demValue = ee.Number(dem.reduceRegion({
+  reducer: ee.Reducer.percentile([75]), 
+  geometry: geometry.buffer(Map.getScale() * 5), 
+  scale: Map.getScale()
+}).values().get(0))
+
+function addDamWater(damHeight) {
+  var water = dem.lt(demValue.add(damHeight))
+  Map.addLayer(water.mask(water), { palette: ['0099CC']}, 'dam water, H = ' + damHeight, true, 0.4)
+}
+
+
+addDamWater(25)
+addDamWater(50)
+addDamWater(100)
+addDamWater(200)

@@ -1,0 +1,252 @@
+// HSV-based Pan-Sharpening.
+
+// Map.setCenter(25.676315, -21.519547, 14), Orapa, Botswana (mine)
+//Map.setCenter(-53.02, -22.53,13); // sediments, Mexico
+//Map.setCenter(-112.22486038208007, 24.238131601432375); // Baja California Sur (Maxico)
+var offset = 0;
+var left = 2; // in sigma
+var right = 6; // in sigma
+var gamma = 1.0;
+var bidx = 0; // index of the band to use for min/max, maybe imrpove later
+
+var min = 0.05;
+var max = 0.4;
+var gamma = 1.8
+
+var bounds = Map.getBounds(true);
+var center = ee.Geometry(bounds).centroid(1);
+var hbounds = center.buffer(5000);
+
+// print(center);
+
+var hbounds_image = ee.Image(0).mask(0).byte().paint(hbounds, 255, 2);
+Map.addLayer(hbounds_image, {min:0, max:255, opacity:0.5}, 'histogram bounds');
+
+var LC8_BANDS = ['B1',    'B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',    'B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8', 'B7'];
+var STD_NAMES = ['blue2', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+// LT4_L1T; LT5_L1T; LE7_L1T; LC8_L1T
+var images =  ee.ImageCollection( 
+
+      'LANDSAT/LC8_L1T_TOA')
+      .select(LC8_BANDS, STD_NAMES)
+
+/*      'LANDSAT/LE7_L1T_TOA') 
+      .select(LC7_BANDS, STD_NAMES)
+*/
+      .filterBounds(hbounds)
+        .filterMetadata('CLOUD_COVER', 'less_than', 20)
+      //.filterMetadata('DATE_ACQUIRED', 'equals', '2014-05-19')
+/*
+// Noel: We compute a scene-to-scene registration for each Landsat image against a golden image (the GLS2000) using an interest point detector.  The count number is how many points matched between the two scenes (1000 is a good match, 50 is not) and the other numbers are the average offset between the scenes.
+// Our process isn't very rigorous, but it's consistent.  But you can also use the GEOMETRIC_RMSE numbers produced by the USGS, that is an indication of how well they think their alignment was.
+// We use SURF
+
+  .filter(ee.Filter.gt('google:registration_count', 1000))
+  .filter(ee.Filter.gt('google:registration_offset_x', -100))
+  .filter(ee.Filter.lt('google:registration_offset_x', 100))
+  .filter(ee.Filter.lt('google:registration_offset_y', 100))
+  .filter(ee.Filter.gt('google:registration_offset_y', -100))
+*/      ;
+
+// print(images.toList(1000, 0).size())
+print(ee.List(images.getInfo().features).size())
+
+var image1 = ee.Image(images.toList(1, offset).get(0));
+
+Map.addLayer(image1.select('BQA'), {}, 'BQA', false); // for inspection
+
+
+var ts = image1.getInfo().bands[0].crs_transform;
+var proj = image1.getInfo().bands[0].crs;
+
+  
+//print(image1)
+// Iceland lake
+// Map.setCenter(-18.943005,64.082499,11) 
+
+// summer:
+/*
+var image1 = ee.Image("LANDSAT/LC8_L1T/LC82190152014263LGN00")
+      .select(LC8_BANDS, STD_NAMES);
+*/
+// winter
+/*
+var image1 = ee.Image("LANDSAT/LC8_L1T/LC82190152013324LGN00")
+      .select(LC8_BANDS, STD_NAMES);
+*/
+
+// Rotterdam
+// var image1 = ee.Image('LC81980242014260LGN00'); 
+
+var info = image1.getInfo();
+var min_value = 0;
+var max_value = info.properties['QUANTIZE_CAL_MAX_BAND_1'];
+max_value = 1;
+//print(max_value)
+var date = info.properties['DATE_ACQUIRED'];
+
+print(date);
+//print(info.id)
+print(info)
+
+
+
+//Map.centerObject(image1, 13);
+
+//print(Chart.image.histogram(image1.select('B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8'), hbounds));
+
+// mask clouds
+var getClouds = function(img) {
+  var q = img.select( 'BQA' );
+  
+  // see http://landsat.usgs.gov/L8QualityAssessmentBand.php
+  var cloud = q.eq(61440)
+    .or(q.eq(59424))
+    .or(q.eq(57344))
+    .or(q.eq(56320))
+    .or(q.eq(39936))
+    .or(q.eq(36896))
+    .or(q.eq(36864))
+    .or(q.eq(53248))
+    .or(q.eq(31744))
+    .or(q.eq(28672))
+    .or(img.select(0).gt(0.6));
+    
+    return cloud;
+};
+
+// image1 = image1.mask(getClouds(image1).not());
+
+
+//var rgb = image1.select('temp', 'green', 'blue').unitScale(0, max_value);
+//var rgb = image1.select('nir', 'red', 'blue').unitScale(0, max_value);
+var rgb = image1.select('swir2', 'nir', 'green').unitScale(0, max_value);
+//var rgb = image1.select('red', 'green', 'blue').unitScale(min_value, max_value);
+//var rgb = image1.select('nir', 'red', 'green').unitScale(min_value, max_value);
+var pan = image1.select('pan').unitScale(min_value, max_value);
+
+// Convert to HSV, swap in the pan band, and convert back to RGB.
+var hsv  = rgb.rgbtohsv();
+
+var intensity = pan;
+//var intensity = pan.add(hsv.select('value').multiply(0.5));
+
+//var swir2 = image1.select('swir2').unitScale(0, max_value);
+//var intensity = pan.add(swir2.multiply(ee.Image(0.3)));
+
+var huesat = hsv.select('hue', 'saturation');
+var upres = ee.Image.cat(huesat, intensity).hsvtorgb();
+
+// Generate the histogram data.  Use minBucketWidth for nice sized buckets.
+//print(Chart.image.histogram(rgb, hbounds));
+//print(Chart.image.histogram(upres, hbounds));
+
+// define parameters for export
+var bounds = Map.getBounds();
+var region = '[['+bounds[0]+', '+bounds[1]+'], ['+bounds[2]+', '+bounds[1]+'], ['+bounds[2]+', '+bounds[3]+'], ['+bounds[0]+', ' + bounds[3] + ']]';
+print(region)
+
+// show original
+/*var median = rgb.reduceRegion(ee.Reducer.mean(), hbounds, 30).values();
+var sigma = rgb.reduceRegion(ee.Reducer.stdDev(), hbounds, 30).values();
+var min = median.get(bidx).getInfo() - sigma.get(bidx).getInfo() * left;
+var max = median.get(bidx).getInfo() + sigma.get(bidx).getInfo() * right;
+*/
+/*
+min = 0.075
+max = 0.5
+gamma = 1.2
+*/
+
+
+
+var visparams = {min: min, max: max, gamma: gamma};
+Map.addLayer(rgb, visparams, 'Original', false);
+
+var visparams = {min: min, max: max, gamma: 0.9};
+print(rgb.visualize(visparams).getDownloadURL({
+  name: 'rgb-' + date, 
+  format: 'png', 
+  scale: 30,
+  region: region
+}));
+
+
+// show pansharpened
+/*
+var left = 2; // in sigma
+var right = 5; // in sigma
+var gamma = 0.9;
+*/
+
+/*var median = upres.reduceRegion(ee.Reducer.median(), hbounds, 30).values();
+var sigma = upres.reduceRegion(ee.Reducer.stdDev(), hbounds, 30).values();
+var min = median.get(bidx).getInfo() - sigma.get(bidx).getInfo() * left;
+var max = median.get(bidx).getInfo() + sigma.get(bidx).getInfo() * right;
+*/
+print(min + ' ' + max)
+
+
+
+var visparams = {min: min, max: max, gamma: gamma};
+Map.addLayer(upres, visparams, 'Pansharpened'); // .polynomial([0.0, 1.2, -1.2])
+
+print(upres.visualize(visparams).getDownloadURL({
+  name: 'pan-' + date, 
+  format: 'png', 
+/*
+  crs: proj,
+  crs_transform: ts,
+*/
+  scale: 15,
+  region: region
+}));
+
+print(image1.getDownloadURL({
+  name: 'all-' + date, 
+  format: 'tif', 
+  scale: 30,
+  region: region
+}));
+
+print(image1.select(['pan']).getDownloadURL({
+  name: 'b8-' + date, 
+  format: 'tif', 
+  scale: 15,
+  region: region
+}));
+
+// DEM
+//var dem = ee.Image('USGS/NED');
+//var dem = ee.Image('CGIAR/SRTM90_V4');
+var dem = ee.Image('USGS/SRTMGL1_003');
+
+var radius = 120;
+var sigma = 30;
+var units = "meters";
+var normalize = false;
+var magnitude = 1;
+var k = ee.Kernel.gaussian(radius, sigma, units, normalize, magnitude)
+
+var gdem = dem;//.convolve(k);
+
+function radians(img) {
+  return img.toFloat().multiply(Math.PI).divide(180);
+}
+
+var terrain = ee.Algorithms.Terrain(gdem);
+var slope = radians(terrain.select('slope'));
+var aspect = radians(terrain.select('aspect'));
+var h = terrain.select('hillshade');
+
+addToMap(h, {}, "hillshade", false)
+addToMap(dem, {min:0, max:1000}, "dem", false)
+
+
+var mndwi = image1.normalizedDifference(['swir2', 'green'])
+Map.addLayer(mndwi, {min:-0.5, max:0.5}, 'mndwi')
+
+var water = mndwi.lt(-0.2);
+Map.addLayer(water.mask(water), {palette:['0000bb'], opacity:0.8}, 'water')

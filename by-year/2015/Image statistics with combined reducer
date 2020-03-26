@@ -1,0 +1,36 @@
+// Image statistics with combined reducer 
+
+var collection = ee.ImageCollection('LEDAPS/L7_L1T_SR')
+  .filterDate(ee.Date('2001-01-01'), ee.Date('2001-12-31'))
+  .filterBounds(ee.Geometry.Point(-104,54))
+  .sort('CLOUD_COVER');
+  
+var image = ee.Image(collection.first());
+print(image);
+Map.addLayer(image, {bands: ['B4', 'B3', 'B2'], min:0, max:4000}, 'L7 image');
+
+// use only spectral bands
+var bands = ['B1', 'B2', 'B3', 'B4', 'B5', 'B7'];
+// generate statistics
+// this will produce an exact solution, though the computation may timeout
+// for a faster, approximate result, set bestEffort=true
+// the reducers are combined for a single pass over the data
+var combinedDict = image.select(bands)
+  .reduceRegion({
+    reducer: ee.Reducer.mean()
+              .combine(ee.Reducer.sampleStdDev(), '', true),
+    geometry: image.geometry(), 
+    scale: 30,
+    maxPixels: 1000000000, // 1 billion
+    tileScale: 4
+});
+// observe that the output of reduceRegion is a Dictionary
+print(combinedDict);
+
+// turn the Dictionary into images, for normalization, etc.
+var means = ee.Image.constant(bands.map(function(b) {
+  return combinedDict.get(b+'_mean')
+}));
+var sds = ee.Image.constant(bands.map(function(b) {
+  return combinedDict.get(b+'_stdDev')
+}));

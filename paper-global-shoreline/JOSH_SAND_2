@@ -1,0 +1,1129 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #0000ff */ee.Geometry.Polygon(
+        [[[4.699058532714844, 52.938086610677495],
+          [4.698543548583984, 52.91200772363801],
+          [4.737339019775391, 52.91697634188064],
+          [4.759998321533203, 52.92142691169138],
+          [4.7852325439453125, 52.926704901509154],
+          [4.8058319091796875, 52.941397091363],
+          [4.810123443603516, 52.96704472979298],
+          [4.789695739746094, 52.969939475370104],
+          [4.730987548828125, 52.96776843436163]]]),
+    background = /* color: #999900 */ee.Geometry.MultiPolygon(
+        [[[[4.768795967102051, 52.9488706045721],
+           [4.768795967102051, 52.94853445350847],
+           [4.771156311035156, 52.94881888919388],
+           [4.77107048034668, 52.94910332300895]]],
+         [[[4.766843318939209, 52.9357975755421],
+           [4.7670793533325195, 52.935849306486915],
+           [4.767036437988281, 52.9361467582195],
+           [4.767658710479736, 52.9363019496162],
+           [4.767658710479736, 52.936418342798504],
+           [4.766650199890137, 52.9362631518192],
+           [4.766778945922852, 52.93592690278817]]],
+         [[[4.775404930114746, 52.95670477014408],
+           [4.774932861328125, 52.95649794572748],
+           [4.775662422180176, 52.95595502692749],
+           [4.776263236999512, 52.95621356053948]]],
+         [[[4.769482612609863, 52.943440152263925],
+           [4.769697189331055, 52.942703109771976],
+           [4.770298004150391, 52.94276776312454],
+           [4.770104885101318, 52.943491874072585]]],
+         [[[4.794802665710449, 52.96236620436914],
+           [4.794931411743164, 52.96192675884329],
+           [4.795618057250977, 52.9620818577742],
+           [4.795403480529785, 52.96254715122859]]],
+         [[[4.787313938140869, 52.951650215175874],
+           [4.787657260894775, 52.95144336658521],
+           [4.788944721221924, 52.95220611586156],
+           [4.78853702545166, 52.95241296080441]]],
+         [[[4.787850379943848, 52.95448135582524],
+           [4.7876787185668945, 52.95515356290781],
+           [4.787249565124512, 52.95505014711366],
+           [4.787378311157227, 52.95450721013701]]],
+         [[[4.7735595703125, 52.944733178930655],
+           [4.775447845458984, 52.944940059611056],
+           [4.775147438049316, 52.94540553752482],
+           [4.77330207824707, 52.94519865907035]]],
+         [[[4.8003387451171875, 52.96407224466702],
+           [4.800553321838379, 52.96363281648192],
+           [4.801111221313477, 52.96376206052942],
+           [4.800896644592285, 52.96420148740085]]],
+         [[[4.779396057128906, 52.94126778046478],
+           [4.779396057128906, 52.940879845451285],
+           [4.780082702636719, 52.940879845451285],
+           [4.7800397872924805, 52.941190193740326]]],
+         [[[4.775930643081665, 52.93580404191359],
+           [4.775909185409546, 52.93552598706734],
+           [4.776381254196167, 52.93551952065432],
+           [4.776381254196167, 52.9357975755421]]],
+         [[[4.789695739746094, 52.95249052740292],
+           [4.7900390625, 52.95238710524065],
+           [4.790339469909668, 52.952568093862354],
+           [4.79029655456543, 52.9528525030234]]],
+         [[[4.786584379289934, 52.953292039989016],
+           [4.785704612731934, 52.953731574060384],
+           [4.785361289978027, 52.95357644517573],
+           [4.786262512207031, 52.95311105518321]]],
+         [[[4.775362014770508, 52.961513158974064],
+           [4.7759199142456055, 52.96135805800303],
+           [4.7759199142456055, 52.96161655931229],
+           [4.775533676147461, 52.96171995940325]]],
+         [[[4.798879623413086, 52.959134882942784],
+           [4.797849655151367, 52.95887636679612],
+           [4.797935485839844, 52.95864370094264],
+           [4.7989654541015625, 52.95887636679612]]],
+         [[[4.798836708068848, 52.95998797526093],
+           [4.799351692199707, 52.960091379246684],
+           [4.799180030822754, 52.960427440492516],
+           [4.7986650466918945, 52.96034988812915]]]]),
+    aoiTexel = /* color: #009999 */ee.Geometry.Polygon(
+        [[[4.907798767089844, 53.078683379821705],
+          [4.92462158203125, 53.13031552109552],
+          [4.894752502441406, 53.17170009529054],
+          [4.857673645019531, 53.19206888353451],
+          [4.834825887889451, 53.18867505617557],
+          [4.7948455810546875, 53.15090984715167],
+          [4.7125374160009414, 53.079985532987905],
+          [4.699175916702643, 53.01013714343909],
+          [4.718112945556641, 52.97947094179596],
+          [4.7914544073829575, 52.99203793501316]]]),
+    background2 = /* color: #ff00ff */ee.Geometry({
+      "type": "GeometryCollection",
+      "geometries": [
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.868059158325195,
+                53.15763627237339
+              ],
+              [
+                4.868059158325195,
+                53.1556805422508
+              ],
+              [
+                4.86994743347168,
+                53.156349617845336
+              ],
+              [
+                4.86994743347168,
+                53.15758480693267
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.849948883056641,
+                53.14703308875152
+              ],
+              [
+                4.848489761352539,
+                53.145179836421704
+              ],
+              [
+                4.849863052368164,
+                53.14497391455962
+              ],
+              [
+                4.850978851318359,
+                53.14667274039506
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.867029190063477,
+                53.1697803909663
+              ],
+              [
+                4.867029190063477,
+                53.16864845734366
+              ],
+              [
+                4.868316650390625,
+                53.168802813686796
+              ],
+              [
+                4.868230819702148,
+                53.16983184178516
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.854154586791992,
+                53.139825547122804
+              ],
+              [
+                4.856472015380859,
+                53.13895026328812
+              ],
+              [
+                4.857845306396484,
+                53.14039189774768
+              ],
+              [
+                4.855442047119141,
+                53.14111269683457
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.857330322265625,
+                53.152901193548374
+              ],
+              [
+                4.857501983642578,
+                53.15187175948047
+              ],
+              [
+                4.859218597412109,
+                53.1518202871292
+              ],
+              [
+                4.859218597412109,
+                53.15305560652982
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.86119270324707,
+                53.16206206946114
+              ],
+              [
+                4.86170768737793,
+                53.160569700506315
+              ],
+              [
+                4.862909317016602,
+                53.16067262416904
+              ],
+              [
+                4.862565994262695,
+                53.16206206946114
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.874839988814756,
+                53.15923157730159
+              ],
+              [
+                4.875097413890899,
+                53.15825401408732
+              ],
+              [
+                4.87629873094204,
+                53.15851126972444
+              ],
+              [
+                4.8759554974952835,
+                53.15954027684688
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.864711761474609,
+                53.143686880552465
+              ],
+              [
+                4.866085052490234,
+                53.143223538868554
+              ],
+              [
+                4.866857528686523,
+                53.14394429043929
+              ],
+              [
+                4.865226745605469,
+                53.144201698783434
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.8714494705200195,
+                53.13531753541716
+              ],
+              [
+                4.870634078979492,
+                53.13454514603111
+              ],
+              [
+                4.8717498779296875,
+                53.134184692898984
+              ],
+              [
+                4.872651100158691,
+                53.13506007383132
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.861514568328857,
+                53.170136522698314
+              ],
+              [
+                4.8616862297058105,
+                53.16945479918256
+              ],
+              [
+                4.862759113311768,
+                53.169557701539325
+              ],
+              [
+                4.862480163574219,
+                53.17029087368873
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.860506057739258,
+                53.16713943091489
+              ],
+              [
+                4.860527515411377,
+                53.16693361435629
+              ],
+              [
+                4.861257076263428,
+                53.166946477920106
+              ],
+              [
+                4.861085414886475,
+                53.16725520229532
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.8020124435424805,
+                53.049804396736434
+              ],
+              [
+                4.8027849197387695,
+                53.04915945949388
+              ],
+              [
+                4.803428649902344,
+                53.04931424531228
+              ],
+              [
+                4.802699089050293,
+                53.04988178855698
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.798192977905273,
+                53.04970120742618
+              ],
+              [
+                4.798750877380371,
+                53.04905626863946
+              ],
+              [
+                4.800209999084473,
+                53.049391638013006
+              ],
+              [
+                4.799566268920898,
+                53.0499333830268
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.856815338134766,
+                53.05545363441493
+              ],
+              [
+                4.858059883117676,
+                53.05426709798707
+              ],
+              [
+                4.859476089477539,
+                53.05426709798707
+              ],
+              [
+                4.860935211181641,
+                53.0548861645476
+              ],
+              [
+                4.858875274658203,
+                53.055479428322215
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.767723083496094,
+                53.098765624658476
+              ],
+              [
+                4.767937660217285,
+                53.0978379673767
+              ],
+              [
+                4.769139289855957,
+                53.097966809861994
+              ],
+              [
+                4.7689032554626465,
+                53.098907348315095
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.762272834777832,
+                53.099061955408025
+              ],
+              [
+                4.761478900909424,
+                53.098430639614136
+              ],
+              [
+                4.762165546417236,
+                53.09808276776886
+              ],
+              [
+                4.762873649597168,
+                53.09879139263076
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.896597862243652,
+                53.08685917066594
+              ],
+              [
+                4.897584915161133,
+                53.086163237042264
+              ],
+              [
+                4.898529052734375,
+                53.087323120163475
+              ],
+              [
+                4.897756576538086,
+                53.0873488949889
+              ],
+              [
+                4.896683692932129,
+                53.087039596064834
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.8438334465026855,
+                53.04188389895098
+              ],
+              [
+                4.843790531158447,
+                53.04135495393744
+              ],
+              [
+                4.844799041748047,
+                53.04135495393744
+              ],
+              [
+                4.844777584075928,
+                53.0418709979303
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.847846031188965,
+                53.04287726594924
+              ],
+              [
+                4.847781658172607,
+                53.04251604423468
+              ],
+              [
+                4.848382472991943,
+                53.042554746706024
+              ],
+              [
+                4.848382472991943,
+                53.0429933722861
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.797420501708984,
+                53.060895806770326
+              ],
+              [
+                4.797420501708984,
+                53.060573422350444
+              ],
+              [
+                4.797806739807129,
+                53.06056052692347
+              ],
+              [
+                4.797763824462891,
+                53.06088291143986
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.797484874725342,
+                53.05616296123963
+              ],
+              [
+                4.797506332397461,
+                53.05590502556355
+              ],
+              [
+                4.797699451446533,
+                53.055917922384005
+              ],
+              [
+                4.7977423667907715,
+                53.056188754722314
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.8444342613220215,
+                53.04024543843512
+              ],
+              [
+                4.845077991485596,
+                53.040039013795905
+              ],
+              [
+                4.845592975616455,
+                53.040516369274165
+              ],
+              [
+                4.84722375869751,
+                53.03988419466787
+              ],
+              [
+                4.847803115844727,
+                53.04025833994228
+              ],
+              [
+                4.845378398895264,
+                53.041045324576665
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.804072380065918,
+                53.05081047956348
+              ],
+              [
+                4.8047590255737305,
+                53.05117163177257
+              ],
+              [
+                4.8041582107543945,
+                53.05148118840005
+              ],
+              [
+                4.803256988525391,
+                53.051094242268256
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                4.8041582107543945,
+                53.04848871452368
+              ],
+              [
+                4.804844856262207,
+                53.04866930073484
+              ],
+              [
+                4.804887771606445,
+                53.04897887533647
+              ],
+              [
+                4.804372787475586,
+                53.049133661803445
+              ],
+              [
+                4.803600311279297,
+                53.04892727972397
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -55.70137023925781,
+                6.0190193639146985
+              ],
+              [
+                -55.70137023925781,
+                6.001264710802948
+              ],
+              [
+                -55.67802429199219,
+                6.004679112142756
+              ],
+              [
+                -55.68077087402344,
+                6.0190193639146985
+              ]
+            ]
+          ],
+          "geodesic": true,
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -55.8270263671875,
+                6.022092225804584
+              ],
+              [
+                -55.82530975341797,
+                5.99682595708413
+              ],
+              [
+                -55.792694091796875,
+                5.99887461713699
+              ],
+              [
+                -55.795440673828125,
+                6.024823644000563
+              ]
+            ]
+          ],
+          "geodesic": true,
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -3.647235631942749,
+                50.281613299281645
+              ],
+              [
+                -3.6470210552215576,
+                50.281575591905465
+              ],
+              [
+                -3.646688461303711,
+                50.282305738515284
+              ],
+              [
+                -3.6469674110412598,
+                50.28239143573975
+              ]
+            ]
+          ],
+          "geodesic": true,
+          "evenOdd": true
+        },
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -3.645561933517456,
+                50.28556897989186
+              ],
+              [
+                -3.6452078819274902,
+                50.28544558407822
+              ],
+              [
+                -3.6448752880096436,
+                50.28584319166568
+              ],
+              [
+                -3.6452507972717285,
+                50.28596658644842
+              ]
+            ]
+          ],
+          "geodesic": true,
+          "evenOdd": true
+        }
+      ],
+      "coordinates": []
+    }),
+    geometry3 = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[149.01589393615723, -20.249877185201623],
+          [149.01220321655273, -20.270812448300138],
+          [149.04044151306152, -20.270892963091107],
+          [149.03546333312988, -20.249877185201623]]]),
+    background4 = /* color: #98ff00 */ee.Geometry.MultiPolygon(
+        [[[[149.0238118171692, -20.26849763018967],
+           [149.02379035949707, -20.26813530770723],
+           [149.02340412139893, -20.26813530770723],
+           [149.02342557907104, -20.26845737217784]]],
+         [[[149.02586102485657, -20.266172712890366],
+           [149.02589321136475, -20.266514910696497],
+           [149.0262472629547, -20.266514910696497],
+           [149.0261721611023, -20.266102260307186]]],
+         [[[149.02600049972534, -20.264964949895678],
+           [149.02612924575806, -20.265307150365217],
+           [149.02639746665955, -20.265196438531177],
+           [149.02632236480713, -20.264864302555157]]]]),
+    geometry4 = /* color: #d63000 */ee.Geometry.MultiPoint(),
+    aoiSuriname = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-56.009674072265625, 6.092763233165229],
+          [-56.009674072265625, 5.857840686914623],
+          [-55.224151611328125, 5.864671244842154],
+          [-55.2337646484375, 6.084569967945615]]]),
+    aoiTorcross = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-3.6502933502197266, 50.28111281712841],
+          [-3.643770217895508, 50.280015851536454],
+          [-3.6416244506835938, 50.28626821679269],
+          [-3.648233413696289, 50.286816630702724]]]),
+    aoiAruba = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-70.0509524345398, 12.568156219527742],
+          [-70.05829095840454, 12.560574560656105],
+          [-70.05451440811157, 12.558563917483298],
+          [-70.04889249801636, 12.565517324958497]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Get Sandy Coast
+// ===============
+// JFriedman
+// Sept. 5, 2016
+// ===============
+
+// FUNCTIONS 
+// =========
+
+// binary land mask based on OTSU method
+function FindLandMask(im) {
+  
+  var ndwi = im.normalizedDifference(['NIR','G']);
+  var edge = ee.Algorithms.CannyEdgeDetector(ndwi,1,1).focal_max(1);
+  var hist_info = ee.Dictionary(ndwi.mask(edge).reduceRegion(
+      ee.Reducer.histogram(255), ndwi.geometry(), 250).get('nd'))
+  var hist = hist_info.get('histogram')
+  var buckets = hist_info.get('bucketMeans')
+  
+  var len = ee.List(hist).length()
+  var counter = ee.List.sequence(1,len.subtract(1))
+  
+  // OTSU to build binary image
+  function OTSU(i) {
+   
+      var len = ee.List(hist).length()
+      var total = ee.Array(hist).accum(0).get([-1])
+      var q_L = ee.Array(ee.List(hist).slice(0,ee.Number(i))).divide(total).accum(0).get([-1])
+      var q_H = ee.Array(ee.List(hist).slice(ee.Number(i))).divide(total).accum(0).get([-1])
+    
+      var miu_L = ee.Array(ee.List(hist).slice(0,ee.Number(i))).divide(total)
+                    .multiply(ee.Array(ee.List.sequence(1,ee.Number(i))))
+                    .accum(0).get([-1]).divide(q_L)
+      var miu_H = ee.Array(ee.List(hist).slice(ee.Number(i))).divide(total)
+                    .multiply(ee.Array(ee.List.sequence(ee.Number(i),ee.Number(len).subtract(1))))
+                    .accum(0).get([-1]).divide(q_H)
+      
+      var sigma = q_L.multiply(q_H).multiply((miu_L.subtract(miu_H)).pow(2))
+      
+      return sigma
+    
+  }
+  
+  var out = counter.map(OTSU)
+  var maxxer = out.reduce(ee.Reducer.max())
+  var threshold_index = ee.Number(out.indexOf(maxxer)).subtract(1)
+  
+  var threshold = ee.List(buckets).get(threshold_index.round()); 
+  threshold = ee.Number(threshold)
+  var land = ndwi.where(ndwi.gte(threshold),1).where(ndwi.lt(threshold),0)
+  
+  return ee.Image(land).set({thresh:threshold})
+  
+}
+
+// build percentile image based on bbox
+function BuildPercentileImage(coll,bbox,date_range,bands,band_names,pct){
+  var ims = ee.ImageCollection(coll)
+        .filterBounds(bbox)
+        .filterDate(date_range[0],date_range[1])
+        .select(bands)
+  var bands2 = []
+  for (var i = 0; i < bands.length; i++) { 
+      bands2.push(ee.List(bands).get(i).getInfo()+'_p'+pct.toString())
+  }
+  var im = ims.reduce(ee.Reducer.percentile([pct])).select(bands2,band_names).clip(bbox)
+
+  return im
+}
+
+// build buffer around coastline
+function FindCoastline(land,foc_len) {
+  
+  var cl_buffer = land.subtract(land.focal_min(foc_len));
+  cl_buffer = cl_buffer.mask(cl_buffer);
+  return cl_buffer
+}
+
+// add spectral indices to the image
+function addIndices(im){
+  
+  var ndwi = im.normalizedDifference(['NIR','G']).select(['nd'],['ndwi'])
+  ndwi = ndwi.where(ndwi.gte(0.2),ndwi.gte(0.2).multiply(10))
+  var ndvi = im.normalizedDifference(['NIR','R']).select(['nd'],['ndvi'])
+  ndvi = ndvi.where(ndvi.gte(0.1),ndvi.gte(0.1).multiply(10))
+  var out = im.addBands(ndwi).addBands(ndvi)
+  
+  return out
+}
+
+// save analysis to "Assets"
+function SaveAnalysis(out_im,out_name){
+  Export.image.toAsset({
+    image: out_im,
+    assetId: 'users/joshuaalbertfriedman/SandyCoasts/'+out_name,
+    description: out_name,
+    scale: 30,
+    crs: 'EPSG:3857',
+    region: out_im.geometry()
+  });
+}
+
+// get OSM sandy coasts based on geometry
+function OSMSand(bounds){
+  
+  var OSM_ft = '1Bs8deprihSf1KUzUsL_pVVnoQ3_hrbRBe0cbgSxa'
+  var OSM = ee.FeatureCollection('ft:'+OSM_ft)
+              .filterBounds(bounds)
+              .map(function(ft){
+                return ee.Feature(ft.geometry()
+                        .intersection(bounds,ee.ErrorMargin(1)))
+              })
+              
+  return OSM
+  
+}
+
+// TRAIN CLASSIFIER
+// ================
+
+var train_aoi = ee.FeatureCollection([aoiTexel, aoiSuriname, aoiAruba]); // multiple training images in which to find OSM sand
+var train_aoiOSM = ee.FeatureCollection([aoiTexel, aoiSuriname, aoiAruba]); // use for OSM sand training
+var back_poly = background2 // non sand polygons
+
+var pct = 15
+
+// select bands + image for training
+var coll = 'COPERNICUS/S2'
+var date_range = ['2015-01-01','2017-08-01']
+var bands = ['B2','B3','B4','B5','B6','B7','B8','B8A']
+var band_names = ['B','G','R','R1','R2','R3','NIR','R4']
+var training_bands = ['B','G','R','R1','R2','R3','R4','ndwi','ndvi']
+
+// var coll = 'LANDSAT/LC8_L1T_TOA'
+// var date_range = ['2013-01-01','2017-01-01]
+// var bands = ['B2','B3','B4','B5','B6','B7']
+// var band_names = ['B','G','R','NIR','SWIR1','SWIR2']
+// var training_bands = ['B','G','R','NIR','ndwi','ndvi']
+
+// var coll = 'LANDSAT/LT5_L1T_TOA'
+// var date_range = ['1985-01-01','1995-01-01']
+// var bands = ['B1','B2','B3','B4','B5']
+// var band_names = ['B','G','R','NIR','SWIR']
+// var training_bands = ['B','G','R','NIR','ndwi','ndvi']
+
+// get image for training
+var im_train = BuildPercentileImage(coll,train_aoi,date_range,bands,band_names,pct)
+Map.addLayer(ee.Image(im_train).select('R','G','B'),{min:500,max:2000,gamma:1.5},'Sentinel 2 training image')
+
+im_train = addIndices(im_train)
+
+// load OSM global sandy coasts
+var OSM_ft = '1Bs8deprihSf1KUzUsL_pVVnoQ3_hrbRBe0cbgSxa'
+var OSM = ee.FeatureCollection('ft:'+OSM_ft)
+            .filterBounds(train_aoiOSM)
+            .map(function(ft){
+              var f = ft.geometry()
+                      .intersection(train_aoi,ee.ErrorMargin(1))
+              var a = ee.Number(ft.get('age'))
+              return ee.Feature(f.buffer(a.multiply(-10),5)).set('class',0)
+              
+            })
+
+// manually define "sand" vs. "not sand"
+var sand = OSM
+var bad = ee.FeatureCollection([ee.Feature(back_poly).set('class', 1)])
+var polygons = sand.merge(bad)
+
+// train a randomForest with default parameters
+var training = im_train.sampleRegions(polygons,['class'],10);
+var trained = ee.Classifier.cart() 
+                .train(training, 'class', training_bands);
+// print(trained.confusionMatrix())
+
+// // find land
+// var land = FindLandMask(im_train,train_aoi);
+// im_train = im_train.mask(land)
+
+// // check the classification on the training image (debug)
+// var classified = im_train.mask(land).select(training_bands).classify(trained);
+// var loc = classified.eq(0)//.focal_max(1)
+// var vis = {bands:['R','G','B'],min:0,max:2500}
+// Map.addLayer(im_train,vis,'Training',true)
+// Map.addLayer(loc.mask(loc),
+//           {min:0, max:1, palette:['fcd046']},
+//           'Sand (Trained)', true)
+// Map.addLayer(OSM,
+//           {color:'00FF00',opacity:0.25},
+//           'OSM Beach', false)
+
+// building binary sandy coastline
+// var cl = FindCoastline(land,5)
+// Map.addLayer(cl,{palette:'FF0000'},'Coastline Buffer')
+// var sand_cl = cl.updateMask(loc.focal_max(2))
+// Map.addLayer(sand_cl,{min:0,max:1,palette:['00FF00']},'Sandy Coastline')
+
+// ANALYZE BOUNDING BOX
+// ====================
+
+// define analysis area
+var analysis_area = ee.Geometry(Map.getBounds(true))
+
+// // get search extents (based on OSM search grid)
+var ft_boxes = '1a4FCecfmn1pYrt6csiWIxZOKzB9ykJvPkxTU4B78'
+var boxes = ee.FeatureCollection('ft:'+ft_boxes)
+                  .filterBounds(analysis_area)
+Map.addLayer(boxes,{color:'000000',opacity:0.1},'Search Boxes',false) // visualize the bounding boxes
+boxes = boxes.filterBounds(analysis_area)
+
+
+//Map.centerObject(boxes)
+
+// // analyze small boxes
+var sandy_coasts = boxes.map(function(box){
+        
+        // get box name
+        var box2_name = ee.String(box.get('name'));
+        
+        // get box geometry
+        var bounds = box.geometry();
+        bounds = ee.Geometry(Map.getBounds(true))
+        
+        // build image
+        var im = BuildPercentileImage(coll,bounds,date_range,bands,band_names,pct)
+        im = addIndices(im)
+        im = im.clip(bounds);
+        
+        // find land
+        var land = FindLandMask(im);
+        var threshold = ee.Number(land.get('thresh')).abs()
+        
+        // TESTING!
+        var foc_len = 60
+        var cl_buffer = land.subtract(land.focal_min(foc_len))
+        cl_buffer = cl_buffer.mask(cl_buffer)
+    
+        // clip image based on land
+        im = im.mask(cl_buffer).clip(bounds)
+        
+        // // clip image based on land
+        // im = im.mask(land).clip(bounds)
+        
+        // classify the image based on the training
+        var classified = im.select(training_bands).classify(trained);
+        var sand = classified.eq(0).focal_max(1).select(['classification'],['sand']);
+        
+        // check accuracy of classification
+        var OSM_sand = OSMSand(bounds)//.filterMetadata('age','less_than',2)
+        var res = 30
+        var summer = ee.Number(sand.reduceRegion(ee.Reducer.sum(),OSM_sand,res).get('sand'))
+        var counter = ee.Number(sand.reduceRegion(ee.Reducer.count(),OSM_sand,res).get('sand'))
+
+        // export the sand classification as an asset
+        var out_im = im.select(['R','G','B']).addBands(sand);
+        out_im = ee.Image(out_im).set({
+                                        name:box2_name,
+                                        abs_thresh:threshold,
+                                        count:counter,
+                                        sum:summer,
+                                        pct:summer.divide(counter)
+                                      })
+        
+        return out_im
+})
+print(sandy_coasts)
+
+// filter based on OTSU threshold value (remove "water-only boxes")
+var land_thresh = 0.3;
+sandy_coasts = ee.ImageCollection(sandy_coasts).filterMetadata(
+                  'abs_thresh','less_than',land_thresh)
+
+// // determine total accuracy of classification (i.e. OSM = benchmark)
+// var total_sand = sandy_coasts.aggregate_sum('sum')
+// var total_OSM_sand = sandy_coasts.aggregate_sum('count')
+// var total_accuracy = ee.Number(total_sand).divide(ee.Number(total_OSM_sand))
+// // print(total_accuracy)
+
+// load DEM (mosaic of two sources)
+//var dem = ee.ImageCollection([ee.Image('USGS/SRTMGL1_003'),
+//  ee.Image('NASA/ASTER_GED/AG100_003').select('elevation')])
+//  .mosaic().clip(analysis_area)
+//Map.addLayer(dem,{},'dem',false)
+
+// visualize results
+// Map.addLayer(sandy_coasts.mosaic().select(['R','G','B']),
+//             {min:500,max:2000,gamma:1.5},
+//             'Percentile Image - Mosaic', true)
+
+var sand = sandy_coasts.mosaic().select(['sand']) //.where(dem.gte(15),0)
+Map.addLayer(sand.mask(sand),
+           {min:0,max:1,palette:'fcd046'},
+           'Sand - Mosaic',true)
+           
+var OSM_sand = OSMSand(analysis_area)//.filterMetadata('age','less_than',2)
+Map.addLayer(OSM_sand,
+            {color:'00FF00',opacity:0.5},
+            'Sand - OSM Beach within Analysis area', false)
+            
+var OSM_sand = OSMSand(train_aoiOSM)//.filterMetadata('age','less_than',2)
+Map.addLayer(OSM_sand,
+            {color:'00FF00',opacity:0.5},
+            'Sand - OSM Beach Training area', false)

@@ -1,0 +1,28 @@
+var assets = require('users/gena/packages:assets')
+var animation = require('users/gena/packages:animation')
+
+var bounds = ee.Geometry(Map.getBounds(true))
+
+var images = assets.getImages(bounds.centroid(1), {
+  missions: ['S2'],
+  filterMasked: true,
+  filter: ee.Filter.date('2016-01-01', '2019-01-01')
+})
+
+print(images.size())
+
+Map.addLayer(images.count(), { min: 100, max: 500 }, 'count', false)
+
+images = assets.getMostlyCleanImages(images, bounds, {
+  cloudFrequencyThresholdDelta: 0.25,
+  percentile: 85
+})
+
+print(images.size())
+
+images = images.sort('system:time_start')
+
+animation.animate(images, {
+  maxFrames: 100,
+  vis: { min: 0.05, max: 0.5, gamma: 1.5 }
+})

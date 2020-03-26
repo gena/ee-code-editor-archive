@@ -1,0 +1,65 @@
+// GenerateFrequency {
+ /*=== Dataset creation function ===============================================================*\
+  *   GenerateFrequency = function(StartDate, EndDate, TotalSteps)                              *
+  *                                                                                             *
+  *   This function is used to create an ImageCollection of evenly spaced Frequency images      *
+  *                                                                                             *
+  * Parameters:                                                                                 *
+  *   StartDate: Day on which to start the imageCollection (inclusive, required)                *
+  *   EndDate: Day on which to end the imageCollection (exclusive, required)                    *
+  *   TotalSteps: Number of "years" to include in the final imageCollection (required)          *
+  *                                                                                             *
+ \*=============================================================================================*/
+var GenerateFrequency = function(StartDate, EndDate, TotalSteps) {                
+  var NDVI_List = ee.List([]);
+  for(var i = 1; i <= TotalSteps; i++) {
+    var NDVI_STACK = ee.ImageCollection("MODIS/MCD43A4_NDVI").select('NDVI').filterDate(StartDate, EndDate);
+    var NDVI_SUM =  NDVI_STACK.sum();                                                                                                                     
+    var NDVI_IMAGE = ee.Image(ee.Number.parse(ee.Date(EndDate).format('YYYY'))).addBands(NDVI_SUM);
+    var NDVI_List = NDVI_List.add(NDVI_IMAGE);
+    var StartDate = ee.Date(StartDate).advance(1, 'year');
+    var EndDate = ee.Date(EndDate).advance(1, 'year');
+  }
+  return ee.ImageCollection(NDVI_List);
+};
+
+//MannKendallStat {
+ /*===Mann Kendalls S statistic=========================================================================*\
+  *                                                                                                     *
+  *   This function returns the Mann Kendalls S statistic, assuming that n is less than 40,             *
+  * the significance of a calculated S statistic is found in table A.30 of Nonparametric                *
+  * Statistical Methods, second edition by Hollander & Wolfe.                                           *
+  *                                                                                                     *
+  * reproduced for conveniance:                                                                         *
+  * https://docs.google.com/document/d/1QIckSWt8c0aqIAQkssrecrunT3ej0sOB4YaOY8Gwqjw/edit?usp=sharing    *
+ \*=====================================================================================================*/
+var MannKendallStat = function(imageCollection) {
+  var TimeSeriesList = imageCollection.toList(50);
+  var NumberOfItems = TimeSeriesList.length().getInfo();
+  var ConcordantArray = [];
+  var DiscordantArray = [];
+  for (var k = 0; k <= NumberOfItems-2; k += 1) {
+    var CurrentImage = ee.Image(TimeSeriesList.get(k));
+    var l = k + 1;
+    for (l; l <= NumberOfItems-1; l += 1) {
+      var nextImage = ee.Image(TimeSeriesList.get(l));
+      var Concordant = CurrentImage.lt(nextImage);
+      ConcordantArray.push(Concordant);
+      var Discordant = CurrentImage.gt(nextImage);
+      DiscordantArray.push(Discordant);
+    }
+  }
+  var ConcordantSum = ee.ImageCollection(ConcordantArray).sum();
+  var DiscordantSum = ee.ImageCollection(DiscordantArray).sum();
+  var MKSstat = ConcordantSum.subtract(DiscordantSum);   
+  return MKSstat;
+};
+
+var yearlyNDVI = GenerateFrequency('2002-01-01', '2003-01-01', 15);
+
+//Print out IC
+print('IC', yearlyNDVI);
+
+var test = MannKendallStat(yearlyNDVI.select('NDVI'));
+print(test)
+Map.addLayer(test.mask(test.abs().gte(52)), {}, 'Sig trend @ 0.49');

@@ -1,0 +1,18 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+l8 = l8
+  .select(['B6', 'B5', 'B3'])
+  //.filterDate('2013-06-06', '2014-06-06')
+
+function getPercentile(ic, percentile) {
+    return ic.reduce(ee.Reducer.percentile([percentile]))
+}
+
+Map.addLayer(l8.count(), {min:0, max:50}, 'count', false)
+  
+for(var i = 5; i < 30; i+= 2) {
+  var im = getPercentile(l8, i);
+  Map.addLayer(im, {min:0.05, max:0.2}, i + '%', false)
+  Map.addLayer(im.normalizedDifference(['B3', 'B5']), {min:-0.5, max:0.5}, i + '% NDWI', false)
+}

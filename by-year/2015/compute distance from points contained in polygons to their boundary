@@ -1,0 +1,92 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var polygons = /* color: d63000 */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Polygon(
+                [[[-123.134765625, 35.53222622770337],
+                  [-127.44140625, 45.1510532655634],
+                  [-131.66015625, 40.17887331434696]]]),
+            {
+              "system:index": "0"
+            }),
+        ee.Feature(
+            ee.Geometry.Polygon(
+                [[[-113.90625, 37.02009820136811],
+                  [-104.94140625, 38.61687046392973],
+                  [-110.7421875, 48.22467264956519],
+                  [-115.224609375, 41.44272637767212]]]),
+            {
+              "system:index": "1"
+            }),
+        ee.Feature(
+            ee.Geometry.Polygon(
+                [[[-88.9453125, 34.161818161230386],
+                  [-81.5625, 43.32517767999296],
+                  [-89.912109375, 44.59046718130883],
+                  [-98.61328125, 44.77793589631623],
+                  [-97.20703125, 39.50404070558415]]]),
+            {
+              "system:index": "2"
+            })]),
+    points = /* color: 98ff00 */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Point([-128.583984375, 41.64007838467894]),
+            {
+              "system:index": "0"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-123.22265625, 43.644025847699496]),
+            {
+              "system:index": "1"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-112.5, 41.37680856570233]),
+            {
+              "system:index": "2"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-110.478515625, 43.389081939117496]),
+            {
+              "system:index": "3"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-110.21484375, 39.50404070558415]),
+            {
+              "system:index": "4"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-94.658203125, 41.3108238809182]),
+            {
+              "system:index": "5"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-86.923828125, 41.705728515237524]),
+            {
+              "system:index": "6"
+            })]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// compute distance from points contained in polygons to their boundary
+
+var joinSaveAll = ee.Join.saveAll({matchesKey: 'polygon', measureKey: 'distance'});
+var intersection = joinSaveAll.apply(points, polygons, 
+  ee.Filter.intersects({leftField: '.geo', rightField: '.geo', maxError: 1e-5}));
+
+Map.addLayer(intersection, {}, 'intersected points')
+
+/**
+ * Given point computes distance to polygon it contained in
+ */
+var computeDistance = function(pt) { 
+  var p = ee.Feature(ee.List(pt.get('polygon')).get(0)).geometry();
+  var distance = p.buffer(1).difference(p).distance(pt.geometry());
+  return pt.set("distance_to_polygon", distance)
+};
+
+var intersection = intersection.map(computeDistance)
+print(intersection)
+
+// show distances
+Map.addLayer(ee.FeatureCollection(intersection.map(function(p){
+  return p.buffer(p.get('distance_to_polygon'))
+})))
+
+

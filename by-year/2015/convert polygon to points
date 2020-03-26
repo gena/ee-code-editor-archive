@@ -1,0 +1,20 @@
+// convert polygon to points
+
+var fc = ee.FeatureCollection([
+  ee.Geometry.Polygon(-72.93411, 41.30902, -72.93411, 41.31902, -72.94411, 41.31902)
+]);
+
+var coords = ee.Feature(fc.first()).geometry().coordinates().get(0);
+
+print(ee.Geometry.MultiPoint(coords.getInfo())) // works
+
+print(ee.Geometry.MultiPoint(coords)) // fails, but needed for the function below (to be used in map()
+
+var toPoints = function(f) {
+  var coords = ee.Feature(f).geometry().coordinates().get(0);
+  return ee.MultiPoint(coords);
+}
+
+Map.setCenter(-72.94, 41.32, 13);
+Map.addLayer(fc);
+Map.addLayer(fc.map(toPoints));

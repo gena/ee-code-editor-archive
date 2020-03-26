@@ -1,0 +1,72 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.MultiPoint();
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var app = function() {
+  // add basins
+  var basins = ee.FeatureCollection('ft:1IHRHUiWkgPXOzwNweeM89CzPYSfokjLlz7_0OTQl')
+  
+  Map.addLayer(ee.Image().float().paint(basins, 1), {palette:['000000']}, 'basins (bg)', true, 0.4)
+  Map.addLayer(ee.Image().float().paint(basins, 1, 1), {palette:['ffffff']}, 'basins', true, 0.8)
+  
+  // create map feature inspector
+  var inspector = new MapFeatureInspector(Map, basins)
+  
+  // subscribe to selection
+  inspector.onSelect(function(selection) {
+    print('Current selection: ', selection)
+  })
+  
+  Map.setOptions("HYBRID")
+}
+
+
+
+/***
+ * Listens to map selection, adds selection layer, fires feature selection events
+ */
+var MapFeatureInspector = function(map, features) {
+  // set private fields
+  this.features = features
+  this.map = map
+  this.selectionLayer = ui.Map.Layer({name: 'selection', visParams: { color:'yellow' }})
+  this.selection = null
+  this.listeners = []
+
+  inspector = this;
+  
+  /***
+   * Initializes map feature inspector
+   */
+  this.initialize = function() {
+    this.map.style().set('cursor', 'crosshair');
+    this.map.onClick(this.onMouseClick)
+    this.map.layers().add(this.selectionLayer)
+  }
+  
+  /***
+   * Mouse click event handler
+   */
+  this.onMouseClick = function(coords) {
+    var selection = ee.FeatureCollection(inspector.features).filterBounds(ee.Geometry.Point(coords.lon, coords.lat))
+    inspector.selectionLayer.setEeObject(selection)
+    
+    inspector.selection = selection
+    
+    // fire listeners
+    inspector.listeners.map(function(listener) {
+      listener(selection)
+    })
+  }
+  
+  /***
+   * Feature selection event handler 
+   */
+  this.onSelect = function(listener) {
+    inspector.listeners.push(listener)
+  }
+  
+  this.initialize()
+}
+
+
+app()

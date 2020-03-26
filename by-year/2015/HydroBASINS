@@ -1,0 +1,41 @@
+var basinsAll = 
+  { 
+    3: ee.FeatureCollection('ft:13dShZ5yGqCEqk3dsJvYEL3lsa1hEmpMRldxK7aSa'),  // level 3
+    4: ee.FeatureCollection('ft:1FxGTqGlr_XTSOL8r1zp-PIOCO3S3_6i2gI-KQeQZ'),  // level 4
+    5: ee.FeatureCollection('ft:1GdJzOuuAFwgcBl_hM75j6DZ83S2U1u9Z2LWJ8n_L'),  // level 5
+  }
+
+function getBasinsImage(basinsAll, level) {
+  var basins = basinsAll[level]
+  
+  // var basinsImage = basins.reduceToImage(['UP_AREA'], ee.Reducer.sum())
+
+  var basinsImage = ee.Image(0).toFloat()
+    .paint({featureCollection:basins, color:'UP_AREA'}) // fill
+    //.paint({featureCollection:basins, color: 1, width: 1.2}) // outline
+    
+  return basinsImage//.randomVisualizer();
+}
+
+var style = '\
+  <RasterSymbolizer>\
+    <ColorMap  type="intervals" extended="false" >\
+      <ColorMapEntry color="#f7fcf0" quantity="0" label=""/>\
+      <ColorMapEntry color="#e0f3db" quantity="0.1" label=""/>\
+      <ColorMapEntry color="#ccebc5" quantity="0.2" label="" />\
+      <ColorMapEntry color="#a8ddb5" quantity="0.3" label="" />\
+      <ColorMapEntry color="#7bccc4" quantity="0.4" label="" />\
+      <ColorMapEntry color="#4eb3d3" quantity="0.5" label="" />\
+      <ColorMapEntry color="#2b8cbe" quantity="0.6" label="" />\
+      <ColorMapEntry color="#0868ac" quantity="0.7" label="" />\
+      <ColorMapEntry color="#084081" quantity="0.8" label="" />\
+      <ColorMapEntry color="#084081" quantity="0.9" label="" />\
+      <ColorMapEntry color="#084081" quantity="1.0" label="" />\
+    </ColorMap>\
+  </RasterSymbolizer>';
+
+var basins3 = getBasinsImage(basinsAll, 3).divide(6000000)
+
+Map.addLayer(basins3.sldStyle(style).mask(basins3.neq(0)), {opacity:0.85})
+
+Map.addLayer(basinsAll[3].filterBounds(geometry), {}, 'selection')

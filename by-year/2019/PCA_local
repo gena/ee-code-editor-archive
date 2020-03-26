@@ -1,0 +1,160 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var images = ee.ImageCollection("COPERNICUS/S2");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/***
+ * Generates regular grid using given bounds, specified as geometry.
+ */
+var generateGrid = function(bounds, dx, dy) {
+  bounds = bounds.bounds().getInfo().coordinates[0]
+  var xmin = bounds[0][0];
+  var xmax = bounds[1][0];
+  var ymin = bounds[0][1];
+  var ymax = bounds[2][1];
+
+  var xx = ee.List.sequence(xmin, xmax, dx)
+  var yy = ee.List.sequence(ymin, ymax, dy)
+  
+  var cells = xx.map(function(x) {
+    return yy.map(function(y) {
+      var x1 = ee.Number(x).subtract(ee.Number(dx).multiply(0.5))
+      var x2 = ee.Number(x).add(ee.Number(dx).multiply(0.5))
+      var y1 = ee.Number(y).subtract(ee.Number(dy).multiply(0.5))
+      var y2 = ee.Number(y).add(ee.Number(dy).multiply(0.5))
+      
+      var coords = ee.List([x1, y1, x2, y2]);
+      var rect = ee.Algorithms.GeometryConstructors.Rectangle(coords);
+      return ee.Feature(rect)
+    })
+  }).flatten();
+
+  return ee.FeatureCollection(cells);
+}
+
+
+function PCA(image, region, scale) {
+  // Get some information about the input to be used later.
+  //var scale = image.projection().nominalScale();
+  var bandNames = image.bandNames();
+  
+  // Mean center the data to enable a faster covariance reducer
+  // and an SD stretch of the principal components.
+  var meanDict = image.reduceRegion({
+      reducer: ee.Reducer.mean(),
+      geometry: region,
+      scale: scale,
+      maxPixels: 1e10
+  });
+  var means = ee.Image.constant(meanDict.values(bandNames));
+  var centered = image.subtract(means);
+
+  // This helper function returns a list of new band names.
+  var getNewBandNames = function(prefix) {
+    var seq = ee.List.sequence(1, bandNames.length());
+    return seq.map(function(b) {
+      return ee.String(prefix).cat(ee.Number(b).int());
+    });
+  };
+  
+  // This function accepts mean centered imagery, a scale and
+  // a region in which to perform the analysis.  It returns the
+  // Principal Components (PC) in the region as a new image.
+  var getPrincipalComponents = function(centered, scale, region) {
+    
+    // Collapse the bands of the image into a 1D array per pixel.
+    var arrays = centered.toArray();
+  
+    // Compute the covariance of the bands within the region.
+    var covar = arrays.reduceRegion({
+      reducer: ee.Reducer.centeredCovariance(),
+      geometry: region,
+      scale: scale,
+      maxPixels: 1e10
+    });
+
+    // Get the 'array' covariance result and cast to an array.
+    // This represents the band-to-band covariance within the region.
+    var covarArray = ee.Array(covar.get('array'));
+    //print('covarArray')
+    //print(covarArray)
+    
+    // Perform an eigen analysis and slice apart the values and vectors.
+    var eigens = covarArray.eigen();
+    //print('eigens')
+    //print(eigens)
+    
+    // This is a P-length vector of Eigenvalues.
+    var eigenValues = eigens.slice(1, 0, 1);
+    //print('eigenValues')
+    //print(eigenValues)
+    
+    // This is a PxP matrix with eigenvectors in rows.
+    var eigenVectors = eigens.slice(1, 1);
+    //print('eigenVectors')
+    //print(eigenVectors)
+
+    // Convert the array image to 2D arrays for matrix computations.
+    var arrayImage = arrays.toArray(1);
+    //print('arrayImage')
+    //print(arrayImage)
+    
+    // Left multiply the image array by the matrix of eigenvectors.
+    var principalComponents = ee.Image(eigenVectors).matrixMultiply(arrayImage);
+    //print('principalComponents')
+    //print(principalComponents)
+
+    // Turn the square roots of the Eigenvalues into a P-band image.
+    var sdImage = ee.Image(eigenValues.sqrt())
+      .arrayProject([0]).arrayFlatten([getNewBandNames('sd')]);
+    //print('sdImage')
+    //print(sdImage) 
+    
+    // Turn the PCs into a P-band image, normalized by SD.
+    var result = principalComponents
+      // Throw out an an unneeded dimension, [[]] -> [].
+      .arrayProject([0])
+      // Make the one band array image a multi-band image, [] -> image.
+      .arrayFlatten([getNewBandNames('pc')])
+      // Normalize the PCs by their SDs.
+      .divide(sdImage);
+    //print('result')
+    //print(result)
+    
+    return result;
+  };
+  
+  // Get the PCs at the specified scale and in the specified region
+  var pcImage = getPrincipalComponents(centered, scale, region);
+  return pcImage;
+}
+
+var bounds = ee.Geometry(Map.getBounds(true))
+
+var image = images
+  .filterBounds(bounds)
+  .toList(1,2).get(0)
+  
+image = ee.Image(image).resample('bicubic').divide(10000).select(['B8','B4','B3'])
+
+Map.addLayer(image, {min:0, max:0.5})
+
+var scale = Map.getScale()
+print(image.toArray().reduceRegion(ee.Reducer.covariance(), bounds, scale))
+
+var dx = 0.003
+var dy = 0.003
+
+var grid = generateGrid(bounds, dx, dy)
+
+
+Map.addLayer(ee.Image().paint(grid, 1, 1), {palette: ['ffffff']}, 'grid')
+
+// for ever cell run PCA
+var results = grid.map(function(cell) {
+  return PCA(image, cell.geometry(), scale).clip(cell)
+})
+
+results = ee.ImageCollection(results).mosaic()
+var edges = ee.Algorithms.CannyEdgeDetector(results.select(0), 0.99,0)
+Map.addLayer(edges.mask(edges))
+
+Map.addLayer(ee.Image([results.select(0), results.select(1), results.select(2)]))

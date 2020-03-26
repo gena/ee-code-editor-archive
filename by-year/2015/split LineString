@@ -1,0 +1,105 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var lineString1 = /* color: d63000 */ee.Geometry.LineString(
+        [[-121.8218994140625, 45.440862671781794],
+         [-121.4263916015625, 45.50057194157226],
+         [-121.07757568359375, 45.42351587434777],
+         [-120.93351314512665, 45.48056068722619],
+         [-120.87158203125, 45.44857064811589],
+         [-120.46293667772983, 45.47065663991905],
+         [-119.9432373046875, 45.592900208269846]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// split LineString
+
+/**
+ * Simple 2D Euclidean distance
+ */
+var getDistance = function(pt1, pt2) {
+  var dx = pt2[0] - pt1[0];
+  var dy = pt2[1] - pt1[1];
+  
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/** 
+ * Splits LineString into a set of segments.
+ */
+var explodeLineString = function(lineString, segmentLength, srs) {
+  var length = lineString.length(1e-5, srs).getInfo()
+  var coords = lineString.coordinates().getInfo()
+  
+  // first point
+  var pt1 = coords[0];
+  var ipt2 = 1;
+  
+  var currentLength = 0.0; 
+  
+  var segments = [];
+  var segmentId = 0;
+  while(currentLength < length && ipt2 < coords.length) 
+  {
+    var segmentPoints = [];
+    segmentPoints.push(pt1);
+    
+    var currentSegmentLength = 0.0;
+    
+    while(currentSegmentLength < segmentLength) 
+    {
+      if(ipt2 === coords.length) {
+        break;
+      }
+      
+      var pt2 = coords[ipt2];
+      var distance = getDistance(pt1, pt2);
+      
+      if(currentSegmentLength + distance > segmentLength) {  // split
+        // hypotenuse lengths
+        var h1 = segmentLength - currentSegmentLength; // short
+        var h2 = distance; // long
+        
+        // cathetus2
+        var dx2 = pt2[0] - pt1[0];
+        var dy2 = pt2[1] - pt1[1];
+
+        // cathetus1
+        var ratio = h1 / h2;
+        var x1 = pt1[0] + dx2 * ratio;
+        var y1 = pt1[1] + dy2 * ratio;
+
+        currentSegmentLength += h1;
+        
+        pt1 = [x1, y1]
+        segmentPoints.push(pt1);
+      } else { // next
+        currentSegmentLength += distance;
+
+        segmentPoints.push(pt2);
+        pt1 = pt2;
+        ipt2++;
+      }
+    }
+    
+    currentLength += currentSegmentLength;
+    segmentId++;
+    
+    segments.push(ee.Feature(ee.Geometry.LineString(segmentPoints), {id:segmentId}))
+  }
+  
+  return segments;
+};
+
+
+var srs = ee.Projection('EPSG:4326'); // WGS84
+var step = 0.2; // [degrees]
+
+var segments = explodeLineString(lineString1, step, srs);
+
+// TODO: perform analysis (compute metrics) for every segment
+// segments.map() { ... compute Hausdorff distance ... }
+
+var colors = ['a6cee3', '1f78b4', 'b2df8a', '33a02c', 'fb9a99', 'e31a1c', 'fdbf6f', 'ff7f00', 'cab2d6', '6a3d9a', 'ffff99'];
+
+var fc = ee.FeatureCollection(segments);
+var segmentsImage = fc.reduceToImage(['id'], ee.Reducer.mean()).focal_max(5);
+Map.addLayer(segmentsImage.select('mean'), {min:0, max:fc.aggregate_count('id').getInfo(), palette:colors}, 'segments as raster');
+
+Map.centerObject(lineString1)

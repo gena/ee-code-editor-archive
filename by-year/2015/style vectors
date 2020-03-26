@@ -1,0 +1,23 @@
+// style vectors
+//print(ee.Geometry(Map.getBounds(true)).centroid(1e-3));
+Map.setCenter(140.46, -25.20, 5)
+
+var fc = new ee.FeatureCollection('ft:1xfvGA2mK7nNrt0S7asJR-lZXDa5fOPAgCsxUlM17');
+
+var rivers = [
+fc.filter(ee.Filter.gt('UP_CELLS', 0).and(ee.Filter.lte('UP_CELLS', 1000))),
+fc.filter(ee.Filter.gt('UP_CELLS', 1000).and(ee.Filter.lte('UP_CELLS', 10000))), 
+fc.filter(ee.Filter.gt('UP_CELLS', 10000).and(ee.Filter.lte('UP_CELLS', 100000))),
+fc.filter(ee.Filter.gt('UP_CELLS', 100000).and(ee.Filter.lte('UP_CELLS', 500000))),
+fc.filter(ee.Filter.gt('UP_CELLS', 500000).and(ee.Filter.lte('UP_CELLS', 2000000))),
+fc.filter(ee.Filter.gt('UP_CELLS', 2000000).and(ee.Filter.lte('UP_CELLS', 5000000)))
+];
+
+var colors = ['3f9fff', '337ddb', '285bb7', '12176f', '0d065d', '0d065d' ];
+var rivers_image = ee.Image(0).mask(0).toByte();
+var count = colors.length;
+for(var i=0; i<count; i++) {
+  rivers_image = rivers_image.paint(rivers[i], i, i*0.7);
+}
+
+Map.addLayer(rivers_image, { palette: '3f9fff, 337ddb, 285bb7, 12176f, 0d065d, 0d065d', max: count, opacity: 0.6 });

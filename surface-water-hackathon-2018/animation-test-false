@@ -1,0 +1,67 @@
+var animation = require('users/gena/packages:animation')
+var assets = require('users/gena/packages:assets')
+var palettes = require('users/gena/packages:colorbrewer').Palettes
+
+var bounds = ee.Geometry(Map.getBounds(true))
+
+
+// get images from one or multiple missions
+var images = assets.getImages(bounds.centroid(1), {
+  filter: ee.Filter.date("2015-01-01", "2020-01-01"),
+  filterMasked: true,
+  missions: [
+    'S2', 
+    'L8', 
+    'L7', 
+    //'L5'
+  ]
+}).sort('system:time_start')
+
+// images = images.map(function(i) { 
+//   return i.visualize({bands:['swir','nir','red'], gamma: 2, min: 0.07})
+//     .set({ label: i.date().format('YYYY-MM-dd') })
+// })
+//animation.animate(images, {label: 'label', maxFrames: 300})  
+
+// filter out noisy images
+images = assets.getMostlyCleanImages(images, bounds, {
+    scale: Map.getScale() * 10, 
+    
+    // how much should we deviate from cloud frequency when filtering images, use negative value to allow more (cloudy) images
+    cloudFrequencyThresholdDelta: 0.15,
+
+    // percentile and band used for cloudness, usually enough to choose one like green    
+    scorePercentile: 95,
+    qualityBand: 'green',
+  })
+  .sort('system:time_start')
+  //.sort('quality')
+
+print('Count: ', images.size())
+
+images = images
+  .map(function(i) {
+    var image = i
+    //var image = images.filterDate(i.date(), i.date().advance(-1, 'month')).mosaic()
+  
+    //return image.visualize({bands:['red','green','blue'], gamma: 1.4, min:0.05, max:[0.5, 0.5, 0.55]})
+    //return image.normalizedDifference(['nir','red']).visualize({palette:palettes.YlGn[9], min: -0.1, max: 1})    
+    return image.visualize({bands:['swir','nir','red'], gamma: 2, min: 0.05, max: 0.6})
+      .set({ label: i.date().format('YYYY-MM-dd') })
+  })
+  
+// animate
+animation.animate(images, {label: 'label', maxFrames: 200})  
+
+// export video
+var utils = require('users/gena/packages:utils')
+utils.exportVideo(images, {
+  bounds: bounds, 
+  label: 'label', 
+  maxFrames: 600, 
+  name: 'animation', 
+  label: 'label', 
+  framesPerSecond: 10 
+})
+
+

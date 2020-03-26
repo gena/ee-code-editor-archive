@@ -1,0 +1,90 @@
+// LANDSAT + MODIS
+
+var style_normalized = '\
+<RasterSymbolizer>\
+  <ChannelSelection>\
+    <RedChannel>\
+      <SourceChannelName>red</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Normalize/>\
+      </ContrastEnhancement>\
+    </RedChannel>\
+    <GreenChannel>\
+      <SourceChannelName>green</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Normalize/>\
+      </ContrastEnhancement>\
+    </GreenChannel>\
+    <BlueChannel>\
+      <SourceChannelName>blue</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Normalize/>\
+      </ContrastEnhancement>\
+    </BlueChannel>\
+  </ChannelSelection>\
+</RasterSymbolizer>';
+
+// Mali
+/*var i1_id = "LC81970492013362LGN00"; // 28 dec, 2013
+var i2_id = "LC81970492014013LGN00"; // 13 jan, 2014
+*/
+
+// Rotterdam,
+var i1_id = "LC81980242014260LGN00"; // 17 sep, 2014
+var i2_id = "LC81980242014276LGN00"; // 03 oct, 2014
+
+// get 2 images
+var i1 = ee.Image(i1_id).select(["B4", "B3", "B2"], ['red', 'green', 'blue']); 
+var i1_start = new Date(i1.getInfo().properties['system:time_start']);
+var i2 = ee.Image(i2_id).select(["B4", "B3", "B2"], ['red', 'green', 'blue']); 
+var i2_start = new Date(i2.getInfo().properties['system:time_start']);
+
+Map.addLayer(i1.sldStyle(style_normalized), {}, String(i1_start) + '(LS)');
+
+Map.centerObject(i1, 10);
+
+var t0 = i1_start;
+
+var start = 0;
+var stop = 16;
+var step = 1;
+
+// see https://lpdaac.usgs.gov/products/modis_products_table for MODIS options
+//var product = 'MODIS/MCD43A4'; // 16days
+//var bands = ['Nadir_Reflectance_Band1','Nadir_Reflectance_Band4','Nadir_Reflectance_Band3'];
+//var product = 'MODIS/MYD09GA'; // 500m
+//var bands = ['sur_refl_b01', 'sur_refl_b04', 'sur_refl_b03'];
+var product = 'MODIS/MOD09GQ'; // 250m, 2bands
+var bands = ['sur_refl_b01', 'sur_refl_b02'];
+
+var tstart = new Date(t0);
+tstart.setDate(t0.getDate());
+
+var tend = new Date(t0);
+tend.setDate(t0.getDate() + stop);
+
+//var c2 = ee.ImageCollection(product)
+//              .select(bands)
+//              .filterDate(tstart, tend);
+
+//Map.addLayer(c2.min(), {gain: [0.1]}, 'min');
+//Map.addLayer(c2.reduce(ee.Reducer.intervalMean(50, 60)), {gain: [0.1]}, 'max');
+
+for(var i = start; i < stop; i+=step) {
+  var tstart = new Date(t0);
+  tstart.setDate(t0.getDate() + i);
+
+  var tend = new Date(t0);
+  tend.setDate(t0.getDate() + i + step);
+  
+  print(tstart);
+  // print(tend);
+
+  var c2 = ee.ImageCollection(product)
+                  //.select(bands)
+                  .filterDate(tstart, tend);
+
+  Map.addLayer(c2.min(), {'bands': [bands[0], bands[0], bands[1]], gain: [0.1]}, String(tstart));
+  //Map.addLayer(c2.reduce(ee.Reducer.intervalMean(10, 30)), params, );
+}
+Map.addLayer(i2.sldStyle(style_normalized), {}, String(i2_start) + '(LS)');

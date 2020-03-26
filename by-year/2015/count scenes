@@ -1,0 +1,8 @@
+// count scenes
+
+// var poly = ee.Geometry.Rectangle(120.49, 30.62,122.40,  31.92);
+var collection = ee.ImageCollection('LANDSAT/LT5_L1T') 
+    .filterDate('2000-01-01','2001-01-02')
+    .select(0);
+
+addToMap(collection.reduce('count').log(), {min:0, max:5});

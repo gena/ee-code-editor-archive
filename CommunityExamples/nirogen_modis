@@ -1,0 +1,57 @@
+// Définir le Maroc dans la liste des pays du Monde
+
+var Maroc = ee.FeatureCollection("users/mahyouh/MAROC_COV_AMS");
+
+
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D1_site");
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D1_site_Buffer");
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D2_site");
+var cereal = ee.FeatureCollection("users/mahyouh/N_D2_site_Buffer");
+
+
+
+ // Définir un centre
+ Map.setCenter(-6, 33, 5) 
+
+
+//sélectio de NDVI pour 2017 (année de référence)
+var D1= ee.ImageCollection('MODIS/006/MOD13Q1')
+ .filterDate('2020-01-28','2020-02-05')
+  .filterBounds (Maroc);
+print(D1)
+var NDVI1 = (D1.select('NDVI')).mean().multiply(0.0001).clip(Maroc);
+
+// et pour l'année courante 
+
+var D2= ee.ImageCollection('MODIS/006/MOD13Q1')
+.filterDate('2020-02-10','2020-02-20')
+  .filterBounds (Maroc);
+  
+var NDVI2 = (D2.select('NDVI')).mean().multiply(0.0001).clip(Maroc);
+
+
+Map.addLayer(NDVI1.clip(Maroc) ,{min: -0.2, max: 0.8, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'NDVI1', false);
+Map.addLayer(NDVI2.clip(Maroc),{min: -0.2, max: 0.8, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'ndvi2', false);
+
+
+
+Map.addLayer(cereal);
+
+
+//var N_cereal = NDVI1.reduceRegions({collection: cereal, reducer: ee.Reducer.median(),  scale: 250}); 
+
+
+var N_cereal = NDVI2.reduceRegions({collection: cereal, reducer: ee.Reducer.median(),  scale: 250}); 
+
+// Export ---------------------------------------------------------------------
+// NDVIp_2003
+Export.table.toDrive({
+  collection: N_cereal,
+  description: 'MODIS_NDVI2_B',
+  folder: 'modis_ndvi',
+  fileFormat: 'CSV'
+});        
+
+
+
+

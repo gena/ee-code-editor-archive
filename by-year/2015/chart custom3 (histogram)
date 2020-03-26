@@ -1,0 +1,28 @@
+// chart custom3 (histogram)
+
+// A simple example demonstrating manual construction of a chart.
+
+// DataTables can be Google Visualization API DataTable literals or simple 2-D
+// arrays:
+//   https://developers.google.com/chart/interactive/docs/reference#DataTable
+var dataTable = {
+  cols: [{id: 'name', label: 'Airport Code', type: 'string'},
+         {id: 'year', label: 'Elevation (m)', type: 'number'}],
+  rows: [{c: [{v: 'SFO'}, {v: 4}]},
+         {c: [{v: 'JFK'}, {v: 4}]},
+         {c: [{v: 'DEN'}, {v: 1655}]},
+         {c: [{v: 'LHR'}, {v: 25}]},
+         {c: [{v: 'ZRH'}, {v: 432}]}]
+};
+
+var options = {
+  title: 'Airport elevation histogram',
+  vAxis: {title: 'Number of airports'},
+  legend: {position: 'none'},
+  hAxis: {
+    title: 'Elevation (m)',
+    logScale: true
+  }
+};
+
+print(Chart(dataTable, 'Histogram', options));

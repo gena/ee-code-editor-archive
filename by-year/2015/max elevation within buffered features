@@ -1,0 +1,189 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var pts1 = /* color: 0b4a8b */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Point([-102.38777160644531, 34.43523054493987]),
+            {
+              "system:index": "0"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.37712860107422, 34.43862840686652]),
+            {
+              "system:index": "1"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.32872009277344, 34.452784677593804]),
+            {
+              "system:index": "2"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.3208236694336, 34.45646491501022]),
+            {
+              "system:index": "3"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.315673828125, 34.45872959588021]),
+            {
+              "system:index": "4"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.3046875, 34.463824903250504]),
+            {
+              "system:index": "5"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.29644775390625, 34.467504654058295]),
+            {
+              "system:index": "6"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.3482894897461, 34.45108605177596]),
+            {
+              "system:index": "7"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.25147247314453, 34.48109002095169]),
+            {
+              "system:index": "8"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.23464965820312, 34.49042867760761]),
+            {
+              "system:index": "9"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.17353820800781, 34.50316152428561]),
+            {
+              "system:index": "10"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.11723327636719, 34.5164581990113]),
+            {
+              "system:index": "11"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.42347717285156, 34.426168904360736]),
+            {
+              "system:index": "12"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.2991943359375, 34.467504654058295]),
+            {
+              "system:index": "13"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.22606658935547, 34.49495613475887]),
+            {
+              "system:index": "14"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.33078002929688, 34.463541838777175]),
+            {
+              "system:index": "15"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.31739044189453, 34.47061816265397]),
+            {
+              "system:index": "16"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.28958129882812, 34.48024100032007]),
+            {
+              "system:index": "17"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.24906921386719, 34.48957975202644]),
+            {
+              "system:index": "18"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.24494934082031, 34.49325836713321]),
+            {
+              "system:index": "19"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.227783203125, 34.504010311590385]),
+            {
+              "system:index": "20"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.17353820800781, 34.51447797766275]),
+            {
+              "system:index": "21"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.3537826538086, 34.462126502013184]),
+            {
+              "system:index": "22"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.34760284423828, 34.46240957128561]),
+            {
+              "system:index": "23"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.3101806640625, 34.483071035490156]),
+            {
+              "system:index": "24"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.27653503417969, 34.49523909266902]),
+            {
+              "system:index": "25"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.26486206054688, 34.486749937679335]),
+            {
+              "system:index": "26"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-102.26177215576172, 34.47797690306098]),
+            {
+              "system:index": "27"
+            })]),
+    SRTM = ee.Image("CGIAR/SRTM90_V4");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// max elevation within buffered features
+
+// Goal: Compute max elevation within each buffered feature. For each feature, 
+// locate all the nearest neighbors and use them to compute a local average of max elevations. 
+// Finally add this as a property to each buffered feature in the collection.
+
+
+// get data
+var PIX_SCL = 90;
+var bufferedpts = pts1.map(function(f) { return f.buffer(1500); });
+    bufferedpts = SRTM.reduceRegions(bufferedpts, ee.Reducer.max(), PIX_SCL, null,null, 1)
+print(bufferedpts)
+
+// Joins collection with itself and counts intersecting points
+var joinFilt = ee.Filter.intersects('.geo', null, '.geo');
+var joined_fc = ee.Join.saveAll({matchesKey: 'Nearby'});
+var intersected_fc = joined_fc.apply( bufferedpts, bufferedpts, joinFilt);
+print("intersected:", intersected_fc)
+
+
+// Stores the number of intersecting points for each buffered feature
+var result = intersected_fc.map(function(f) {
+  var test = f.set("Num_nearby", ee.List(f.get('Nearby')).length().subtract(1))
+              .set('NeighborMax', ee.FeatureCollection(ee.List(f.get('Nearby'))).aggregate_max('max'))
+  return test})
+  
+// For each feature, I would like to take the 'max' property from all of the points in 'Nearby' and compute something with it (e.g. a 'local average')
+
+// Why does the 'max' property go to 0 for all the features in 'Nearby' 
+
+// If it weren't zero, how do I extract not just the number of nearby features, but properties from each to then manipulate?
+
+  
+print("result: ", result)
+var blank = ee.Image(0).mask(0).toByte();                              
+var bufferedpts_disp = blank.paint(bufferedpts,3,1);          
+Map.addLayer(bufferedpts_disp,{},'Buffered points');
+
+
+
+
+
+
+
+

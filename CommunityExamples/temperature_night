@@ -1,0 +1,328 @@
+// Définir le Maroc 
+var Maroc = ee.FeatureCollection("users/mahyouh/MAROC_COV_AMS");
+
+//Définir les provinces  dans la liste des provinces du Maroc
+var region = ee.FeatureCollection("users/mahyouh/Region");
+
+// Définir les provinces  dans la liste des provinces du Maroc
+var province = ee.FeatureCollection("users/mahyouh/Province");
+
+// Définir les Communes dans la liste des communes du Maroc
+var commune = ee.FeatureCollection("users/mahyouh/Commune");
+
+//var mask_agricole = ee.FeatureCollection("users/mahyouh/mask_agricole");
+ 
+ // Définir un centre
+ 
+ Map.setCenter(-6, 33, 5) 
+
+ // Récuperation des images LST La moyenne générée directement à partir de MODIS (MOD13Q1) 
+
+var start_noY = 30;
+
+// Long term average can be generated directly from the pre-calculated LST
+
+var MODIS_LST = ee.ImageCollection("MODIS/006/MOD11A2")
+.filter(ee.Filter.dayOfYear(start_noY, start_noY + 90))
+ .filterDate('2000-01-01', '2019-04-01')
+ .filterBounds (Maroc);
+ 
+// #############################################################################
+
+// Scale to Kelvin and convert to Celsius, set image acquisition time.
+var modLSTc = MODIS_LST.map(function(img) {
+  return img
+    .multiply(0.02)
+    .subtract(273.15)
+    .copyProperties(img, ['system:time_start']);
+});
+
+
+//#############################################################################
+// Select only the 1km Night and night LST data band.
+
+
+var modLSTnight = modLSTc.select('LST_Night_1km'); 
+ 
+
+// ##########################  LTA  #####################################
+
+// Calculate Night mean, min and max temperature for Maroc.
+var LSTmin_n = modLSTnight.min().clip(Maroc);
+var LSTmean_n = modLSTnight.median().clip(Maroc);
+var LSTmax_n = modLSTnight.max().clip(Maroc);
+
+
+ // ##########################   Reference  #####################################
+
+////sélection  de LST pour 2017 (année de référence)
+var reference_n= //ee.ImageCollection("MODIS/006/MOD11A2")
+ modLSTnight.filterDate('2017-02-01', '2017-04-01')
+ .filterBounds (Maroc);
+ 
+ // Calculate Night mean, min and max temperature for Maroc.
+var LSTmin_nr = reference_n.min().clip(Maroc);
+var LSTmean_nr = reference_n.median().clip(Maroc);
+var LSTmax_nr =reference_n.max().clip(Maroc);
+
+
+ // ##########################   Actual  #####################################
+
+////sélection  de LST pour 2019 (année courante)
+var actual_n= //ee.ImageCollection("MODIS/006/MOD11A2")
+ modLSTnight.filterDate('2019-02-01', '2019-04-01')
+ .filterBounds (Maroc);
+ 
+
+ // Calculate Night mean, min and max temperature for Maroc.
+var LSTmin_na = actual_n.min().clip(Maroc);
+var LSTmean_na = actual_n.median().clip(Maroc);
+var LSTmax_na = actual_n.max().clip(Maroc);
+
+
+// ##########################  seuil #####################################    
+
+//Classer LST en seuils allant de moins -5 à plus 40
+
+var thresholds = ee.Image([-5,0,5,10, 15, 20, 25]);
+
+
+//###############  LTA  #############
+var LSTmin_n1 = LSTmin_n.gt(thresholds).reduce('sum');
+var LSTmean_n1 = LSTmean_n.gt(thresholds).reduce('sum');
+var LSTmax_n1 = LSTmax_n.gt(thresholds).reduce('sum');
+
+//###############  REF  #############
+var LSTmin_nr1 = LSTmin_nr.gt(thresholds).reduce('sum');
+var LSTmean_nr1 = LSTmean_nr.gt(thresholds).reduce('sum');
+var LSTmax_nr1 = LSTmax_nr.gt(thresholds).reduce('sum');
+
+
+//###############  ACTUAL  #############
+var LSTmin_na1 = LSTmin_na.gt(thresholds).reduce('sum');
+var LSTmean_na1 = LSTmean_na.gt(thresholds).reduce('sum');
+var LSTmax_na1 = LSTmax_na.gt(thresholds).reduce('sum');
+
+
+
+var palette = {min: 0, max: 7, palette: ["fc27ff", "0000ff","32cd32","ffff00","cabe2f","ffb443", "ff0000"]};
+
+
+// Mapping mean, min and max temperature.
+
+////////////////////////////LTA ///////////////////////////////////////////////
+//////////////////////////////Night//////////////////////////////////////////////
+Map.addLayer(LSTmin_n1, palette, 'Night_min temperature', false);
+
+Map.addLayer(LSTmean_n1, palette,'Night_mean temperature', false);
+
+Map.addLayer(LSTmax_n1  , palette,  'Night_max temperature', false);
+
+///////////////////////////REFERENCE///////////////////////////////////////////////
+
+//////////////////////////////Night//////////////////////////////////////////////
+Map.addLayer(LSTmin_nr1, palette, 'Night_min T_ref', false);
+
+Map.addLayer(LSTmean_nr1, palette,'Night_mean T_ref', false);
+
+Map.addLayer(LSTmax_nr1  , palette,  'Night_max T_ref', false);
+  
+
+///////////////////////////Actual///////////////////////////////////////////////
+
+//////////////////////////////Night//////////////////////////////////////////////
+Map.addLayer(LSTmin_na1, palette, 'Night_min T_Act', false);
+
+Map.addLayer(LSTmean_na1, palette,'Night_mean T_Act', false);
+
+Map.addLayer(LSTmax_na1  , palette,  'Night_max T_Act', false);
+
+
+
+//Générer des statistiques LST pour les limites administratives
+
+// création d'une image multibande
+
+var LSTstack = LSTmin_n1.addBands(LSTmean_n1).addBands(LSTmax_n1)
+.addBands(LSTmean_nr1).addBands(LSTmax_nr1).addBands(LSTmean_nr1).addBands(LSTmin_na1)
+.addBands(LSTmean_na1).addBands(LSTmax_na1);
+
+// Renommer les noms des bandes
+
+LSTstack = LSTstack.select(LSTstack.bandNames(), ['LTA_min', 'LTA_mean', 'LTA_max',
+'Ref_min', 'Ref_mean', 'Ref_max', 'Act_min', 'Act_mean', 'Act_max']);
+
+// Calculer les totaux pour toutes les limites administratives
+
+//Region
+var LST_region = LSTstack.reduceRegions({collection: region, reducer: ee.Reducer.median(),  scale: 250});
+
+//Province
+
+var LST_province = LSTstack.reduceRegions({collection: province, reducer: ee.Reducer.median(),  scale: 250});
+
+
+//Commune
+
+var LST_commune = LSTstack.reduceRegions({collection: commune, reducer: ee.Reducer.median(),  scale: 250});
+
+
+//cartographie commune
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'LTA_min').paint(LST_commune, 0, 1), palette, 'LTA_min_com', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'LTA_mean').paint(LST_commune, 0, 1), palette, 'LTA_mean_com', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'LTA_max').paint(LST_commune, 0, 1), palette, 'LTA_max_com', false);
+
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'Ref_min').paint(LST_commune, 0, 1), palette, 'Ref_min_com', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'Ref_mean').paint(LST_commune, 0, 1), palette, 'Ref_mean_com', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'Ref_max').paint(LST_commune, 0, 1), palette, 'Ref_max_com', false);
+
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'Act_min').paint(LST_commune, 0, 1), palette, 'Act_min_com', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'Act_mean').paint(LST_commune, 0, 1), palette, 'Act_mean_com', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_commune, 'Act_max').paint(LST_commune, 0, 1), palette, 'Act_max_com', false);
+
+// cartographie province
+ 
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'LTA_min').paint(LST_province, 0, 1), palette, 'LTA_prov', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'LTA_mean').paint(LST_province, 0, 1), palette, 'LTA_mean_prov', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'LTA_max').paint(LST_province, 0, 1), palette, 'LTA_max_prov', false); 
+
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'Ref_min').paint(LST_province, 0, 1), palette, 'Ref_min_prov', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'Ref_mean').paint(LST_province, 0, 1), palette, 'Ref_mean_prov', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'Ref_max').paint(LST_province, 0, 1), palette, 'Ref_max_prov', false);
+
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'Act_min').paint(LST_province, 0, 1), palette, 'Act_min_prov', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'Act_mean').paint(LST_province, 0, 1), palette, 'Act_mean_prov', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_province, 'Act_max').paint(LST_province, 0, 1), palette, 'Act_max_prov', false);
+
+
+// cartographie region
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'LTA_min').paint(LST_region, 0, 1), palette, 'LTA_reg', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'LTA_mean').paint(LST_region, 0, 1), palette, 'LTA_mean_reg', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'LTA_max').paint(LST_region, 0, 1), palette, 'LTA_max_reg', false); 
+
+
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'Ref_min').paint(LST_region, 0, 1), palette, 'Ref_min_reg', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'Ref_mean').paint(LST_region, 0, 1), palette, 'Ref_mean_reg', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'Ref_max').paint(LST_region, 0, 1), palette, 'Ref_max_reg', false);
+
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'Act_min').paint(LST_region, 0, 1), palette, 'Act_min_reg', false); 
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'Act_mean').paint(LST_region, 0, 1), palette, 'Act_mean_reg', false);
+Map.addLayer(ee.Image().toFloat().paint(LST_region, 'Act_max').paint(LST_region, 0, 1), palette, 'Act_max_reg', false);
+
+
+
+//Légende
+
+// set position of panel
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+
+// Create legend title
+var legendTitle = ui.Label({
+  value: 'Température °C',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '18px',
+    margin: '0 0 4px 0',
+    padding: '0'
+    }
+});
+
+// Add the title to the panel
+legend.add(legendTitle);
+
+// Creates and styles 1 row of the legend.
+var makeRow = function(color, name) {
+
+      // Create the label that is actually the colored box.
+      var colorBox = ui.Label({
+        style: {
+          backgroundColor: '#' + color,
+          // Use padding to give the box height and width.
+          padding: '8px',
+          margin: '0 0 4px 0'
+        }
+      });
+
+      // Create the label filled with the description text.
+      var description = ui.Label({
+        value: name,
+        style: {margin: '0 0 4px 6px'}
+      });
+
+      // return the panel
+      return ui.Panel({
+        widgets: [colorBox, description],
+        layout: ui.Panel.Layout.Flow('horizontal')
+      });
+};
+
+//  Palette with the colors
+var palette =["fc27ff", "0000ff","32cd32","ffff00","cabe2f","ffb443", "ff0000"];
+
+// name of the legend
+var names = ['-5','0','5','10','15', '20', '25'];
+
+// Add color and and names
+for (var i = 0; i <7; i++) {
+  legend.add(makeRow(palette[i], names[i]));
+  }  
+
+// add legend to map 
+Map.add(legend);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

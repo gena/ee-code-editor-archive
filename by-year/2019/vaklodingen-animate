@@ -1,0 +1,55 @@
+var palettes = require('users/gena/packages:colorbrewer').Palettes
+var animation = require('users/gena/packages:animation')
+var utils = require('users/gena/packages:utils')
+
+var min = -30
+var max = 0
+
+var palette = palettes.Blues[9].slice(2).reverse()
+
+var weight = 1.3
+var exaggregation = 200
+var azimuth = 315
+var elevation = 45
+var shadows = false
+//var shadows = true
+
+var proj = ee.Projection('EPSG:3857').atScale(10)
+
+// animate vakloding data based on current map
+function animateVaklodingen() {
+  var images = ee.ImageCollection('users/gena/vaklodingen')
+    .filter(ee.Filter.gt('system:time_start', 0)) // some images are bad
+    .sort('system:time_start')
+    .map(function(i) { 
+      var t = i.date()
+      i = i.resample('bilinear').multiply(0.01)
+      
+      return i.set({year: t.get('year') })
+    })
+    
+    var years = images.distinct('year').aggregate_array('year')
+    
+    print('years: ', years)
+    
+    var imagesPerYear = ee.List(years).map(function(y) {
+      var f = ee.Filter.and(
+        ee.Filter.gte('year', y), 
+        ee.Filter.lte('year', ee.Number(y).add(3))
+      )
+      var output = images.filter(f).mosaic()
+      
+      var iRGB = output.visualize({min: min, max: max, palette: palette})
+      output = utils.hillshadeRGB(iRGB, output.reproject(proj), 1.5, 50, 0, elevation)
+      
+      return output
+        .set({label: ee.Number(y).format('%d')})
+    })
+    
+    imagesPerYear = ee.ImageCollection(imagesPerYear)
+    
+    //animation.animate(images, {maxFrames: 30})
+    animation.animate(imagesPerYear, {maxFrames: 30})
+}
+
+animateVaklodingen()

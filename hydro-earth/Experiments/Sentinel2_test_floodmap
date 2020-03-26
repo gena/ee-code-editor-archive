@@ -1,0 +1,107 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var S2 = ee.ImageCollection("COPERNICUS/S2");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Sentinel-2 test (see https://code.earthengine.google.com/dataset/COPERNICUS/S2 for more info)
+
+// This is a very simple script that shows each Sentinel-2 image from the ImageCollection
+// after filtering dates and bounds, and for selected bands.
+// The user can specify the index of a single image with the collection, for which MNDWI
+// will be calculated and from that a water mask is derived.
+// The whole thing is based heavily on Gena's scripts, just applied on Sentinel-2.
+
+// It was used to very quickly create some flood maps for the March 2016 floods in Serbia,
+// which is why there are some comments in the code related to that.
+// The very simple MNDWI threshold based approach results in a lot of false positives due to
+// clouds and snow, which were quikcly filtered out manually in a GIS program afterwards...
+
+// point around which images will be extracted
+//var point = ee.Geometry.Point(20.566, 44.708); // Central Serbia (around Belgrade)
+//var point = ee.Geometry.Point(20.5005, 43.7513); // Southern Serbia
+var point = ee.Geometry.Point(5.91, 51.87); // Nijmegen
+
+// dates around which images will be extracted
+var date_start    = '2018-01-01';
+var date_end      = '2018-01-10';
+
+// index for single image (set to null to suppress)
+var specific_image_index = 9;    // 6 for Southern Serbia, 9 for Central Serbia point (if dates are unchanged)
+
+// MNDWI threshold
+var MNDWI_threshold = 0.3;
+
+// bands that will be extracted, along with the names that will be assigned to them
+var S2_BANDS      = ['B2',   'B3',    'B4',  'B8',  'B11'];
+var STD_NAMES     = ['blue', 'green', 'red', 'nir', 'swir1'];
+
+// unitscale values (scales data from these values to 0-1)
+var scale_values  = [0, 5000];
+
+// extract images
+var S2_images     = S2.filterDate(date_start, date_end).filterBounds(point).select(S2_BANDS, STD_NAMES);
+
+// print images info
+var images_info = S2_images.getInfo();
+var images_size = S2_images.size().getInfo();
+print(images_info);
+for (var i=0; i<images_size; i++) {
+  print(i + ': ' + images_info.features[i].properties.PRODUCT_URI);
+}
+
+// visualization parameters
+var visProps      = {min:0.05, max:0.5, gamma:1.5};
+
+// color rendering for MNDWI
+var water_index_style = '\
+<RasterSymbolizer>\
+  <ColorMap extended="true" >\
+    <ColorMapEntry color="#ffffd9" quantity="-1.0" label="-1"/>\
+    <ColorMapEntry color="#edf8b1" quantity="-0.8" label="-1"/>\
+    <ColorMapEntry color="#c7e9b4" quantity="-0.6" label="-1"/>\
+    <ColorMapEntry color="#7fcdbb" quantity="-0.4" label="-1"/>\
+    <ColorMapEntry color="#41b6c4" quantity="-0.2" label="-1"/>\
+    <ColorMapEntry color="#1d91c0" quantity="0.0" label="-1"/>\
+    <ColorMapEntry color="#225ea8" quantity="0.2" label="-1"/>\
+    <ColorMapEntry color="#253494" quantity="0.4" label="-1"/>\
+    <ColorMapEntry color="#081d58" quantity="0.6" label="-1"/>\
+    <ColorMapEntry color="#081dff" quantity="1.0" label="-1"/>\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+Map.setCenter(point.coordinates().get(0).getInfo(), point.coordinates().get(1).getInfo(), 10);
+
+// show all images of selection on map
+// for (var i=0; i<images_size; i++) {
+//   Map.addLayer(ee.Image(S2_images.toList(images_size).get(i)).select('red', 'green', 'blue'), 
+//                {}, i.toString() + ' (rgb) raw', false);
+// }
+for (var i=0; i<images_size; i++) {
+  Map.addLayer(ee.Image(S2_images.toList(images_size).get(i)).select('red', 'green', 'blue').
+                unitScale(scale_values[0], scale_values[1]), visProps, 
+                i.toString() + ' (rgb) styled', false);
+}
+for (var i=0; i<images_size; i++) {
+  Map.addLayer(ee.Image(S2_images.toList(images_size).get(i)).select('swir1', 'nir', 'green').
+                unitScale(scale_values[0], scale_values[1]), visProps, 
+                i.toString() + ' (swir nir green) styled', false);
+}
+
+// single image
+if (specific_image_index !== null) {
+  var specific_image = ee.Image(S2_images.toList(images_size).get(specific_image_index));
+  var MNDWI_image    = specific_image.normalizedDifference(['green', 'swir1']);
+  var water_image    = MNDWI_image.gt(MNDWI_threshold);
+  Map.addLayer(specific_image.select('red', 'green', 'blue').unitScale(scale_values[0], scale_values[1]), 
+                visProps, 'specific image (rgb) styled', true);
+  Map.addLayer(specific_image.select('swir1', 'nir', 'green').unitScale(scale_values[0], scale_values[1]), 
+                visProps, 'specific image (swir nir green) styled', false);
+  Map.addLayer(MNDWI_image, {min:-1, max:1}, 'specific image (MNDWI, raw)', false);
+  Map.addLayer(MNDWI_image.sldStyle(water_index_style), {}, 'specific image (MNDWI, styled)', false);
+  Map.addLayer(water_image.mask(water_image), {palette:'081dff'}, 'specific image (MNDWI > threshold)', true);
+}
+
+// Export of water mask
+// var image_geom = water_image.geometry();
+// Export.image(water_image.mask(water_image), 'SerbiaFloodImage1', {crs:'EPSG:4326',
+//                                                                   region: image_geom,
+//                                                                   driveFolder: 'EarthEngine',
+//                                                                   scale:30});

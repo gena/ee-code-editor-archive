@@ -1,0 +1,59 @@
+// canny, Simple Edge detection in NDVI
+//
+centerMap(-88.5597,40.890867, 14);
+
+// A function to compute NDVI for a Landsat image.
+var ndvi = function(input) {
+  return input.select("40", "30").normalizedDifference();
+}
+
+// The landsat TOA collection filtered down to a single year.
+var l7_median = ee.ImageCollection("L7_L1T_TOA")
+  .filterDate(new Date('4/5/2007'), new Date('9/19/2011'))
+
+//Try NDVI
+// Apply the NDVI algorithm to each image.
+var ndvi_palette = [
+          "FFFFFF",
+          "CE7E45",
+          "DF923D",
+          "F1B555",
+          "FCD163",
+          "99B718",
+          "74A901",
+          "66A000",
+          "529400",
+          "3E8601",
+          "207401",
+          "056201",
+          "004C00",
+          "023B01",
+          "012E01",
+          "011D01",
+          "011301"
+        ]
+var l7_ndvi = l7_median.map(ndvi);
+var l7_ndvi_max = l7_ndvi.max()
+addToMap(l7_ndvi_max, {min:0.5, max:1.0,palette:ndvi_palette},'NDVI_max' );
+
+//Edge detection
+//Canny Edge Detection
+/*image3 = ee.Image({
+  creator: "CannyEdgeDetector",
+  args: [l7_ndvi_max, 0.0 , 1.0]           //image, threshold, sigma
+  });
+*/  
+var canny = ee.Algorithms.CannyEdgeDetector(l7_ndvi_max, 0.2, 1.0);
+addToMap(canny.mask(canny), {min: 0, max: 1, palette: 'FF0000'}, 'cannny');
+
+//addToMap(image3, {min:0, max:1},'Edges [Canny]');
+
+//Hough Transform
+//Hough Transform
+/*
+var image4 = ee.Image({
+  creator: "HoughTransform",
+  args: [l7_ndvi_max, 100, 10, 0.3]    //image, gridSize, inputThreshold, lineThreshold 
+  });
+*/
+//addToMap(image4, {min:0, max:1},'Edges [Hough]');

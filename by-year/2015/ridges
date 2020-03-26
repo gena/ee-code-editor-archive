@@ -1,0 +1,27 @@
+var dem = ee.Image('USGS/SRTMGL1_003');
+
+var gaussianKernel = ee.Kernel.gaussian(1.0, 1.0, "pixels");
+var gaussianDem = dem.convolve(gaussianKernel);
+
+
+var terrain = ee.Algorithms.Terrain(gaussianDem);
+var slope = terrain.select("slope");
+var hillshade = terrain.select("hillshade");
+
+Map.addLayer(hillshade);
+Map.addLayer(dem, {min:0, max:4000});
+Map.addLayer(gaussianDem, {min:0, max:4000});
+Map.addLayer(slope);
+
+var terrain1 = terrain.addBands(terrain)
+var slope1 = terrain1.select('slope_1')
+
+var terrain2 = ee.Algorithms.Terrain(slope1);
+
+var slope2 = terrain2.select('slope')
+var hillshade2 = terrain2.select('hillshade')
+
+Map.addLayer(slope2);
+Map.addLayer(hillshade2);
+
+print(slope2)

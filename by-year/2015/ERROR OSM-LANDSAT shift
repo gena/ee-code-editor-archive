@@ -1,0 +1,45 @@
+// ERROR: OSM/LANDSAT shift
+
+var image = new ee.Image('LANDSAT/LC8_L1T_TOA/LC80950842013160LGN00')
+  .select([6,4,2,5]);
+
+Map.addLayer(image, {min: 0.05, max: 0.4}, 'original', false);
+
+// show Google's registration info, registration_count is very small!
+var info = image.getInfo();
+var dx = info.properties['google:registration_offset_x'];
+var dy = info.properties['google:registration_offset_y'];
+print('google:registration_count: ' + info.properties['google:registration_count']);
+print('google:registration_offset_x: ' + dx);
+print('google:registration_offset_x: ' + dy);
+
+// shift image
+var crs = info.bands[0].crs;
+var t = info.bands[0].crs_transform;
+t = [15, t[1], t[2]+dx, t[3], -15, t[5]-dy];
+var image2 = image.reproject(crs, t);
+
+Map.addLayer(image2, {min: 0.05, max: 0.4}, 'shifted', false);
+
+// add osm
+var rivers_polygons_osm = ee.FeatureCollection('ft:1hp7-tC7bqEVxrdxqOLKpIqRGEaWCpeluimHAntrD');
+Map.addLayer(rivers_polygons_osm, {color:'4292c6'}, 'rivers_polygons')
+
+
+// add NDWI
+var ndwi = image.normalizedDifference(['B6','B3']);
+Map.addLayer(image.mask(ndwi.lt(-0.1)), {min: 0, max: 0.1}, 'ndwi > -0.1');
+
+var slope = image.expression('(green-swir1)/1.05', { swir1: image.select('B6'), green: image.select('B3') });
+Map.addLayer(image.mask(slope.gt(0.1)), {min:0, max:0.1}, 'slope');
+
+
+// ---
+//Map.centerObject(image, 13)
+
+var bounds = Map.getBounds(true)
+var center = ee.Geometry(bounds).centroid(1).coordinates().getInfo();
+print(center);
+
+//var center = [142.24509024584577,-34.26668662236306];
+//Map.setCenter(center[0], center[1], 14)

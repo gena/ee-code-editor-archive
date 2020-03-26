@@ -1,0 +1,3 @@
+// remove nulls
+
+zipped = zipped.removeAll([[null, null]]);

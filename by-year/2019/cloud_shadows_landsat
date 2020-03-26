@@ -1,0 +1,36 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var images = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Load a cloudy Landsat scene and display it.
+var image = ee.Image('LANDSAT/LC08/C01/T1_RT_TOA/LC08_035034_20130519');
+
+//Map.centerObject(cloudy_scene);
+Map.addLayer(image, {bands: ['B4', 'B3', 'B2'], max: 0.4}, 'TOA', true);
+
+// Add a cloud score band.  It is automatically called 'cloud'.
+var cloudScore = ee.Algorithms.Landsat.simpleCloudScore(image).select('cloud');
+
+// Create a mask from the cloud score and combine it with the image mask.
+var cloudMask = cloudScore.gt(40).reproject(ee.Projection('EPSG:3857').atScale(30));
+
+Map.addLayer(cloudMask.mask(cloudMask), {palette: ['fb8072']}, 'cloud mask', true)
+
+// erode and dilate cloud shadows (morphological opening)
+/*
+var radiusErode = 3
+cloudMask = cloudMask.not().fastDistanceTransform(radiusErode).sqrt().lte(radiusErode).not()
+var radiusDilate = 5
+cloudMask = cloudMask.fastDistanceTransform().sqrt().lte(radiusDilate)
+Map.addLayer(cloudMask.mask(cloudMask), {palette: ['fb8072']}, 'cloud mask clean', true)
+*/
+
+// project cloud shadows
+var cloudUtils = require('users/gena/packages:cloud-utils')
+var sunElevation = image.get('SUN_ELEVATION')
+var sunAzimuth = ee.Number(image.get('SUN_AZIMUTH')).subtract(90)
+var cloudShadows = cloudUtils.computeCloudShadowMask(sunElevation, sunAzimuth, cloudMask)
+Map.addLayer(cloudShadows.mask(cloudShadows), {palette: ['ffffb3']}, 'cloud shadows', false)
+
+// find darker pixels in the cloud shadows
+cloudShadows = image.mask(cloudShadows).select(['B5', 'B6']).lt(0.15).reduce(ee.Reducer.sum()).eq(2);
+Map.addLayer(cloudShadows.mask(cloudShadows), {palette: ['ffffb3']}, 'cloud shadows (dark)')

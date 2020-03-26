@@ -1,0 +1,44 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var admareas = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017"),
+    gsmap = ee.ImageCollection("JAXA/GPM_L3/GSMaP/v6/operational"),
+    table = ee.FeatureCollection("WRI/GPPD/power_plants");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+Map.addLayer(admareas)
+
+
+print(gsmap.size())
+
+Map.addLayer(gsmap.first())
+
+print(admareas.first())
+print(gsmap.first())
+
+var times = ee.List(gsmap.limit(1).aggregate_array('system:time_start'))
+
+print(times)
+
+print(admareas)
+
+var firstImage = gsmap.first()
+
+
+
+var output = times.map(function(time) {
+  var image = ee.Image(gsmap.filter(ee.Filter.eq('system:time_start', time)).first())
+  
+  var features = image.reduceRegions({ 
+    collection: admareas.limit(4), 
+    reducer: ee.Reducer.mean(), 
+    scale: 500000, 
+    tileScale: 8
+  })
+  
+  features = features.map(function(f) {
+    return f.set({ time: time })
+  })
+  
+  return features
+}).flatten()
+
+print(output)

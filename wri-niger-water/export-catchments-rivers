@@ -1,0 +1,42 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var catchments = ee.FeatureCollection("users/gena/water-niger/wflow/catchments"),
+    catchment = ee.FeatureCollection("users/gena/water-niger/catchment");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var hydro = require('users/gena/packages:hydro')
+
+Map.addLayer(catchments)
+
+var level = 9
+var catchments00 = ee.Image("users/rutgerhofste/PCRGlobWB20V04/support/global_Standard_lev00_30sGDALv01")
+var catchments09 = catchments00.divide(ee.Number(10).pow(ee.Number(12).subtract(level))).floor().clipToCollection(catchments)
+Map.addLayer(catchments09.randomVisualizer(), {}, 'catchments', true, 0.5)
+    
+var rivers = ee.FeatureCollection('users/gena/HydroEngine/riv_15s_lev05')
+  .filterBounds(catchment.first().geometry())
+  
+Map.addLayer(rivers.style({ width: 1, color: 'cyan' }), { }, 'rivers', true, 0.5)
+Map.addLayer(rivers.filter(ee.Filter.gt('UP_CELLS', 1000)).style({ width: 2, color: 'cyan' }), { }, 'rivers (large)', true, 0.5)
+
+Export.table.toDrive({ 
+  collection: rivers, 
+  description: 'upper-niger-rivers', 
+  folder: 'upper-niger', 
+  fileNamePrefix: 'upper-niger-rivers', 
+  fileFormat: 'GeoJSON'
+})
+
+var catchments09 = catchments09.int().reduceToVectors({
+  geometry: catchment.geometry(),
+  scale: 450, 
+  eightConnected: true
+})
+
+Map.addLayer(catchments09, {}, 'catchmnets09', false)
+
+Export.table.toDrive({ 
+  collection: catchments09, 
+  description: 'upper-niger-catchments-level9', 
+  folder: 'upper-niger', 
+  fileNamePrefix: 'upper-niger-catchments-level9', 
+  fileFormat: 'GeoJSON'
+})

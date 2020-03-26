@@ -1,0 +1,31 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var table = ee.FeatureCollection("users/gena/OpenStreetMap/waterways1"),
+    table2 = ee.FeatureCollection("users/gena/OpenStreetMap/waterways2"),
+    table3 = ee.FeatureCollection("users/gena/OpenStreetMap/waterways3"),
+    table4 = ee.FeatureCollection("users/gena/OpenStreetMap/waterways4"),
+    geometry = 
+    /* color: #d63000 */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[-42.08377983685364, 0.2993842869342378],
+          [-42.08377983685364, -0.5959893448125646],
+          [5.844076608458863, -0.5959893448125646],
+          [5.844076608458863, 0.2993842869342378]]], null, false);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var waterways = table.merge(table2).merge(table3).merge(table4)
+  .filter(ee.Filter.intersects('.geo', geometry).not())
+
+Map.addLayer(waterways.style({ width: 1, color: '00ffff' }))
+
+Map.setOptions('SATELLITE')
+
+Export.table.toAsset({
+  collection: waterways, 
+  description: 'waterways', 
+  assetId: 'users/gena/OpenStreetMap/waterways'
+})
+

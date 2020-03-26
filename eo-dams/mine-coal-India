@@ -1,0 +1,44 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([87.41118865439387, 24.546026114471353]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+var assets = require('users/gena/packages:assets')
+
+var bounds = Map.getBounds(true)
+
+// var start = '2005-01-01'
+// var stop = '2015-01-01'
+var start = ee.Date('2005-01-01')
+var stop = ee.Date('2019-01-01')
+var step = 2
+var duration = 12
+
+var months = ee.List.sequence(0, stop.difference(start, 'month'), step)
+print(months)
+
+var images = assets.getImages(bounds, {
+  missions: ['L5', 'L7', 'L8', 'S2'],
+  filter: ee.Filter.date(start, stop)
+})
+  .select(['swir', 'nir', 'green'])
+
+print(images.size())
+
+images = assets.getMostlyCleanImages(images, bounds)
+
+print(images.size())
+ 
+function toComposite(step) {
+  var t = start.advance(step, 'month')
+  return images.filterDate(t, t.advance(duration, 'month')).reduce(ee.Reducer.percentile([10]))
+    .set({ label: t.format('YYYY-MM')})
+}
+
+
+var frames = ee.ImageCollection(months.map(toComposite))
+
+animation.animate(frames, { 
+  maxFrames: 100,
+  vis: { min: 0.05, max: 0.3},
+  label: 'label'
+})

@@ -1,0 +1,73 @@
+//Load landsat 7
+var l7rf = ee.Image('LANDSAT/LE7_L1T/LE71440512001014SGS00')
+var real = {"opacity":1,"bands":["B1","B4","B7"]};//rea
+//Map.setCenter(77.40, 13.14, 8);
+//Map.addLayer(l7rf,real,'raw');
+
+
+//elevation of weather station in Bangalore, FAO Climwat dataset
+var z_sl = 921;
+var Press = 101.3*((293-0.0065*z_sl)/293)^5.26;//Eq 3-4 http://www.fao.org/docrep/x0490e/x0490e0k.htm
+
+var pi=Math.PI;
+
+var date = ee.Date(l7rf.get('system:time_start'));
+//print(date)
+var doy = date.getRelative('day', 'year').add(1);
+
+
+//*******************************************************************************
+//  Cloud masking using fmask
+//*******************************************************************************
+  //Load data with Fmask
+  //https://explorer.earthengine.google.com/#detail/LANDSAT%2FLE7_L1T_TOA_FMASK
+  var fmask = ee.Image('LANDSAT/LE7_L1T_TOA_FMASK/LE71440512001014SGS00');
+  //Map.addLayer(fmask, {}, 'fmask')  
+  //where pixel values are 0=clear, 1=water, 2=shadow, 3=snow, 4=cloud
+  var data = fmask.select('fmask');
+  var cloudMask = data.lt(2);  //filter clear and water areas
+  var raw = l7rf.updateMask(cloudMask);
+
+//*******************************************************************************    
+//  Radiance
+//*******************************************************************************
+  var theta=ee.Number(90).subtract(ee.Number(raw.get('SUN_ELEVATION'))).multiply(ee.Number(2*pi/360)); //Sun incidence angle
+  var dr=ee.Number(1).add(ee.Number(doy.multiply(ee.Number(2*pi/365))).cos().multiply(ee.Number(0.033)));
+  var L3=raw.expression('G*DN+B',{'G':ee.Number(raw.get('RADIANCE_MULT_BAND_3')),'DN':raw.select('B3'),'B':ee.Number(raw.get('RADIANCE_ADD_BAND_3'))});
+  var L4=raw.expression('G*DN+B',{'G':ee.Number(raw.get('RADIANCE_MULT_BAND_4')),'DN':raw.select('B4'),'B':ee.Number(raw.get('RADIANCE_ADD_BAND_4'))});
+  var r3=L3.expression('pi*L/(ESUN*cos(th)*dr)',{'pi':pi,'L':L3,'ESUN':1547,'th':theta,'dr':dr});
+  var r4=L4.expression('pi*L/(ESUN*cos(th)*dr)',{'pi':pi,'L':L4,'ESUN':1044,'th':theta,'dr':dr});
+
+//*******************************************************************************
+//  NDVI
+//*******************************************************************************
+  var ndvi=r4.expression('(r4-r3)/(r4+r3)',{'r4':r4,'r3':r3}); //.select([0],['nd'])  
+Map.addLayer(ndvi, {}, 'ndvi')
+//Map.centerObject(ndvi)
+
+
+//Input ndvi thresholds
+var ndviM = 0.5; //veg. cover 100%
+var ndvim = 0.2; //veg. cover 0%
+
+//Selection of areas based on NDVI value thresholds
+var hah = ndvi.lt(ndvim).subtract(ndvi.lte(0.00)); // hot
+var cac = ndvi.gt(ndviM);  //cold
+
+//Mask ndvi zones
+  var ndvi_h = ndvi.mask(hah);
+  var ndvi_c = ndvi.mask(cac);
+
+Map.addLayer(ndvi_h, {palette:['ff2020']}, 'ndvi_h')
+Map.addLayer(ndvi_c, {palette:['2020ff']}, 'ndvi_c')
+
+
+//Median ndvi value in each zone
+  var NDVImed_h=ee.Number(ndvi_h.reduceRegion({
+    bestEffort:true,
+    reducer:ee.Reducer.median()}).get('constant'));
+  var NDVImed_c=ee.Number(ndvi_c.reduceRegion({
+    bestEffort:true,
+    reducer:ee.Reducer.median()}).get('constant'));
+
+

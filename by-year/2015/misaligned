@@ -1,0 +1,10 @@
+var i1 = ee.Image("LT51970241984299XXX02");
+var i2 = ee.Image("LT51980241984306XXX09");
+var i3 = ee.Image("LT51970241984315XXX02");
+
+//addToMap(i1.select(["70", "40", "20"]), {}, 't1');
+addToMap(i2.select(["70", "40", "20"]), {opacity:0.8}, 't2 (misaligned)');
+//addToMap(i3.select(["70", "40", "20"]), {}, 't3');
+
+Map.centerObject(i2, 10);
+

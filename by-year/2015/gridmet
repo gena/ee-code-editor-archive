@@ -1,0 +1,61 @@
+// gridmet
+
+//Group Reducer by Property
+var gridmet_coll = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET')
+  .filterDate('1981-01-01', '1982-01-01')
+  .select(['pr']);
+//Set up days
+var days = ee.List.sequence(1,365)
+//Set up the band names
+var bandNames =days.map(function(d){return ee.String('Day_').cat(ee.String(ee.Number(d).int16()))})
+
+//Convert the collection to an image
+var gridmet_stack = gridmet_coll.toArray()
+.arrayProject([0])
+.arrayFlatten([bandNames]);
+
+//365 band image
+print(gridmet_stack)
+//365 image collection
+print(gridmet_coll)
+
+
+var gridmet_coll = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET')
+  .filterDate('1981-01-01', '2012-01-01')
+  .select(['pr']);
+
+//Specify reducer
+var reducer = ee.Reducer.mean();
+
+var gridmetDaily30YrMean = ee.ImageCollection(days.map(function(day){
+
+  var startDate = '1981-01-01';
+  var endDate = '2012-01-01';
+  var startDay = day;
+  var endDay = day;
+  var gridmetDaySummary = gridmet_coll.filterDate(startDate,endDate)
+                        .filter(ee.Filter.calendarRange(startDay,endDay))
+                        .reduce(reducer)
+                        
+  return gridmetDaySummary//.set('system:time_start.....)
+  
+}))
+print(gridmetDaily30YrMean)
+
+// // This function attaches the DOY as a property on the GRIDMET image
+// function gridmet_func(gridmet_image) {
+//   var doy = ee.Number(ee.Algorithms.Date(gridmet_image.get("system:time_start"))
+//     .getRelative('day', 'year')).add(1).int();
+//   return gridmet_image.set({'DOY':doy});
+// }
+// var variable_coll = gridmet_coll.map(gridmet_func);
+// print(variable_coll.first());
+
+// // Try grouping by the DOY property
+// var reducer = ee.Reducer.mean().group({'groupName':'DOY'});
+// //var reducer = ee.Reducer.mean().unweighted().group({'groupName':'DOY'});
+
+// print(variable_coll.reduce(reducer));
+
+//A single image with 365 bands
+//This does lose the date properties

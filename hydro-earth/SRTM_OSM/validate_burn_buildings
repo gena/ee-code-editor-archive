@@ -1,0 +1,242 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: d63000 */ee.Geometry.MultiPoint();
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// functions has been updated on 03/feb. now seperate functions to give features a 'burn_height'
+// * property and to burn this property to a map. Copying the 'est_height' property still
+// * does not work. Check if this is due to absent of any value for this property (all null).
+
+// Function validation and modification after review H.C. Winsemius (2016-01-13)
+// * whether a property exists is now checked by: a) is the property available for a given feature AND b) if it exists is it null or a value?
+// * Some high buildings were checked for their properties. Seems to be correct
+// * added one filter for school buildings with default nr. of storeys 2 and height per storey 4
+//     checked if library at crossing of Azikiwe Road/Nyerere Road (39.284481, -6.811483) turned up as elevation 5*4 = 20. Works!
+// * zooming out to a larger area: works well, not very slow!
+
+
+// some plot functionality
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+var style_dem = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#cef2ff" quantity="-2" label="-2m"/>\
+    <ColorMapEntry color="#9cd1a4" quantity="0" label="0m"/>\
+    <ColorMapEntry color="#7fc089" quantity="0.5" label="0.05m" />\
+    <ColorMapEntry color="#9cc78d" quantity="1.0" label="0.1m" />\
+    <ColorMapEntry color="#b8cd95" quantity="2.5" label="0.25m" />\
+    <ColorMapEntry color="#d0d8aa" quantity="5.0" label="0.5m" />\
+    <ColorMapEntry color="#e1e5b4" quantity="7.5" label="0.75m" />\
+    <ColorMapEntry color="#f1ecbf" quantity="10.0" label="1.0m" />\
+    <ColorMapEntry color="#e2d7a2" quantity="15.0" label="1.5m" />\
+    <ColorMapEntry color="#d1ba80" quantity="20.0" label="2.m" />\
+    <ColorMapEntry color="#d1ba80" quantity="50.0" label="5.0m" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+var azimuth = 90;
+var zenith = 60;
+
+// **** FUNCTIONALITY STARTS BELOW *****
+// test step 1-3 pipeline with actual OSM data
+
+// step 1: filter OSM feature collection (fc)
+/***
+ * filters fc based on property keys & (list of) values
+ */
+var filter_fc = function(fc, keys, values){
+  // function to loop over filters
+  var filter_multiple = function(i, fc){
+  return ee.FeatureCollection(fc).filter(ee.Filter.inList(keys.get(i), values.get(i)))};
+  // declare keys and props as list and make index
+  
+  keys = ee.List(keys);
+  values = ee.List(values);
+  var index = ee.List.sequence(0,null,1, keys.length());
+  // iterate over keys and props and return filtered fc
+  return ee.FeatureCollection(index.iterate(filter_multiple, fc));
+};
+  
+
+// step 2: add default info about height to fc
+/***
+ *split feature collection based on wheather property exist (isnull) 
+ */
+function splitIsNull(fc, prop) {
+  return [
+    fc.filter(ee.Filter.neq(prop, null)).cache(), // not NULL
+    fc.filter(ee.Filter.eq(prop, null)).cache()   // NULL
+    ];
+}
+
+
+/***
+ * Set property (trg_key)  to default if missing 
+ */
+var add_property_constant = function(fc, trg_key, default_value){
+  var split = splitIsNull(fc, trg_key);
+
+  var notnull = split[0];
+  var isnull = split[1];
+  
+  return notnull.merge(isnull.map(function(f){return f.set(trg_key, default_value)}));
+};
+
+
+/***
+ * Set property (trg_key) with multiply of other property
+ */
+var add_property_multiply = function(fc, trg_key, prop, multiplier){
+  
+  function compute_property(f) {
+    return f.set(trg_key, ee.Number(f.get(prop)).multiply(ee.Number(multiplier)));
+  }
+
+  var split = splitIsNull(fc, trg_key);
+  var notnull = split[0];
+  var isnull = split[1];
+  
+  return notnull.merge(isnull.map(compute_property));
+};
+
+
+/***
+ * set burn_height property to buildings according to following rationale:
+ * if exist: 'burn_height' is taken from 'est_height' property
+ * else 'burn height' is 'level_height' variable multiplied with 'building_levels' property
+ *   where missing set missing 'building_levels' property with default value
+ * 
+ * inputs: list fc, default value building_levels, default level height
+ */
+var burn_height_AllBuildings = function(fc_list, default_building_levels_list, level_height_list) {
+  
+  // function for single feature collection
+  var burn_height_buildings = function(i, fc_in){
+    // input is an index value
+    // get the inputs for build_buildings with index
+    var fc = ee.FeatureCollection(ee.List(fc_list).get(i));
+    var default_levels = ee.Number(ee.List(default_building_levels_list).get(i));
+    var level_height = ee.Number(ee.List(level_height_list).get(i));
+
+    // make new burn height property
+    fc = fc.map(function(f) {return f.set('burn_height', null)});
+  
+    // if exist use est_height property
+    // fc = add_property_multiply(fc, 'burn_height', 'est_height', ee.Number(1));
+    
+    // fill in missings building_levels property with a default value
+    fc = add_property_constant(fc, 'building_levels', default_levels);
+    
+    // multiply number of building_levels with level_height, map to 'burn_height' where missing
+    fc = add_property_multiply(fc, 'burn_height', 'building_levels', level_height);
+
+    // return merged feature collection with burn_height property
+    return fc.merge(ee.FeatureCollection(fc_in));
+  };
+  
+  // iterate over list and return enriched merged fc; start with empty fc
+  var index = ee.List.sequence(0,null,1, ee.List(default_building_levels_list).length());
+  return ee.FeatureCollection(index.iterate(burn_height_buildings, ee.FeatureCollection([])));
+};
+
+
+// step 3: burn polygons to grid
+/***
+ * burn property value of feature collection to map
+ * fill value is zero; if multiple features take the max property value
+ * 
+ * inputs: feature collection with buildings, burn property, resolution
+ */
+var burn_map_max = function(fc, prop, resolution) {
+  //make a map with zeros
+  var blank = ee.Image(0);
+  // reduce fc to image and burn
+  var fc_burn = fc.reduceToImage([prop], ee.Reducer.max());
+  fc_burn = blank.where(fc_burn.gt(0), fc_burn)
+    .reproject('EPSG:4326', null, resolution);
+  return fc_burn;
+};
+
+
+/***
+ * burn property value of feature collection to map
+ * fill value is zero; if multiple features take the min property value
+ * 
+ * inputs: feature collection with buildings, burn property, resolution
+ */
+var burn_map_min = function(fc, prop, resolution) {
+  //make a map with zeros
+  var blank = ee.Image(0);
+  // reduce fc to image and burn
+  var fc_burn = fc.reduceToImage([prop], ee.Reducer.min());
+  fc_burn = blank.where(fc_burn.gt(0), fc_burn)
+    .reproject('EPSG:4326', null, resolution);
+  return fc_burn;
+};
+
+
+// ********* ALL INPUTS START HERE! *********************************
+// read osm poly
+//var osm_polys = ee.FeatureCollection('ft:1RvpBw-GK43EV0CpXWi6La-txXdD-TE2xiy7JiGd1');
+var osm_polys = ee.FeatureCollection('ft:1l8s4AUPo5NEXDGHCvbQCXTFBdG069b8hAi5qtxPH');
+
+// filter residential & commercial buildings
+var osm_residential = filter_fc(osm_polys, ['building'], [['residential']]);
+var osm_commercial = filter_fc(osm_polys, ['building'],[['commercial']]);
+// added one additional filter for validation, H.C. Winsemius (2016-01-13)
+var osm_school = filter_fc(osm_polys, ['building'],[['school']]);
+
+// assing burn_height property to all buildings
+// inputs: list fc, default value building_levels, default level height
+var osm_AllBuildings_wHeight = burn_height_AllBuildings([osm_residential, osm_commercial, osm_school], [1, 4, 2], [3, 4, 4]);
+
+
+// burn Allbuldings fc to map
+// inputs: feature collection with buildings, burn property, resolution
+var osm_min_height = burn_map_min(osm_AllBuildings_wHeight, 'burn_height', 2);
+
+//  test
+// print('check if est_height property exist using contains filter:');
+// print(osm_commercial.first().propertyNames().contains('est_height'));
+// print('filter on est_height property not equals null and show first. NOTE that est_height property is emtpy for all features:');
+// print(splitIsNull(osm_residential, 'est_height')[0].first());
+// print('check if building_levels property exist:');
+// print(osm_commercial.first().propertyNames().contains('est_height'));
+// print('filter on building_levels property not equals null and show first:');
+// print(splitIsNull(osm_residential, 'building_levels')[0].first());
+
+// check for buildings with missing 'burn_height 'values
+print('show first feature with new burn_height value');
+print(osm_AllBuildings_wHeight.first());
+print('building has burn_height [m] of:');
+print(osm_AllBuildings_wHeight.first().get('burn_height'));
+
+// add to map
+Map.setCenter(39.262015, -6.808537, 20);
+Map.addLayer(osm_residential, {color: 'BB4400'}, 'residential buildings');
+Map.addLayer(osm_commercial, {color: '22DDFF'}, 'commercial buildings');
+Map.addLayer(osm_school, {color: 'DDFF22'}, 'school buildings');
+Map.addLayer(osm_AllBuildings_wHeight, {color: '000000'}, 'all buildings /w h prop');
+
+Map.addLayer(osm_min_height.sldStyle(style_dem),  {'opacity': 0.8}, 'burned buildings');
+//Map.addLayer(hillshadeit(shaded.sldStyle(style_dem), shaded, 1.5, 4.0), {opacity: 0.5}, 'burned buildings');
+

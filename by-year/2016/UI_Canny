@@ -1,0 +1,46 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var srtm = ee.Image("USGS/SRTMGL1_003");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var az = 50
+var zen = 50
+var z = 1
+var hs = ee.Terrain.hillshade(srtm.multiply(z), az, zen)
+
+function update(az, zen, z) {
+  hs = ee.Terrain.hillshade(srtm.multiply(z), az, zen)
+  
+  var minMax = hs.reduceRegion(ee.Reducer.minMax(), Map.getBounds(true), Map.getScale()*10)
+  var min = minMax.get('hillshade_min').getInfo()
+  var max = minMax.get('hillshade_max').getInfo()
+  var l = ui.Map.Layer(hs, {min: min, max: max}, 'HS')
+
+  Map.layers().set(0, l)
+
+  //Map.layers().set(1, ee.Image(1).visualize({palette:['000000'], opacity: 0.5}))
+}
+
+function updateEdge(σ) {
+  var edge = ee.Algorithms.CannyEdgeDetector(hs, 0.5, σ).focal_max(0.5)
+
+  Map.layers().set(2, edge.mask(edge).visualize({palette:['ffffff']}))
+}
+
+var sliderAzimuth = ui.Slider({
+  min:0, max:360, step:5, onChange: function(v) { update(v, zen, z)},
+})
+
+var sliderZenith = ui.Slider({
+  min:0, max:90, step:5, onChange: function(v) { update(az, v, z)},
+})
+
+var sliderTh = ui.Slider({
+  min:0, max:5, step:0.05, onChange: function(v) { updateEdge(v) },
+})
+
+var sliderZ = ui.Slider({
+  min:1, max:100, step:1, onChange: function(v) { update(az, zen, v) },
+})
+
+var p = ui.Panel([sliderAzimuth, sliderZenith, sliderZ, sliderTh])
+
+Map.add(p)

@@ -1,0 +1,78 @@
+// training with raster
+
+//test confusion matrix 3
+centerMap(-117.6, 33.73, 10);
+
+//Filter collection by bounds, date range, and cloud cover
+function filterCollection(imgcoll, start_date, end_date, poly){
+  return imgcoll.filterDate(start_date, end_date)
+                .filterBounds(poly.centroid())
+                .filter(ee.Filter.lt('CLOUD_COVER', 10));
+}
+
+//Selecting collections
+var poly = ee.Geometry.Polygon([[-117.86407,33.24443],//lower left
+                                [-116.60202,33.24443],//lower right
+                                [-116.60202,33.88500],//upper right
+                                [-117.86407,33.88500]]); //upper left
+                                
+var smallpoly = ee.Geometry.Polygon([[-117.86407,33.4],//lower left
+                                    [-116.9,33.4],//lower right
+                                    [-116.9,33.88500],//upper right
+                                    [-117.86407,33.88500]]); //upper left 
+var clipgeom = smallpoly;
+Map.addLayer(clipgeom, {color:'7FFF00'});
+        
+var start = ee.Date.fromYMD(2009,1,1);
+var end = ee.Date.fromYMD(2012,1,1);
+
+//Source collection
+var l1tcoll = filterCollection(ee.ImageCollection("LT5_L1T_SR"), start, end, poly);
+
+//NDVI collection
+var ndvicoll = l1tcoll.map(function(img){
+                              return img.normalizedDifference(['B4', 'B3'])
+                                      .set({'system:time_start':img.get('system:time_start')});
+                          });
+
+//Reflectance collection
+var reflcoll = l1tcoll.map(function(img){
+  return img.select(['B1','B2', 'B3', 'B4','B5', 'B7']).divide(1e4)
+          .set({'system:time_start':img.get('system:time_start')});
+});
+
+// Train a classifier from a training raster (e.g. USDA cover map)
+function getRasterClassifier(inputimg, trainimg, trainband, traingeom){    
+  return inputimg.trainClassifier({'training_image':trainimg,
+                                  'training_band':trainband,
+                                  'training_region':traingeom,
+                                  'classifier_name': "Cart",
+                                  'subsampling':0.05,
+                                  });
+}
+
+//Apply classification to an img 
+function doMyClassification(inputimg, classifier){
+  var classified = inputimg.classify(classifier);
+  return classified;
+}
+
+//Return a feature with the classifier's confusion matrix
+function getConfusionMatrix(classifier, fname){
+  var props = ee.data.getValue({image: classifier.serialize(),'fields': 'classifier'});
+  var confmatr = ee.Feature(null,{confusion_matrix: ee.List(props.properties.classifier.confusion_matrix)});
+  Export.table(ee.FeatureCollection([confmatr]), fname , {fileFormat:'CSV', driveFileNamePrefix:fname});
+  return confmatr ;
+}
+
+//Training raster
+var usdaclasses = ee.Image('GME/images/00400150459191862107-16096472523519746648');
+Map.addLayer(usdaclasses.randomVisualizer(), 'USDA Cover Type');
+
+//Testing classification
+var inputimg = ee.Image(ndvicoll.first());
+var rast_clsfr = getRasterClassifier(inputimg.clip(clipgeom), usdaclasses.clip(clipgeom), 'b1', clipgeom);
+var rast_clsfd = doMyClassification(inputimg.clip(clipgeom), rast_clsfr);
+Map.addLayer(rast_clsfd.randomVisualizer(), 'Raster Classified');
+
+

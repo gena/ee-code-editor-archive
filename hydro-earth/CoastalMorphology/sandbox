@@ -1,0 +1,78 @@
+//Sandbox
+//===========
+//JFriedman
+//May 28/2015
+//===========
+
+// 1. LOAD SPATIAL EXTENTS FROM COASTLINE "SEARCH" POLYGON
+var aoi = ee.FeatureCollection("ft:1D0Tpjx3qd7dHk8_WeSTDBOdm-igOKkQKy3rzbBHm"); //link to uploaded kml (from fusion drive)
+
+// 2. DEFINE TEMPORAL EXTENTS
+var sdate = '2013-09-01' 
+var edate = new Date()
+
+// 3. DEFINE IMAGE COLLECTION + BAND NAMES
+var DATABASE = 'LANDSAT/LC8_L1T_TOA'
+var BANDS    = ['B1',       'B2',  'B3',   'B4', 'B5',  'B6',  'B7',   'B8', 'B10', 'BQA'];
+var NAMES    = ['coastblue','blue','green','red','nir','swir1','swir2','pan','temp','BQA'];
+
+// 4. GET COLLECTION OF IMAGES
+var images = ee.ImageCollection(DATABASE)
+    .filterDate(sdate,edate)
+    .filterBounds(aoi)
+    .select(BANDS, NAMES);
+
+// 5. SELECT IMAGE + GET DATE
+var image = ee.Image(images.first());
+var imdate = ee.Algorithms.Date(image.get('system:time_start')).format('yyyymmdd_HHMMSS').getInfo();
+
+// 6. PANSHARPEN IMAGE TO 15m RESOLUTION
+var pansharpen = function(im, bands, weight)
+{
+  var rgb = im.select(bands);
+  var pan = im.select('pan').unitScale(0, 1);
+  
+  var hsv  = rgb.rgbtohsv();
+  var intensity = pan.multiply(weight).add(hsv.select('value').multiply(1-weight));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+// 7. CLIP PANSHARPENED IMAGE TO COASTLINE BUFFER EXTENTS
+var clipped = pansharpen(image, ['red', 'green', 'blue'],1).clip(aoi);
+var clipped_coast = pansharpen(image, ['red', 'green', 'coastblue'],1).clip(aoi);
+var clipped_false = pansharpen(image, ['nir', 'red','green'],1).clip(aoi);
+
+print(pansharpen(image, ['red', 'green', 'blue'], 1.0))
+
+// 8. CALCULATE THE NWDI
+var NWDI = clipped_false.normalizedDifference();
+var land = clipped.mask(NWDI.gt(0));
+var water = clipped_coast.mask(NWDI.lt(0));
+
+// 9. VISUALIZE THE RESULTING IMAGE
+var flattenedImage = ee.ImageCollection.fromImages([
+    land.visualize({'bands': ['red', 'green', 'blue'],'min': 0.05, 'max': 0.45,'gamma': 1.5}), //a single-band Landsat image visualized in gray-scale, 
+    water.visualize({'bands': ['red', 'green', 'blue'], 'gain': 3500})  //a single-band image visualized with a given color palette 
+  ]).mosaic();
+
+Map.addLayer(flattenedImage,{},'HDR '+imdate)
+Map.centerObject(aoi,14);
+
+// 10. CONVERT RASTER MASK TO VECTOR
+var NWDI = NWDI.mask(NWDI).where(NWDI.gt(0),1).cast({'nd':'int'})
+var COASTLINE = NWDI.reduceToVectors(null, aoi, 10);
+
+Map.addLayer(COASTLINE)
+
+// 11. EXPORT COASTLINE AS KML
+var filenamePrefix = 'COASTLINE';
+var taskParams = {
+    'driveFolder' : 'Coastal Morphology',
+    'driveFileNamePrefix': imdate,
+    'fileFormat' : 'KML'
+  };
+Export.table(COASTLINE, filenamePrefix, taskParams);
+
+Export.image(flattenedImage.visualize())

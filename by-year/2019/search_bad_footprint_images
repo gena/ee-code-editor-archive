@@ -1,0 +1,56 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var s2 = ee.ImageCollection("COPERNICUS/S2"),
+    s1 = ee.ImageCollection("COPERNICUS/S1_GRD"),
+    l5 = ee.ImageCollection("LANDSAT/LT05/C01/T1_TOA"),
+    aster = ee.ImageCollection("ASTER/AST_L1T_003"),
+    l4 = ee.ImageCollection("LANDSAT/LT04/C01/T1_TOA"),
+    l7 = ee.ImageCollection("LANDSAT/LE07/C01/T1_RT_TOA"),
+    l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+function getMask(scale) {
+  return function(i) {
+    i = i.select(0)
+    
+    var areaFootprint = i.geometry().area(scale)
+    
+    var areaMask = ee.Image.pixelArea().mask(i.mask()).reduceRegion({
+      reducer: ee.Reducer.sum(), bestEffort: true, geometry: i.geometry(), scale: scale, tileScale: 4
+    }).values().get(0)
+    
+    var areaMismatchRatio = ee.Number(areaFootprint).subtract(areaMask).abs().divide(areaFootprint)
+    
+    return i.select(0)
+      .set({ areaMismatchRatio: areaMismatchRatio})
+  }
+}
+
+function findFootprintMaskMismatchRatio(images, bounds, name, scale) {
+  images = images.filterBounds(bounds)
+
+  print(name)
+
+  print('Total: ', images.size())
+
+  images = images.map(getMask(scale)).filter(ee.Filter.gt('areaMismatchRatio', 0.1)).limit(10)
+
+  print('Bad: ', images.size())
+  
+  print(ui.Chart.feature.histogram({ features: images, property: 'areaMismatchRatio' }))
+  
+  print(images.sort('areaMismatchRatio', false).limit(5))
+  Map.addLayer(images.map(function(i) { return i.mask().mask(i.mask()) }).mosaic(), {}, 'bad mask ' + name)
+  Map.addLayer(images.geometry(), {}, 'bad geometry ' + name)
+}
+
+var bounds = Map.getBounds(true)
+var scale = 10000
+
+/*findFootprintMaskMismatchRatio(l4, bounds, 'L4', scale)
+findFootprintMaskMismatchRatio(l5, bounds, 'L5', scale)
+findFootprintMaskMismatchRatio(l7, bounds, 'L7', scale)
+findFootprintMaskMismatchRatio(l8, bounds, 'L8', scale)
+findFootprintMaskMismatchRatio(aster, bounds, 'ASTER', scale)
+*/
+//findFootprintMaskMismatchRatio(s1, bounds, 'S1', scale)
+findFootprintMaskMismatchRatio(s2, bounds, 'S2', scale)
+

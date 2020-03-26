@@ -1,0 +1,40 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([-58.68415801476738, -34.08007215170293]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+ 
+var collection= ee.ImageCollection ("LANDSAT/LC08/C01/T1")
+.filterDate ('2017-01-01', '2018-01-01')
+//print ( collection.size ())
+
+
+var addNDVI = function(image){
+var ndvi2= image.expression ("(nir-red)/(nir+red)", {
+  nir :image.select ("B5"), 
+  red: image.select ("B4") 
+  
+}).rename ("ndvi")
+return ndvi2 }
+
+
+var withNDVI =collection.map (addNDVI)
+var maxNDVI= withNDVI.reduce (ee.Reducer.max())
+Map.addLayer (maxNDVI)
+var threshold= maxNDVI.gt(0.6)
+var highNdvi= maxNDVI.updateMask (threshold)
+Map.addLayer(highNdvi) 
+var roi = geometry.buffer(100000)
+Map.addLayer (roi)
+
+var area = threshold.multiply (ee.Image.pixelArea()).reduceRegion ({
+  reducer: ee.Reducer.sum(),
+  geometry: roi,
+  scale:30,
+  maxPixels: 1e9
+})
+print (area)
+
+
+
+
+
+

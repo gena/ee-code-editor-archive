@@ -1,0 +1,16 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var dem = ee.Image("JAXA/ALOS/AW3D30_V1_1"),
+    land = ee.Image("users/gena/land_polygons_image"),
+    srtm = ee.Image("USGS/SRTMGL1_003");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.setOptions('HYBRID')
+var palette = ['000000', '09151F','1D2931','313F47','495A66','542A21','627B8B','934220','E48352','87A7B5','ffffff']
+dem = dem.select('MED').resample('bicubic').updateMask(land.mask())
+var demStyled = dem.visualize({ min: -10, max:2500, palette: palette })
+//Map.addLayer(demStyled)
+var hs = ee.Algorithms.Terrain(dem.multiply(100)).select('hillshade').unitScale(100, 180)
+var hsv = demStyled.unitScale(0, 255).rgbToHsv()
+var w = 0.8
+hs = hsv.select('value').multiply(w).add(hs.multiply(1-w))
+demStyled = hsv.addBands(hs, ['value'], true).hsvToRgb()
+Map.addLayer(demStyled)

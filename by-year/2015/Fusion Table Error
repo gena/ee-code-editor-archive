@@ -1,0 +1,9 @@
+// Create a feature collection from a Fusion Table.
+//
+// Select "desert" features from the TNC Ecoregions fusion table.
+var fc = ee.FeatureCollection('ft:1R9ciOoVAsr0obvNKae2AM0OFjIyWrKMuBvx79KHe');
+
+Map.addLayer(fc);
+
+print(fc.toList(1,0))
+// Map.addLayer(fc);

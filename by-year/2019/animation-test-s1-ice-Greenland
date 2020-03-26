@@ -1,0 +1,109 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([-59.823642576358, 75.96840890497327]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/*
+Copyright (c) 2018 Gennadii Donchyts. All rights reserved.
+
+This work is licensed under the terms of the MIT license.  
+For a copy, see <https://opensource.org/licenses/MIT>.
+*/ 
+
+var animation = require("users/gena/packages:animation")
+var assets = require('users/gena/packages:assets')
+var charting = require('users/gena/packages:charting')
+
+// Map.centerObject(geometry, 9)
+
+var mode = 'IW'
+var bands = 'HH'
+
+var start = ee.Date('2019-01-01')
+var stop = ee.Date('2020-01-01')
+
+var vmin = -20.0;
+var vmax =  -10.0;
+
+var palette = [
+  '#030512',
+  '#0e1023',
+  '#1b1a36',
+  '#26244a',
+  '#302e5f',
+  '#383874',
+  '#3c4288',
+  '#3e4f9b',
+  '#3e5da8',
+  '#3e6cb1',
+  '#427ab7',
+  '#4887bc',
+  '#5295c0',
+  '#5da3c5',
+  '#6ab1cb',
+  '#7abed0',
+  '#8ccbd5',
+  '#a3d7dc',
+  '#bce3e6',
+  '#d4f0f2'
+]
+
+var images = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filterBounds(geometry)
+  // .filterMetadata('instrumentMode', 'equals', mode)
+  // .filter(ee.Filter.listContains('transmitterReceiverPolarisation', bands))
+  .filterDate(start, stop)
+  .filterBounds(geometry)
+
+print('S1', images.size())
+
+var imagesOptical = assets.getImages(geometry, {
+  missions: ['L7', 'L8', 'S2'],
+  filter: ee.Filter.date(start, stop)
+})
+
+var bounds = Map.getBounds(true)
+imagesOptical = assets.getMostlyCleanImages(imagesOptical, bounds, { scale: Map.getScale() * 10 })
+  .sort('system:time_start')
+
+print('Optical', imagesOptical.size())
+
+// plot
+var rect = ee.Geometry.Rectangle({ coords: [[0, 0], [100, 4]], geodesic: false })
+var plotOptions = { area: { width: 1, color: '000000', fillColor: '00000011' } }
+  
+var plot = new charting.Plot(rect.bounds(), plotOptions)
+plot.setMinMax(start.millis(), stop.millis(), 0, 1)
+var times = ee.List(images.aggregate_array('system:time_start'))
+plot.addRugSeries('S1', times, { width: 1, color: 'red' }, 1)  
+print('S1', plot.getThumbnail({ dimensions: '600x24'}))
+
+var plot = new charting.Plot(rect.bounds(), plotOptions)
+plot.setMinMax(start.millis(), stop.millis(), 0, 1)
+var times = ee.List(imagesOptical.filter(ee.Filter.eq('MISSION', 'S2')).aggregate_array('system:time_start'))
+plot.addRugSeries('S2', times, { width: 1, color: 'red' }, 1)  
+print('S2', plot.getThumbnail({ dimensions: '600x24'}))
+
+throw(0)
+
+
+var duration = 6
+var imagesComposite = ee.List.sequence(0, 120, duration).map(function(t) {
+  var t0 = ee.Date(start).advance(t, 'day')
+  var t1 = ee.Date(start).advance(t, 'day').advance(duration, 'day')
+  var results = images.filterDate(t0, t1)
+    
+  return results.max().set({ count: results.size(), 'system:time_start': t0.millis() })
+}).filter(ee.Filter.gt('count', 0))
+
+imagesComposite = ee.ImageCollection(imagesComposite)
+
+function visualize(image) {
+    var rgb = ee.Image(10.0).pow(image.divide(10.0))
+      .visualize({ bands: bands, min: 0, max: 1, palette: palette })
+
+    return rgb.set({label: ee.Date(image.get('system:time_start')).format("YYYY-MM-dd")})
+};
+
+var video = imagesComposite.map(visualize)
+print(video.first())
+
+animation.animate(video, { maxFrames: 50, label: 'label' })

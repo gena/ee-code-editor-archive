@@ -1,0 +1,158 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var s2 = ee.ImageCollection("COPERNICUS/S2");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// This helper function returns a list of new band names.
+var getNewBandNames = function(prefix) {
+  var seq = ee.List.sequence(1, bandNames.length());
+  return seq.map(function(b) {
+    return ee.String(prefix).cat(ee.Number(b).int());
+  });
+};
+
+// This function accepts mean centered imagery, a scale and
+// a region in which to perform the analysis.  It returns the
+// Principal Components (PC) in the region as a new image.
+var getPrincipalComponents = function(centered, scale, region) {
+  // Collapse the bands of the image into a 1D array per pixel.
+  var arrays = centered.toArray();
+
+  // Compute the covariance of the bands within the region.
+  var covar = arrays.reduceRegion({
+    reducer: ee.Reducer.centeredCovariance(),
+    geometry: region,
+    scale: scale,
+    maxPixels: 1e9
+  });
+
+  // Get the 'array' covariance result and cast to an array.
+  // This represents the band-to-band covariance within the region.
+  var covarArray = ee.Array(covar.get('array'));
+
+  // Perform an eigen analysis and slice apart the values and vectors.
+  var eigens = covarArray.eigen();
+
+  // This is a P-length vector of Eigenvalues.
+  var eigenValues = eigens.slice(1, 0, 1);
+  
+  print('eigen values: ', eigenValues)
+  
+  // This is a PxP matrix with eigenvectors in rows.
+  var eigenVectors = eigens.slice(1, 1);
+  
+  print('eigen vectors: ', eigenVectors)
+
+  // Convert the array image to 2D arrays for matrix computations.
+  var arrayImage = arrays.toArray(1);
+
+  // Left multiply the image array by the matrix of eigenvectors.
+  var principalComponents = ee.Image(eigenVectors).matrixMultiply(arrayImage);
+
+  // Turn the square roots of the Eigenvalues into a P-band image.
+  var sdImage = ee.Image(eigenValues.sqrt())
+    .arrayProject([0]).arrayFlatten([getNewBandNames('sd')]);
+
+  // Turn the PCs into a P-band image, normalized by SD.
+  return principalComponents
+    // Throw out an an unneeded dimension, [[]] -> [].
+    .arrayProject([0])
+    // Make the one band array image a multi-band image, [] -> image.
+    .arrayFlatten([getNewBandNames('pc')])
+    // Normalize the PCs by their SDs.
+    .divide(sdImage);
+};
+
+
+function toNatural(i) {
+  return ee.Image(ee.Image.constant(10.0).pow(i.divide(10.0)).copyProperties(i, ['system:time_start']));
+}
+
+//Load S1 Collection
+var s1 = ee.ImageCollection('COPERNICUS/S1_GRD')
+   //.filterDate('2014-01-01', '2015-01-01')
+   .filterBounds(Map.getBounds(true))
+   
+var iVHVV = s1
+   .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+   .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+   .select(['VH', 'VV'])
+
+print(iVHVV.size())   
+
+iVHVV = iVHVV
+  .limit(60)
+  .map(function(i) { return i.resample('bicubic') })
+  .median()
+
+var iHHHV = s1
+   .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'HH'))
+   .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'HV'))
+   .select(['HH', 'HV'])
+
+print(iHHHV.size())   
+
+iHHHV = iHHHV
+  .limit(60)
+  .map(function(i) { return i.resample('bicubic') }) 
+  .median()
+  
+
+// var iHHHV = ee.Image('COPERNICUS/S1_GRD/S1A_EW_GRDH_1SDH_20141016T173241_20141016T173259_002858_0033AE_5D3E').resample('bicubic')
+//   .select(['HH', 'HV'])
+
+// var iVHVV = ee.Image('COPERNICUS/S1_GRD/S1A_EW_GRDM_1SDV_20150110T060544_20150110T060617_004105_004F88_358F').resample('bicubic')
+//   .select(['VH', 'VV'])
+
+var i = toNatural(iHHHV.addBands(iVHVV))
+
+
+// sharpen see e.g. http://www.cse.psu.edu/~rtc12/CSE486/lecture11_6pp.pdf
+// var log = i
+//   .convolve(ee.Kernel.gaussian(10, 7, 'meters')) // G
+//   .convolve(ee.Kernel.laplacian8(0.4)) // L of G
+  
+// i = i.subtract(log)
+
+var gamma = 2
+
+Map.addLayer(i, {bands: ['VH', 'HV', 'HH'], min: 0, max: [0.15, 0.25, 0.75], gamma: gamma}, 'HV, VH, HH')
+Map.addLayer(i, {bands: ['VH', 'HV', 'VV'], min: 0, max: [0.15, 0.25, 0.75], gamma: gamma}, 'HV, VH, VV')
+Map.addLayer(i, {bands: ['VH', 'HV', 'VV'], min: 0, max: [0.5, 0.75, 2.5], gamma: gamma}, 'HV, VH, VV high')
+Map.addLayer(i, {bands: ['VH', 'HV', 'HV'], min: 0, max: [0.15, 0.25, 0.15], gamma: gamma}, 'HV, VH, HV')
+
+var region = Map.getBounds(true)
+var scale = Map.getScale()
+
+var bandNamesOptical = ['B8A','B8','B3','B2','B1']
+var is2 = s2.filterDate('2017-01-01', '2018-01-01').filterBounds(region).select(bandNamesOptical).map(function(i) { return i.resample('bicubic') }).reduce(ee.Reducer.percentile([20])).divide(10000).rename(bandNamesOptical)
+
+i = i
+  .addBands(is2)
+  .addBands(i.select('HH').subtract(i.select('VV')).rename('HH-VV'))
+
+Map.addLayer(i, {bands: ['VH', 'HV', 'HH-VV'], min: [0, 0, -0.15], max: [0.5, 0.5, 1.5], gamma: gamma}, 'VH, HV, HH-HV')
+
+var bandNames = i.bandNames() 
+var meansDict = i.reduceRegion({ reducer: ee.Reducer.mean(), geometry: region, scale: scale });
+var means = ee.Image.constant(meansDict.values());
+var centered = i.subtract(means);
+
+
+// Get the PCs at the specified scale and in the specified region
+var pcImage = getPrincipalComponents(centered, scale, region);
+
+
+ee.List.sequence(1, bandNames.length()).evaluate(function(indices) {
+  indices.map(function(i) {
+    var pc = pcImage.select('pc' + i);
+    Map.addLayer(pc.mask(pc), {min:-2, max:2, palette: ['ffff00']}, 'pc' + i, false);
+  })
+})
+
+
+// Map.addLayer(ee.Image([pcImage.select(0), pcImage.select(1), pcImage.select(2)]), {min:-1, max:1}, 'pca123');
+// Map.addLayer(ee.Image([pcImage.select(1), pcImage.select(2), pcImage.select(3)]), {min:-1, max:1}, 'pca234');
+
+// var pc12 = pcImage.select(0).multiply(pcImage.select(1))
+// Map.addLayer(pc12.mask(pc12), {min:-2, max:2, palette: ['ffff00']}, 'pc1 * pc2', false);
+
+Map.addLayer(is2, {min: 0.05, max: 0.3})

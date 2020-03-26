@@ -1,0 +1,101 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #98ff00 */ee.Geometry.Polygon(
+        [[[84.93804931640625, 21.282976338263616],
+          [85.02799987792969, 21.25930125371288],
+          [85.10627746582031, 21.252261980810392],
+          [85.14129638671875, 21.279777225091856],
+          [85.155029296875, 21.31560331675759],
+          [85.13786315917969, 21.382753675350255],
+          [85.15022277832031, 21.43900835015781],
+          [85.07949829101562, 21.490769060231436],
+          [85.04241943359375, 21.549536677734494],
+          [84.99504089355469, 21.571249126146213],
+          [84.913330078125, 21.520155840025915],
+          [84.83985900878906, 21.486296638453588],
+          [84.80827331542969, 21.43964748332894],
+          [84.8748779296875, 21.356536720183236]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+var assets = require('users/gena/packages:assets')
+var palettes = require('users/gena/packages:colorbrewer').Palettes
+
+var bounds = ee.Geometry(Map.getBounds(true))
+
+// get images from one or multiple missions
+var images = assets.getImages(bounds.centroid(1), {
+  filter: ee.Filter.date("2014-01-01", "2020-01-01"),
+  filterMasked: true,
+  resample: true,
+  missions: [
+    'S2', 
+    'L8', 
+    'L7', 
+    //'L5'
+  ]
+}).sort('system:time_start')
+
+// images = images.map(function(i) { 
+//   return i.visualize({bands:['swir','nir','red'], gamma: 2, min: 0.07})
+//     .set({ label: i.date().format('YYYY-MM-dd') })
+// })
+//animation.animate(images, {label: 'label', maxFrames: 300})  
+
+// filter out noisy images
+images = assets.getMostlyCleanImages(images, geometry, {
+    scale: Map.getScale() * 10, 
+    
+    // how much should we deviate from cloud frequency when filtering images, use negative value to allow more (cloudy) images
+    // cloudFrequencyThresholdDelta: 0.20,
+
+    // percentile and band used for cloudness, usually enough to choose one like green    
+    scorePercentile: 95,
+    qualityBand: 'green',
+  })
+  .sort('system:time_start')
+  //.sort('quality')
+
+print('Count: ', images.size())
+
+// compute bad value probability
+var thMin = 80 // CDF thredholds
+var thMax = 90
+images = assets.addCdfQualityScore(images, thMin, thMax /*, includeNeighborhood*/)
+
+// visualize
+
+var maxFrames = 10
+
+// raw
+var imagesRGB = images.map(function(i) {
+  //return i.visualize({bands:['red','green','blue'], gamma: 1.4, min:0.05, max:[0.5, 0.5, 0.55]})
+  //return i.normalizedDifference(['nir','red']).visualize({palette:palettes.YlGn[9], min: -0.1, max: 1})    
+  return i.visualize({bands:['swir','nir','red'], gamma: 2, min: 0.05, max: 0.6})
+    .set({ label: i.date().format('YYYY-MM-dd') })
+})
+  
+// animate
+animation.animate(imagesRGB, {label: 'label', maxFrames: 10, preload: false, position: 'bottom-center'})  
+
+// compute multi-index
+images = images
+  .map(function(i) {
+    var ndwi = i.normalizedDifference(['green', 'nir']).unitScale(-0.05, 0.1)
+    var ndvi = i.normalizedDifference(['nir', 'red']).unitScale(0, 0.5)
+    var mndwi = i.normalizedDifference(['green', 'swir']).unitScale(-0.05, 1)
+    
+    var weight = i.select('weight')
+    weight = weight.mask(ee.Image.constant(1).subtract(weight))
+    
+    return ee.Image([ndwi, ndvi, mndwi])
+      .updateMask(weight)
+      .set({ label: i.date().format('YYYY-MM-dd') })
+  })
+  
+// animate
+animation.animate(images, {label: 'label', maxFrames: 10})  
+
+// export video
+// var utils = require('users/gena/packages:utils')
+// utils.exportVideo(images, {bounds: bounds, label: 'label', maxFrames: 600, name: 'animation', label: 'label' })
+
+

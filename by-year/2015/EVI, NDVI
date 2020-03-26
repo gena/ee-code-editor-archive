@@ -1,0 +1,35 @@
+// EVI, NDVI
+
+var collection = ee.ImageCollection('MODIS/MCD43A4').filterDate('2005-01-01', '2006-01-01');
+
+var IndicesFunction = function(img) {
+  
+  // Define global variables
+  img = img.multiply(0.0001);
+  var red = img.select('Nadir_Reflectance_Band1');    
+  var nir = img.select('Nadir_Reflectance_Band2'); 
+  var blue = img.select('Nadir_Reflectance_Band3'); 
+  
+  // run the expression over the image
+  var ndvi = img.expression('(nir - red) / (nir + red )', {red: red, nir: nir});
+  var evi = img.expression('2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue + 1)', {red: red, nir: nir, blue: blue});
+ 
+  // return an image and give them a nice name
+  return  ee.Image(evi.select([0], ['evi'])).addBands(ndvi.select([0], ['ndvi']));
+};
+
+
+var indices = collection.map(IndicesFunction);
+print (indices);
+
+Map.addLayer(indices.select('evi'), 
+  {min:0, max:1},
+  'evi',
+  true);
+  
+  
+Map.addLayer(indices.select('ndvi'), 
+  {min:0, max:1},
+  'ndvi',
+  true);
+  

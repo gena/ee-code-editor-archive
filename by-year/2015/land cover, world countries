@@ -1,0 +1,52 @@
+// land cover, world countries
+
+var world = ee.FeatureCollection('ft:1EYqXxm5kePn3awAMk-9bq4oMzMCyp0Qy38ueKM9B');
+var img = ee.Image("L7_TOA_1YEAR_2009")
+
+var bands = ["10", "20", "30", "40", "50", "62", "70"]
+
+var cover = ee.Image("MCD12Q1/MCD12Q1_005_2009_01_01").select("Land_Cover_Type_1")
+
+//Filter some countries that fail (check later)
+var africa = world.filter(ee.Filter.eq('REGION','Africa')).filter(ee.Filter.neq('Name','Equatorial Guinea'))
+.filter(ee.Filter.neq('Name','Gabon'))
+.filter(ee.Filter.neq('Name','Seychelles'))
+.filter(ee.Filter.neq('Name','Comoros'))
+.filter(ee.Filter.neq('Name','Sao Tome and Principe'))
+.filter(ee.Filter.neq('Name','Mauritius'))
+.filter(ee.Filter.neq('Name','South Africa'))
+
+print('Number of countries: ' + africa.aggregate_count('.all').getInfo())
+
+function create_landcover(f){
+    var npoints = 10000 // set as high as possible (40000?)
+    
+    var points = ee.FeatureCollection.randomPoints(f.geometry(), npoints, npoints, 1)
+
+    var training = cover.addBands(img).reduceToVectors({
+        reducer:"mean",
+        geometry:points,
+        geometryType:"centroid",
+        scale:500,
+        crs:"EPSG:4326",
+        labelProperty:'Land_Cover_Type_1'
+    })
+
+    var classifier = training.trainClassifier({
+        property_list:bands,
+        class_property:"Land_Cover_Type_1",
+        classifier_name:"RifleSerialClassifier"
+    })
+
+    var ls7_1999 = ee.Image("L7_TOA_1YEAR_1999")
+    var out = ls7_1999.classify(classifier)
+    return out.clip(f).toInt8()
+}
+
+var landcover_africa = africa.map(create_landcover)
+var n = 10 // increase up to 50 (total numbers of countries)
+landcover_africa = ee.ImageCollection.fromImages(landcover_africa.toList(n)).reduce(ee.Reducer.mean(),20) // does parallelScale work?
+
+var palette = 'aec3d4,152106,225129,369b47,30eb5b,387242,6a2325,c3aa69,b76031,d9903d,91af40,111149,8dc33b,cc0013,6ca80d,d7cdcc,f7e084,6f6f6f'
+
+Map.addLayer(landcover_africa,{'palette': palette, 'min':0, 'max':17})

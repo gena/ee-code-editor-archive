@@ -1,0 +1,318 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometryA = 
+    /* color: #d63000 */
+    /* shown: false */
+    ee.Geometry.Polygon(
+        [[[-104.5196237251306, -72.22467969338172],
+          [-106.88327077628333, -72.10402429900724],
+          [-110.47213218030811, -72.49023285587981],
+          [-111.52217261003432, -72.76478238674609],
+          [-112.30890686560303, -73.36398023356362],
+          [-112.70110985548513, -74.02733971175167],
+          [-112.34979840920658, -74.64139622451293],
+          [-111.16782121032264, -75.22087419082017],
+          [-108.50056777194868, -75.62790029704172],
+          [-104.25889699721154, -75.82161767973871],
+          [-101.24213110080359, -75.75744860303956],
+          [-99.44895687026303, -75.39846301738524],
+          [-98.83519031949777, -74.88281547658636],
+          [-99.11230258971591, -74.35253681390599],
+          [-99.44485764152, -73.73570067650938],
+          [-100.66919978932117, -73.04771609863967],
+          [-102.94404457489321, -72.47687944397376]]]),
+    s1 = ee.ImageCollection("COPERNICUS/S1_GRD"),
+    geometryB = 
+    /* color: #d63000 */
+    /* shown: false */
+    ee.Geometry.Polygon(
+        [[[155.01127392202523, -76.71110160684877],
+          [156.94046023404633, -77.78555234704233],
+          [160.74067056996728, -78.62901925147663],
+          [165.90530398404633, -79.05456457601645],
+          [171.00128548677208, -78.78550897649151],
+          [174.16702273404633, -78.07953299619442],
+          [176.03104339197637, -77.07791337970401],
+          [176.80374148404633, -75.95150288961757],
+          [177.2897911105946, -74.26614102333279],
+          [176.10061648404633, -72.10001653260677],
+          [172.15492179052853, -71.05913756895809],
+          [166.95999148404633, -70.69895432401115],
+          [160.63186648404633, -71.44021079306167],
+          [156.56696671798966, -73.09976574840813],
+          [155.00686648404633, -75.43022042361423]]]),
+    geometryC = 
+    /* color: #d63000 */
+    /* shown: false */
+    ee.Geometry.Polygon(
+        [[[65.19917599992277, -69.89384705015134],
+          [65.32496984706404, -70.66838524250473],
+          [65.99309841382842, -71.36622398184488],
+          [67.62154007132847, -71.94410166372873],
+          [70.30437365639045, -72.15237421793924],
+          [72.84120161241958, -72.16272696658251],
+          [75.27160015570462, -71.88375761254885],
+          [77.08693883161732, -71.41607878213014],
+          [79.21816109648569, -70.88710987129065],
+          [80.71019525139695, -70.22451336411089],
+          [81.47591875771548, -69.35128772644104],
+          [81.50130117142044, -68.4149980583298],
+          [80.20055376292999, -67.44540226982707],
+          [78.14114553172749, -66.66154227798694],
+          [76.10900174350218, -66.01911136603555],
+          [73.45967998368997, -65.69912439858693],
+          [69.78555916379844, -66.03185570930879],
+          [67.01146752487944, -66.93972559416271],
+          [65.89456259879591, -67.89835336046163],
+          [65.59386345114217, -69.1193585535458]]]),
+    rectA = 
+    /* color: #d63000 */
+    /* shown: false */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Geometry.Polygon(
+        [[[154.7206426436975, -75.33969515642858],
+          [154.7206426436975, -80.84327489888956],
+          [174.1444707686975, -80.84327489888956],
+          [174.1444707686975, -75.33969515642858]]], null, false);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/*
+Copyright (c) 2018 Gennadii Donchyts. All rights reserved.
+
+This work is licensed under the terms of the MIT license.  
+For a copy, see <https://opensource.org/licenses/MIT>.
+*/ 
+var bucket = 'deltares-video-map'
+var prefix = 's1-ice-5yr-amery'
+// time per frame
+var duration = 12
+// timespan of video
+var nDays = 365 * 5
+
+
+
+var geometry = geometryC
+var tiler = require('users/gena/packages:tiler')
+var utils = require('users/gena/packages:utils')
+var palettes = require('users/gena/packages:palettes')
+var c = require('users/fbaart/packages:collections')
+
+var animation = require("users/gena/packages:animation")
+var scale = s1.select(0).first().projection().nominalScale().getInfo()
+var maxZoom = tiler.scaleToZoom(scale)
+maxZoom = Math.min(maxZoom, 10)
+
+// Map.centerObject(geometry, maxZoom)
+Map.centerObject(geometry, maxZoom)
+
+// generate alpha mask around boundary
+var radius = 25000
+var g = geometry.buffer(-radius)
+var mask = ee.FeatureCollection(g).distance(radius).paint(g, 0)
+  .divide(radius).subtract(1).multiply(-1).selfMask()
+Map.addLayer(mask, { min: 0, max:  radius}, 'mask', false)
+
+Map.onChangeZoom(function(zoom){
+  print(zoom, Map.getScale())
+})
+print('scale', scale)
+print('zoom', maxZoom)
+
+var end = s1.sort('system:time_start', false).first().date()
+var start = end.advance(-nDays,  'day')
+
+
+var mode = 'IW'
+var bands = 'HH'
+
+// var start = '2019-1-10'
+// var end = '2019-12-31'
+
+var vmin = -20.0;
+var vmax =  -10.0;
+
+// Cmocean ice palette
+var palette = [
+  '#030512',
+  '#0e1023',
+  '#1b1a36',
+  '#26244a',
+  '#302e5f',
+  '#383874',
+  '#3c4288',
+  '#3e4f9b',
+  '#3e5da8',
+  '#3e6cb1',
+  '#427ab7',
+  '#4887bc',
+  '#5295c0',
+  '#5da3c5',
+  '#6ab1cb',
+  '#7abed0',
+  '#8ccbd5',
+  '#a3d7dc',
+  '#bce3e6',
+  '#d4f0f2'
+]
+// palettes.showPalette('ice', palette)
+// var visParams = { bands: bands, min: -0.2, max: 0.6, palette: palette }
+var visParams = {min: -20, max:-2,  palette: palette, bands: bands}
+
+var images = s1
+  .filterBounds(geometry)
+  .filterMetadata('instrumentMode', 'equals', mode)
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', bands))
+  .filterDate(start, end)
+
+
+
+var dateList = ee.List.sequence(0, nDays, duration)
+  .map(function(t) {
+    var t0 = ee.Date(start)
+      .advance(t, 'day')
+    var t1 = ee.Date(start)
+      .advance(t, 'day')
+      .advance(duration, 'day')
+    var result = {
+      i: ee.Number(t).divide(duration),
+      t0: t0,
+      t1: t1
+    }
+    return result
+  })
+
+
+
+function visualize(image) {
+    // var rgb = ee.Image(10.0).pow(image.divide(10.0))
+    //   .visualize(visParams)
+    var rgb = image
+      .visualize(visParams)
+
+    return rgb.set({label: ee.Date(image.get('system:time_start')).format("YYYY-MM-dd")})
+};
+
+var region = geometry.bounds()
+
+
+function exportFrame(i, frame) {
+  // Convert frame counter to 5 padded string
+  var frameId = utils.pad(i, 5)
+  var task = prefix + '-' + frameId
+  var path = prefix + '/' + frameId
+
+  Export.map.toCloudStorage({
+    image: frame, 
+    description: task, 
+    bucket: bucket, 
+    fileFormat: 'png', 
+    path: path,
+    minZoom: 0, 
+    maxZoom: maxZoom,
+    region: region,
+    writePublicTiles: false,
+    skipEmptyTiles: true
+  })
+}
+
+
+function generateFrame(rows) {
+  rows.map(function(row) {
+    var t0 = row.t0.value
+    var t1 = row.t1.value
+    var i = row.i
+    var selection = images
+      .filterDate(t0, t1)
+    var image = selection
+      .max()
+      .set({ count: selection.size(), 'system:time_start': t0 })
+    var image_rgb = visualize(image).updateMask(mask)
+    if (i === 0) {
+
+      Map.addLayer(
+        image,
+        visParams,
+        'vis-log'
+        
+      )
+      Map.addLayer(image_rgb,  {},  'image 0')
+    }
+    exportFrame(i,  image_rgb)
+  })
+}
+
+
+
+print(dateList)
+// dateList.evaluate(generateFrame)
+
+
+print(dateList.get(0))
+var dateListLocal = dateList.getInfo()
+var mapGeometry = Map.getBounds(true)
+var videoImages = s1
+  .filterBounds(rectA)
+  .filterMetadata('instrumentMode', 'equals', mode)
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', bands))
+  .filterDate(start, end)
+
+videoImages = videoImages.map(function(i)  {
+  return i.select(bands)
+  
+})
+print('video', videoImages)
+
+var rgbs = dateListLocal.map(function(row) {
+  var t0 = row.t0.value
+  var t1 = row.t1.value
+  var i = row.i
+  
+  var selection = videoImages
+    .filterDate(t0, t1)
+  var image = selection
+    .max()
+    .set({ count: selection.size(), 'system:time_start': t0 })
+  var image_rgb = visualize(image).updateMask(mask)
+  var bands = image_rgb.bandNames()
+  var nBands = bands.size()
+  image_rgb  = image_rgb.set('nBands', nBands)
+  return image_rgb
+})
+rgbs = ee.ImageCollection(rgbs)
+// remove  images without 3 bands.
+rgbs = rgbs.filter(ee.Filter.eq('nBands', 3))
+
+print('after bands', rgbs)
+
+// rgbs = rgbs.map(function(i) {
+//   return i.set({
+//     isEmpty: i.select(0).mask().reduceRegion({
+//       reducer: ee.Reducer.anyNonZero(),
+//       geometry: rectA,
+//       scale: 1000
+//     }).values().get(0)
+//   })
+// })
+// rgbs = rgbs.filter(ee.Filter.gt('isEmpty', 0))
+
+
+Map.addLayer(c.last(c.head(rgbs, 5)))
+Map.centerObject(rectA, maxZoom)
+var fourk  = '2160x3840'
+var eightk = '4320x7680'
+Export.video.toCloudStorage({
+  collection: rgbs, 
+  description: 'optical-flow-test-4k', 
+  bucket: bucket, 
+  fileNamePrefix: 'optical-flow-test-4k', 
+  framesPerSecond: 10, 
+  dimensions: fourk, 
+  region: rectA,
+  maxPixels: 5000*8000
+})
+  
+
+
+

@@ -1,0 +1,26 @@
+// download image using map bounds
+
+// grab some image
+Map.setCenter(10, 10, 10);
+
+// ... why do we have to wrap .first() once again? Can't it just ee.Image()?
+var image = ee.Image(ee.ImageCollection('LANDSAT/LC8_L1T')
+        .filterBounds(Map.getBounds(true))
+        .filterMetadata('CLOUD_COVER', 'less_than', 20).first()); 
+
+// get bounds as a geometry
+var bounds = JSON.stringify(Map.getBounds(true));
+
+print(bounds)
+
+print(image.visualize().getDownloadURL(
+  {
+    name: 'L8', 
+    format: 'png', 
+    scale: 30,
+    region: bounds
+  }
+));
+
+
+// export to Google Drive

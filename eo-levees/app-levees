@@ -1,0 +1,20 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var OSM_levees_lines = ee.FeatureCollection("users/arjenhaag/ParTerra/Global/OSM_man_made_levees_global"),
+    OSM_levees_polys = ee.FeatureCollection("users/arjenhaag/ParTerra/Global/OSM_man_made_ply_levees_global"),
+    NL_levees = ee.FeatureCollection("users/arjenhaag/ParTerra/NL/NL_PrimaireWaterkeringen_dijktrajecten");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/***
+ * 
+ * Integrate:
+ * 
+ * https://code.earthengine.google.com/751ac02b24ea04656a34b3580b399ef6 - HAND, max water?
+ * https://gena.users.earthengine.app/view/mena-waterbodies 
+ * https://gena.users.earthengine.app/view/urban-lights - urban extent (and lights / infrastructure?)
+ * https://gena.users.earthengine.app/view/waterbodies - basins (3D)
+ * https://code.earthengine.google.com/4a2a5e1e0245907c86112f5ae93eae1e - water occurrence (higher-res)
+ * 
+ * levees script from Arjen
+ * 
+ */
+ 
+ 

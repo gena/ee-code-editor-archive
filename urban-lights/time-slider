@@ -1,0 +1,36 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var viirs = ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+var animation = require('users/gena/packages:animation')
+var palettes = require('users/gena/packages:colorbrewer').Palettes
+
+viirs = viirs.map(function(i) { return i.resample('bicubic')})
+
+print(viirs)
+
+
+var startDate = viirs.sort('system:time_start', true).first().date()
+var endDate = viirs.sort('system:time_start', false).first().date()
+
+var visParams = {
+  bands: ['avg_rad'],
+  min: 0,
+  max: 35,
+  palette: palettes.YlOrRd[9].reverse()
+}
+
+var images = viirs.map(function(i) {
+  var mask = i
+    .unitScale(0, 5)
+    .clamp(0, 1)
+  i = i.updateMask(mask)
+  var rgb = i.visualize(visParams)
+  rgb = rgb.set({ label: i.date().format('YYYY-MM') })
+  return rgb 
+})
+print(images)
+// print(images.aggregate_array('label'))
+Map.addLayer(ee.Image(1), {palette:['black']}, 'black', true, 0.9)
+animation.animate(images, {label: 'label', maxFrames: 60, opacity: 0.7})
+

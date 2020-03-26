@@ -1,0 +1,219 @@
+////////////////////////////////// 1) SETTING VARIABLES FOR ANALYSIS ////////////////////////////////////////
+var GDriveOutputImgFolder = 'GEEOutputs';
+var VarForSeason = 'SD'; //'SD' or 'CV' Seasonality
+
+// 1.1 ) Definition of the studied period
+var FirstYear = 2002; // First year of the studied period
+var LastYear = 2017;  // Last year of the studied period
+var TimeFrame = ee.List.sequence(FirstYear, LastYear); 
+var NumberYears = LastYear - FirstYear + 1;
+var doy = ee.List.sequence(1, 366, 16);
+// 1.2) Select Image Collection // 
+var coll1 = ee.ImageCollection('MODIS/006/MOD13Q1').filterDate(String(FirstYear)+'-01-01', String(LastYear)+'-12-31'); // EVI y NDVI
+// 1.3) Select the target variable/spectral index // 
+var SelectedVariableName = 'NDVI'; //EVI'
+var SelectedVariable = coll1.select([SelectedVariableName]); // index selected from the "MODIS/006/MOD13Q1" collection
+
+// 1.4) Study area // 
+var UseRegion = 1; // Set to 0 to compute the Globe
+if (UseRegion == 1){
+var Rectangle = /* color: #d6300 */ ee.Geometry.Polygon(// Square around Andalusia //Decimal degrees in WGS84
+  [[[-7.60,39.00],
+  [-7.60,35.84],
+  [-1.47,35.84],
+  [-1.47,39.00]
+  ]]);
+ 
+var iberian = /* color: #d63000 */ee.Geometry.Polygon(
+[[[-9.771656271829329,44.18358031084569],
+[-9.947437521829329,36.56414160180858],
+[-5.860523459329329,35.49801862762591],
+[-3.004078146829329,36.03288387569886],
+[-0.6749765843293289,37.09177077332209],
+[0.8631093531706711,39.06333937615859],
+[3.983226540670671,41.67434541636698], 
+[4.071117165670671,42.97390587207905],
+[-2.300953146829329,44.935055080569136],
+[-9.771656271829329,44.18358031084569]]]);
+
+  var region = iberian;// Shape o Rectangle o Geometry
+  Map.addLayer(region);  
+}
+//////////////////////////////////
+///2) COMPUTATION OF VARIABLES ///
+//////////////////////////////////
+//LAND MASK from  GLOBCOVER
+var GlobCover = ee.Image('ESA/GLOBCOVER_L4_200901_200912_V2_3');
+// Select the anytime water mask.
+var GlobCoverLandCover = GlobCover.select('landcover');
+// Create a binary mask.
+//Map.addLayer(NoWaterNoIceNoSnow, {min:0, max:222}, 'GLOBCOVERall');
+var NoWaterNoIceNoSnow = GlobCoverLandCover.lt(210);
+var mask = NoWaterNoIceNoSnow;
+Map.addLayer(mask, {min:0, max:1}, 'GLOBCOVERmask');
+
+// 2.1) Annual EFAs //
+//Imports the MODIS image collection, the temporal subset is defined
+// Function to calculate the average year
+
+var Evi_mensual = doy.map(function(m) {
+var forcenum = ee.Number(m)
+  // Filter to 1 month.
+  var Evi_men = SelectedVariable.filter(ee.Filter.dayOfYear(forcenum, forcenum.add(16))).mean();
+  // add month band for MMax
+  var Evi_men2 = Evi_men.updateMask(mask);
+return  Evi_men2.addBands(ee.Image.constant(forcenum).int8());
+});
+print(Evi_mensual.size())
+var Evi_mensual = ee.ImageCollection(Evi_mensual);
+    if (UseRegion == 1){
+    var Evi_mensual = ee.ImageCollection(Evi_mensual
+    .map(function(image){
+      var xx = image.clip(iberian);
+      return xx;
+    }));
+      }
+var Evi_mensual_1band = doy.map(function(m) {
+  var forcenum = ee.Number(m)
+  // Filter to 1 month.
+  var Evi_men_1band = SelectedVariable.filter(ee.Filter.dayOfYear(forcenum, forcenum.add(16))).mean();
+  //look for calendar day of year function
+  // add month band for MMax
+  var Evi_men2_1band = Evi_men_1band.updateMask(mask);
+ return  Evi_men2_1band;
+});
+//this clips collection to study area//
+var Evi_mensual_1band = ee.ImageCollection(Evi_mensual_1band);
+    if (UseRegion == 1){
+    var Evi_mensual_1band = ee.ImageCollection(Evi_mensual_1band
+    .map(function(image){
+      var xx = image.clip(iberian);
+      return xx;
+    }));
+    }
+print(Evi_mensual_1band);
+
+//convert a collection with 1-band images to 1 stacked image//
+var stackCollection = function(Evi_mensual_1band) {
+  // Create an initial image.
+  var first = ee.Image(Evi_mensual_1band.first()).select([]);
+
+  // Write a function that appends a band to an image.
+  var appendBands = function(image, previous) {
+    return ee.Image(previous).addBands(image);
+  };
+  return ee.Image(Evi_mensual_1band.iterate(appendBands, first));
+};
+var stacked = stackCollection(Evi_mensual_1band);
+print('iberian', stacked);
+
+Map.addLayer(stacked, {}, 'iberian');
+
+var scale = 231.65635826395825
+
+// Mean center the data to enable a faster covariance reducer
+// and an SD stretch of the principal components.
+var meanDict = stacked.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: region,
+    scale: scale,
+    maxPixels: 1e9,
+});
+
+var means = ee.Image.constant(meanDict.values(bandNames));
+var centered = stacked.subtract(means);
+
+
+//var bandNames = Evi_mensual_1band;
+
+//export each image in collection//
+Export.image.toDrive({
+image: stacked,
+description: 'iberian',
+maxPixels: 1e13,
+folder: GDriveOutputImgFolder,
+crs:'SR-ORG:6974', 
+crsTransform: [231.65635826395825, 0, -20015109.353988, 0, -231.65635826395834, 10007554.676994]
+// scale: 250
+})
+//exporting with the original projection and transformation (the 6 element)
+//subset stacked image//
+
+//do PCA on inter-annual mean NDVI by month, where each month is a band in the stack//
+// var centered = stacked;
+
+// This helper function returns a list of new band names.
+var getNewBandNames = function(prefix) {
+var seq = ee.List.sequence(1, bandNames.length());
+return seq.map(function(b) {
+ return ee.String(prefix).cat(ee.Number(b).int());
+});
+};
+var bandNames = stacked.bandNames();
+
+var getPrincipalComponents = function(centered, scale, region) {
+  // Collapse the bands of the image into a 1D array per pixel.
+  var arrays = centered.toArray();
+
+  // Compute the covariance of the bands within the region.
+  var covar = arrays.reduceRegion({
+   reducer: ee.Reducer.centeredCovariance(),
+   geometry: region,
+   scale: scale,
+   maxPixels: 1e9
+ });
+
+  // Get the 'array' covariance result and cast to an array.
+  // This represents the band-to-band covariance within the region.
+  var covarArray = ee.Array(covar.get('array'));
+  print('array', covarArray);
+
+  // Perform an eigen analysis and slice apart the values and vectors.
+  var eigens = covarArray.eigen();
+
+  // This is a P-length vector of Eigenvalues.
+  var eigenValues = eigens.slice(1, 0, 1);
+  
+  print('eigenvalues', eigenValues);
+  
+  // This is a PxP matrix with eigenvectors in rows.
+  var eigenVectors = eigens.slice(1, 1);
+  print('eigenVectors', eigenVectors);
+  /// Converts the array image to 2D arrays for matrix computations.
+  var arrayImage = arrays.toArray(1);
+
+  // Left multiply the image array by the matrix of eigenvectors.
+  var principalComponents = ee.Image(eigenVectors).matrixMultiply(arrayImage);
+  print('principal components', principalComponents);
+
+  // Turn the square roots of the Eigenvalues into a P-band image.
+  var sdImage = ee.Image(eigenValues.sqrt())
+      .arrayProject([0]).arrayFlatten([getNewBandNames('sd')]);
+
+  // Turn the PCs into a P-band image, normalized by SD.
+  return principalComponents
+      // Throw out an an unneeded dimension, [[]] -> [].
+     .arrayProject([0])
+      // Make the one band array image a multi-band image, [] -> image.
+     .arrayFlatten([getNewBandNames('pc')])
+      // Normalize the PCs by their SDs.
+     .divide(sdImage);
+};
+var pcImage = getPrincipalComponents(centered, scale, region);
+//Plots each PC as a new layer
+for (var i = 0; i < bandNames.length().getInfo(); i++) {
+var band = pcImage.bandNames().get(i).getInfo();
+Map.addLayer(pcImage.select([band]), {min: -2, max: 2}, band);
+}
+print('iberian', pcImage);
+
+//export PCs//
+Export.image.toDrive({
+      image: pcImage,
+      description: 'pcImage',
+      maxPixels: 1e9,
+      folder: GDriveOutputImgFolder,
+      scale: scale
+    });
+    Map.addLayer(pcImage, {}, 'pcImage');
+    

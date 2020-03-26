@@ -1,0 +1,105 @@
+// Hillshade example.
+
+function radians(img) {
+  return img.toFloat().multiply(Math.PI).divide(180);
+}
+
+// Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  // Hillshade = cos(Azimuth - Aspect) * sin(Slope) * sin(Zenith) +
+  //     cos(Zenith) * cos(Slope)
+  return azimuth.subtract(aspect).cos()
+    .multiply(slope.sin())
+    .multiply(zenith.sin())
+    .add(
+      zenith.cos().multiply(slope.cos()));
+}
+
+var dem = ee.Image('USGS/SRTMGL1_003');
+
+var radius = 120;
+var sigma = 30;
+var units = "meters";
+var normalize = false;
+var magnitude = 1;
+var k = ee.Kernel.gaussian(radius, sigma, units, normalize, magnitude)
+var gdem = dem.convolve(k);
+
+var terrain = ee.Algorithms.Terrain(gdem);
+var slope = radians(terrain.select('slope'));
+var aspect = radians(terrain.select('aspect'));
+var h = terrain.select('hillshade');
+
+var angle = 45;
+
+var hs_i;
+var hs_min;
+for (var i = 0; i < 360; i += 60) {
+  hs_i = hillshade(i, 70, slope, aspect)
+  // addToMap(hs_i, {}, i + ' deg');
+  
+  if (i > 0) {
+    hs_min = hs_min.min(hs_i);
+  }
+  else {
+    hs_min = hs_i;
+  }
+}
+
+addToMap(hs_min, {min:0.0, max:0.3}, "1")
+addToMap(hs_min, {min:0.25, max:0.35}, "2")
+addToMap(hs_min, {min:0.3, max:0.35}, "3")
+addToMap(terrain.select('slope'), {min:0, max:15}, "slope"); // 0-90
+addToMap(terrain.select('aspect'))
+addToMap(dem, {min:0, max:1000}, "dem")
+
+
+var bounds = Map.getBounds();
+var xmin = bounds[0];
+var ymin = bounds[1];
+var xmax = bounds[2];
+var ymax = bounds[3];
+var region = '[[' + xmin + ',' + ymin + '], [' + xmax + ',' + ymin  + '], [' + xmax + ',' + ymax + '], [' + xmin + ',' + ymax + ']]';
+
+/*
+var path = dem.focal_mode().focal_max(3).focal_min(5).focal_max(3).int16().getDownloadURL({
+  'scale': 30,
+  'crs': 'EPSG:4326',
+  'region': region
+});
+print('dem_mode_min_max: ' + path);
+
+var path = dem.focal_max(3).focal_min(5).focal_max(3).int16().getDownloadURL({
+  'scale': 30,
+  'crs': 'EPSG:4326',
+  'region': region
+});
+print('dem_min_max: ' + path);
+
+var path = dem.int16().getDownloadURL({
+  'scale': 30,
+  'crs': 'EPSG:4326',
+  'region': region
+});
+print('dem: ' + path);
+
+var path = gdem.int16().getDownloadURL({
+  'scale': 30,
+  'crs': 'EPSG:4326',
+  'region': region
+});
+print('gdem: ' + path);
+
+var image = ee.Image('CGIAR/SRTM90_V4');
+
+// Make download URL 
+var path = image.getDownloadURL({
+  'scale': 90,
+  'crs': 'EPSG:4326',
+  'region': region,
+});
+
+print('dem_90: ' + path);
+*/

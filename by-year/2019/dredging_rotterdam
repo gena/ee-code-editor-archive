@@ -1,0 +1,67 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var land = ee.Image("users/gena/land_polygons_image"),
+    jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var charting = require('users/gena/packages:charting')
+var assets = require('users/gena/packages:assets')
+var animation = require('users/gena/packages:animation')
+
+var bounds = Map.getCenter()
+
+var images = assets.getImages(bounds, {
+  missions: ['S2', 'L8' /*, 'L7'*/],
+  filter: ee.Filter.date('2017-01-01', '2019-01-01')
+})
+
+print('Count before filtering: ', images.size())
+
+var boundsWater = jrc.select('occurrence').gt(0).selfMask().reduceToVectors({ geometry: Map.getBounds(true), scale: Map.getScale() * 10 }).geometry()
+
+images = assets.getMostlyCleanImages(images, boundsWater)
+
+print('Count after cloud filtering: ', images.size())
+
+images = images.sort('system:time_start')
+
+// add label
+function addLabel(i) {
+  return i
+    .set({ label: i.date().format('YYYY-MM-dd').cat(', ').cat(i.get('MISSION')) })
+}
+
+images = images.map(addLabel)
+
+// animate
+animation.animate(images, {
+  vis: { bands: ['red', 'green', 'blue' ], min: 0, max: 0.2 },
+  label: 'label'
+})
+
+
+
+// print rug plot
+function showThumb(year) {
+  print(year)
+  
+  var start = ee.Date.fromYMD(year, 1, 1)
+  var stop = start.advance(1, 'year')
+  
+  // plot
+  var rect = ee.Geometry.Rectangle({ coords: [[0, 0], [100, 4]], geodesic: false })
+  
+  // add rug plots
+  var plot = new charting.Plot(rect.bounds(), { 
+    area: { width: 1, color: '000000', fillColor: '00000011' }
+  })
+  
+  plot.setMinMax(start.millis(), stop.millis(), 0, 1)
+  
+  var times = ee.List(images.aggregate_array('system:time_start'))
+  plot.addRugSeries('', times, { width: 1, color: 'red' }, 1)  
+
+  print(plot.getThumbnail({ dimensions: '600x24'}))
+}
+
+var years = ee.List.sequence(2017, 2018)
+years.evaluate(function(years) { years.map(showThumb) })
+

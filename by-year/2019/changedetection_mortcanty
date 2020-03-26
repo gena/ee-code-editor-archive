@@ -1,0 +1,58 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #0b4a8b */ee.Geometry.Polygon(
+        [[[5.93660157229192, 53.42689199004098],
+          [6.176696425484579, 53.43312012768711],
+          [6.142622656601134, 53.50407504115076],
+          [5.937346434332767, 53.47985986858969]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+//          
+var omb = require('users/mortcanty/changedetection:omnibus');
+//
+// Test data
+var significance = 0.0001;
+var polarization = ['VV','VH'];
+var relorbitnumber = 15;
+var orbitpass = 'ASCENDING';
+var startDate = '2016-04-01';
+var endDate = '2016-11-01';
+var median = true;
+
+                
+var collection = ee.ImageCollection('COPERNICUS/S1_GRD') 
+                   .filterBounds(geometry) 
+                   .filterDate(ee.Date(startDate), ee.Date(endDate)) 
+                   .filter(ee.Filter.eq('transmitterReceiverPolarisation', polarization)) 
+                   .filter(ee.Filter.eq('resolution_meters', 10)) 
+                   .filter(ee.Filter.eq('instrumentMode', 'IW')); 
+if (relorbitnumber != 'any'){
+      collection = collection.filter(ee.Filter.eq('relativeOrbitNumber_start', relorbitnumber));                        
+} 
+// filter the collection and create a list of clipped images
+var collection = collection.sort('system:time_start');  
+var acquisition_times = ee.List(collection.aggregate_array('system:time_start'));
+
+var count = acquisition_times.length().getInfo();
+if (count===0){ print('No images found')}
+else {print(count)};
+
+var pcollection = collection.map(omb.get_vvvh);
+var pList = pcollection.toList(count);
+var first = ee.Dictionary({imlist:ee.List([]),geom:geometry});
+var imList = ee.List(ee.Dictionary(pList.iterate(omb.clipList,first)).get('imlist')); 
+
+var jet = ['black','blue','cyan', 'yellow','red'];
+var vis = {min:0, max:count, palette:jet};
+var vis2 = {min:0, max:Math.round(count/2), palette:jet};
+
+// run the algorithm
+var result = ee.Dictionary(omb.omnibus(imList,significance,median));
+var cmap = ee.Image(result.get('cmap'));
+var smap = ee.Image(result.get('fmap'));
+var fmap = ee.Image(result.get('fmap'));
+
+Map.centerObject(cmap,13);
+//Map.addLayer(cmap,vis,'cmap');
+//Map.addLayer(smap,vis,'smap');
+Map.addLayer(fmap,vis2,'fmap');
+
+

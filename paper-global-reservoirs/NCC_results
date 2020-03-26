@@ -1,0 +1,437 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    s2 = ee.ImageCollection("COPERNICUS/S2"),
+    srtm = ee.Image("USGS/SRTMGL1_003"),
+    hydroLakes = ee.FeatureCollection("users/gena/HydroLAKES_polys_v10"),
+    jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory"),
+    jrcYealy = ee.ImageCollection("JRC/GSW1_0/YearlyHistory"),
+    profile = /* color: #d63000 */ee.Geometry.LineString(
+        [[29.23736572265625, -20.29633354334086],
+         [29.24337387084961, -20.30309552664784]]),
+    fa = ee.Image("users/gena/GlobalHAND/90m/fa"),
+    waterOccurrence = ee.Image("users/gena/eo-reservoirs/Limpopo_occurrence_04987_v2"),
+    waterOccurrenceVector = ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies_Limpopo_JRC_fixed_buffer");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var style = require('users/gena/packages:style')
+var hydro = require('users/gena/packages:hydro')
+var utils = require('users/gena/packages:utils')
+var dem = hydro.Map.addDem({layer: {visible: false, name: 'DEM'}})
+
+// style map
+style.SetMapStyleDark()
+
+Map.addLayer(ee.Image.pixelLonLat(), {}, 'coords', false)
+
+var jrcWaterOccurrence = jrc.select('occurrence').divide(100)
+var jrcWater = jrcWaterOccurrence.gt(0)
+
+
+/***
+ * Converts pixels withing a region into image collection (image per pixels)
+ */
+function regionToImageCollection(image, region) {
+  var bandNames = image.bandNames()
+  
+  var values = image.reduceRegion(ee.Reducer.toList(), region)
+  var n = ee.List(values.values().get(0)).length()  
+  
+  // convert lists of band values into a list of constant images
+  var images = ee.List.sequence(0, n.subtract(1)).map(function(offset) {
+    var row = values.values().map(function(c) { return ee.List(c).get(offset) })
+    return ee.Image.constant(row).rename(bandNames).float().set({offset: offset})
+  })
+    // turn into image collection
+  return ee.ImageCollection(images)
+}
+
+
+
+
+Map.addLayer(ee.Image(1), {palette:['000000']}, 'black', false, 0.5)
+
+
+// Natural Earth rivers
+var rivers = ee.FeatureCollection('ft:1yMXz_cItkAJFvmeXNcsuW2i7kK5i1iJ0QcYK3g')
+
+// detect basin
+var limpopo = {
+  rivers: rivers.filter(ee.Filter.eq('name', 'Limpopo')),
+}
+
+var outlet = ee.Geometry.Point(limpopo.rivers.geometry().coordinates().get(-5))
+limpopo.basins = hydro.getCatchments({level: 5, outlet: outlet})
+
+print(limpopo.basins)
+
+// add DEM and HAND
+var hand = hydro.Map.addHand({region: limpopo.basins, layer: {visible: false, name: 'HAND'}})
+hydro.Map.addHand({region: limpopo.basins, styleAsDem: true, layer: {visible: false, name: 'HAND (DEM style)'}})
+var dem = hydro.Map.addDem({region: limpopo.basins, layer: {visible: false, name: 'DEM'}})
+
+Map.addLayer(ee.Image(1).clip(limpopo.basins), {palette:['000000']}, 'black (Limpopo)', true, 0.5)
+Map.addLayer(ee.Image(1).clip(limpopo.basins), {palette:['ffff00']}, 'yellow (Limpopo)', false, 0.3)
+Map.addLayer(ee.Image(1).clip(limpopo.basins), {palette:['ffffff']}, 'white (Limpopo)', false, 0.3)
+
+
+
+
+// add rivers
+Map.addLayer(rivers, {color: 'lightblue'}, 'rivers (Natural Earth)', true)  
+
+// add Limpopo river and basins
+// detect outlet
+Map.addLayer(outlet, {color: 'red'}, 'outlet')
+
+// get catchments limited by the outlet
+  //.map(function(f) { return f.buffer(500) })
+
+
+var basins6 = hydro.getCatchments({level: 6})
+// utils.Map.addAsImage(basins6, 'HydroBASINS (basins, L6)', {outline: true, fill: false, opacity: 0.9, palette: ['000000', 'ffffff']})
+
+limpopo.basins6 = basins6.filterBounds(limpopo.basins.geometry().simplify(5000).buffer(-10000, 5000))
+utils.Map.addAsImage(limpopo.basins6, 'Limpopo (basins, L6)', {outline: true, fill: false, opacity: 0.9, palette: ['000000', 'ffffff']})
+
+// export JRC data aggregated by Limpopo sub-catchments
+var years = ee.List.sequence(1984, 2015)
+
+var basins = limpopo.basins6
+//var basins = limpopo.basins.map(function(f) { return f.select(['HYBAS_ID'], ['hybas_id'])})
+
+
+function getWaterAreaByYear(basin) {
+  var results = years.map(function(year) {
+    var t = ee.Date.fromYMD(year, 1, 1)
+    
+    var water = jrcMonthly.filterDate(t, t.advance(1, 'year')).max()
+    water = ee.Image(ee.Algorithms.If(water.bandNames().length(), water, ee.Image().rename('water')))
+    var water = water.eq(3).or(water.eq(2))
+  
+    var results = water.multiply(ee.Image.pixelArea()).reduceRegions({
+      collection: ee.FeatureCollection([basin]), 
+      reducer: ee.Reducer.sum(), 
+      // scale: 30,
+      scale: 120,
+      crs: 'EPSG:4326',
+      tileScale: 16
+    }).select(['hybas_id', 'sum'], ['hybas_id', 'water_area'])
+  
+    results = results.map(function(f) { 
+      return f.set({date: t.format('YYYY-MM-dd')}) 
+    })
+    
+    return results
+  }).flatten()
+  
+  return ee.FeatureCollection(results)
+}
+
+basins.evaluate(function(basins) {
+  basins.features.map(function(basin) {
+    var basinWaterArea = getWaterAreaByYear(basin)
+    var name = 'water_occurrence_area_annually_' + basin.properties.hybas_id.toString()
+    Export.table.toDrive({
+      collection: results, 
+      description: name, 
+      folder: 'Limpopo', 
+      fileNamePrefix: name, 
+      fileFormat: 'GeoJSON'
+    })
+  })
+})
+
+
+
+// print(ui.Chart.feature.groups(results, 'date', 'water_area', 'hybas_id'))
+
+// ============ monthly
+var times = years.map(function(year) {
+  return ee.List.sequence(1, 12).map(function(month) {
+    return ee.Date.fromYMD(year, month, 1)
+  })
+}).flatten()
+
+var t = ee.Date.fromYMD(1984, 1, 1)
+
+var results = times.map(function(t) {
+  t = ee.Date(t)
+  
+  var water = jrcMonthly.filterDate(t, t.advance(1, 'month')).max()
+  water = ee.Image(ee.Algorithms.If(water.bandNames().length(), water, ee.Image().rename('water')))
+  water = water.eq(2).rename('water_area')
+  
+  var results = water.multiply(ee.Image.pixelArea()).reduceRegions({
+    collection: basins.limit(1), 
+    reducer: ee.Reducer.sum(), 
+    scale: 300,
+    crs: 'EPSG:4326',
+    tileScale: 16
+  }).select(['hybas_id', 'sum'], ['hybas_id', 'water_area'])
+  
+  results = results.map(function(f) { 
+    return f.set({date: t.format('YYYY-MM-dd')}) 
+  })
+  
+  return results
+})
+
+var results = ee.FeatureCollection(results).flatten()
+print('water monthly', ui.Chart.feature.byFeature(results, 'date', ['water_area']))
+
+utils.Map.addAsImage(limpopo.basins, 'Limpopo (basins)', {outline: true, fill: false, opacity: 0.9, palette: ['000000', 'ffffff']})
+
+
+// S2
+
+Map.addLayer(s2.filterBounds(Map.getBounds(true)).filterDate('2017-01-01', '2018-01-01').select(['B11', 'B8', 'B3'])
+  .reduce(ee.Reducer.percentile([15])), 
+  {min: 300, max: 2500}, 'S2', false)
+
+
+// water occurrence
+var waterIndexHR = hydro.getWaterIndexHR()
+
+hydro.addWaterIndexHR(waterIndexHR)
+
+var handMask = hand.gt(30)
+  .and(jrcWater.unmask().not())
+  
+Map.addLayer(handMask.mask(handMask), {palette:['000000']}, 'HAND > 30m', false, 0.6)
+
+Map.addLayer(jrcWaterOccurrence, {palette: style.Palettes.RedToBlue, min:0, max:1}, 'water (JRC)', false)
+
+Map.addLayer(jrcWaterOccurrence.clip(limpopo.basins), {palette: style.Palettes.Water, min:0, max:1}, 'water (JRC), Limpopo', false)
+Map.addLayer(jrcWaterOccurrence.clip(limpopo.basins), {palette: style.Palettes.Hot, min:0, max:1}, 'water (JRC), Limpopo, hot', true)
+
+Map.addLayer(ee.Image().paint(waterOccurrenceVector, 1, 1), {palette: ['ffffff']}, 'water (JRC), Limpopo, vector')
+
+
+// 1. detect blobs
+
+// 2. for every blob collect distribution of HAND values
+
+var blobs = waterIndexHR.mask().reduce(ee.Reducer.max()).gt(0.1).connectedComponents(ee.Kernel.plus(10, 'meters'), 256)
+Map.addLayer(blobs.randomVisualizer(), {}, 'waterbodies (blobs)', false)
+
+var waterbodies = blobs.select('labels').reduceToVectors({geometry: Map.getBounds(true), scale: 10})
+Map.addLayer(waterbodies, {}, 'waterbodies (vector)', false)
+
+// for every blob polygon report HAND distribution
+waterbodies = waterbodies.map(function(f) {
+  return f.set({
+    handStdDev: hand.reduceRegion({reducer: ee.Reducer.stdDev(), geometry: f.geometry(), scale: 10}).values().get(0) })
+})
+
+// Map.addLayer(ee.Image().paint(waterbodies, 'handStdDev'), {}, 'hand sigma per waterbody', false)
+
+
+
+// show profile along the line
+var profileImages = regionToImageCollection(waterIndexHR.add(jrcWaterOccurrence), profile)
+
+// show results for geometry centroid
+var scale = Map.getScale()
+print(ui.Chart.image.series({
+  imageCollection: profileImages, 
+  region: profile, 
+  scale: scale, 
+  xProperty: 'offset'
+}))
+
+/*
+// show pixel coordinates
+var text = require('users/gena/packages:text');
+
+// get coordinates and indices
+var values = image.reduceRegion(ee.Reducer.toList(), geometry)
+
+var centers = ee.List(values.get('longitude')).zip(values.get('latitude')).zip(ee.List.sequence(0, ee.List(values.get('longitude')).length().subtract(1)))
+  .map(function(o) {
+    o = ee.List(o)
+    var xy = o.get(0)
+    var offset = o.get(1)
+    return ee.Feature(ee.Algorithms.GeometryConstructors.Point(xy), {offset: offset})
+  })
+
+centers = ee.FeatureCollection(centers)
+
+Map.addLayer(centers, {}, 'cell centers')
+
+var offsetText = ee.ImageCollection(centers.map(function(i) {
+  return text.draw(ee.Number(i.get('offset')).format('%d'), i.geometry(), Map.getScale(), {
+    fontSize:12, textColor: '000000', outlineColor: 'ffffff', outlineWidth: 3, outlineOpacity: 0.6
+  })
+})).mosaic()
+
+Map.addLayer(offsetText, {}, 'offset')
+*/
+
+// select and export HydroLAKES for Limpopo
+limpopo.lakes = hydroLakes.filterBounds(limpopo.basins)
+print('Limpopo lakes: ', limpopo.lakes)
+
+Export.table.toDrive({
+  collection: limpopo.lakes, 
+  description: 'lakes', 
+  folder: 'Limpopo',
+  fileNamePrefix: 'lakes', 
+  fileFormat: 'GeoJSON'
+})
+
+Map.setOptions('SATELLITE')
+
+
+
+
+
+
+
+// TDOM + shadows + dark
+var cloudThresh =20;//Ranges from 1-100.Lower value will mask more pixels out. Generally 10-30 works well with 20 being used most commonly 
+var cloudHeights = ee.List.sequence(200,10000,250);//Height of clouds to use to project cloud shadows
+var irSumThresh =0.35;//Sum of IR bands to include as shadows within TDOM and the shadow shift method (lower number masks out less)
+var dilatePixels = 2; //Pixels to dilate around clouds
+var contractPixels = 1;//Pixels to reduce cloud mask and dark shadows by to reduce inclusion of single-pixel comission errors
+
+//////////////////////////////////////////////////////
+//Get some s2 data
+var s2s = ee.ImageCollection('COPERNICUS/S2')
+                  .filterBounds(Map.getBounds(true))
+                  .map(function(img){
+                    var t = img.select([ 'B1','B2','B3','B4','B5','B6','B7','B8','B8A', 'B9','B10', 'B11','B12']).divide(10000);//Rescale to 0-1
+                    t = t.addBands(img.select(['QA60']));
+                    var out = t.copyProperties(img).copyProperties(img,['system:time_start']);
+                  return out;
+                    })
+                    .select(['QA60', 'B1','B2','B3','B4','B5','B6','B7','B8','B8A', 'B9','B10', 'B11','B12'],['QA60','cb', 'blue', 'green', 'red', 're1','re2','re3','nir', 'nir2', 'waterVapor', 'cirrus','swir1', 'swir2']);
+
+
+var rescale = function(img, exp, thresholds) {
+    return img.expression(exp, {img: img})
+        .subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+  };
+  
+////////////////////////////////////////
+////////////////////////////////////////
+// Cloud masking algorithm for Sentinel2
+//Built on ideas from Landsat cloudScore algorithm
+//Currently in beta and may need tweaking for individual study areas
+function sentinelCloudScore(img) {
+  
+
+  // Compute several indicators of cloudyness and take the minimum of them.
+  var score = ee.Image(1);
+  
+  // Clouds are reasonably bright in the blue and cirrus bands.
+  score = score.min(rescale(img, 'img.blue', [0.1, 0.5]));
+  score = score.min(rescale(img, 'img.cb', [0.1, 0.3]));
+  score = score.min(rescale(img, 'img.cb + img.cirrus', [0.15, 0.2]));
+  
+  // Clouds are reasonably bright in all visible bands.
+  score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]));
+
+  
+  //Clouds are moist
+  var ndmi = img.normalizedDifference(['nir','swir1']);
+  score=score.min(rescale(ndmi, 'img', [-0.1, 0.1]));
+  
+  // However, clouds are not snow.
+  var ndsi = img.normalizedDifference(['green', 'swir1']);
+  score=score.min(rescale(ndsi, 'img', [0.8, 0.6]));
+  
+  score = score.multiply(100).byte();
+ 
+  return img.addBands(score.rename('cloudScore'));
+}
+
+////////////////////////////////////////////////////////
+/////////////////////////////////////////////
+/***
+ * Implementation of Basic cloud shadow shift
+ * 
+ * Author: Gennadii Donchyts
+ * License: Apache 2.0
+ */
+function projectShadows(cloudMask,image,cloudHeights){
+  var meanAzimuth = image.get('MEAN_SOLAR_AZIMUTH_ANGLE');
+  var meanZenith = image.get('MEAN_SOLAR_ZENITH_ANGLE');
+  ///////////////////////////////////////////////////////
+  // print('a',meanAzimuth);
+  // print('z',meanZenith)
+  
+  //Find dark pixels
+  var darkPixels = image.select(['nir','swir1','swir2']).reduce(ee.Reducer.sum()).lt(irSumThresh)
+    .focal_min(contractPixels).focal_max(dilatePixels)
+  ;//.gte(1);
+  
+  
+  //Get scale of image
+  var nominalScale = cloudMask.projection().nominalScale();
+  //Find where cloud shadows should be based on solar geometry
+  //Convert to radians
+  var azR =ee.Number(meanAzimuth).add(180).multiply(Math.PI).divide(180.0);
+  var zenR  =ee.Number(meanZenith).multiply(Math.PI).divide(180.0);
+  
+  
+ 
+  //Find the shadows
+  var shadows = cloudHeights.map(function(cloudHeight){
+    cloudHeight = ee.Number(cloudHeight);
+    
+    var shadowCastedDistance = zenR.tan().multiply(cloudHeight);//Distance shadow is cast
+    var x = azR.sin().multiply(shadowCastedDistance).divide(nominalScale);//X distance of shadow
+    var y = azR.cos().multiply(shadowCastedDistance).divide(nominalScale);//Y distance of shadow
+    // print(x,y)
+   
+    return cloudMask.changeProj(cloudMask.projection(), cloudMask.projection().translate(x, y));
+    
+    
+  });
+  
+  
+  var shadowMask = ee.ImageCollection.fromImages(shadows).max();
+  // Map.addLayer(cloudMask.updateMask(cloudMask),{'min':1,'max':1,'palette':'88F'},'Cloud mask');
+  // Map.addLayer(shadowMask.updateMask(shadowMask),{'min':1,'max':1,'palette':'880'},'Shadow mask');
+  
+  //Create shadow mask
+  shadowMask = shadowMask.and(cloudMask.not());
+  shadowMask = shadowMask.and(darkPixels).focal_min(contractPixels).focal_max(dilatePixels);
+  
+  var cloudShadowMask = shadowMask.or(cloudMask);
+  
+  image = image.updateMask(cloudShadowMask.not()).addBands(shadowMask.rename(['cloudShadowMask']));
+  return image;
+}
+//////////////////////////////////////////////////////
+//Function to bust clouds from S2 image
+function bustClouds(img){
+  img = sentinelCloudScore(img);
+  img = img.updateMask(img.select(['cloudScore']).gt(cloudThresh).focal_min(contractPixels).focal_max(dilatePixels).not());
+  return img;
+}
+//////////////////////////////////////////////////////
+//Function for wrapping the entire process to be applied across collection
+function wrapIt(img){
+  img = sentinelCloudScore(img);
+  var cloudMask = img.select(['cloudScore']).gt(cloudThresh)
+    .focal_min(contractPixels).focal_max(dilatePixels)
+
+  img = projectShadows(cloudMask,img,cloudHeights);
+
+  return img;
+}
+
+
+s2s = s2s.map(wrapIt)
+
+Map.addLayer(hydroLakes, {color: 'green'}, 'HydroLAKES (vector)', false)
+Map.addLayer(ee.Image().paint(hydroLakes, 1, 2), {palette: ['2c7fb8']}, 'HydroLAKES', false)
+Map.addLayer(ee.Image().paint(limpopo.lakes, 1, 2), {palette: ['2c7fb8']}, 'HydroLAKES (Limpopo)', false)
+
+// mines
+var mines = ee.FeatureCollection("users/gena/mines-mrds");
+var minesImage = ee.Image().paint(mines, 1, 1).focal_max(3)
+Map.addLayer(minesImage, {palette: ['ff0000']}, 'mines')
+Map.addLayer(mines, {palette: ['ff0000']}, 'mines (vector)', false)
+
+Map.addLayer(fa.mask(fa.gt(100)), {}, 'FA')

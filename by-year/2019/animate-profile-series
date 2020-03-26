@@ -1,0 +1,75 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.LineString(
+        [[110.89256806940591, -6.400980420327288],
+         [110.89630170435464, -6.41104520437488]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+var utils = require('users/gena/packages:utils')
+var assets = require('users/gena/packages:assets')
+var animation = require('users/gena/packages:animation')
+var palettes = require('users/gena/packages:palettes')
+
+var images = assets.getImages(geometry, {
+  missions: ['S2', 'L8'],
+  filter: ee.Filter.date('2017-01-01', '2019-01-01')
+})
+
+
+images = assets.getMostlyCleanImages(images, geometry)
+
+var scale = Map.getScale()
+
+var profile = images.limit(10).map(function(i) {
+  var image = i.normalizedDifference(['green', 'nir'])
+  return utils.reduceImageProfile(image, geometry, ee.Reducer.mean(), scale).map(function(f) {
+    return f.set({ date: i.date().format('YYYY-MM-dd') })
+  })
+}).flatten()
+
+var chart = ui.Chart.feature.groups(profile, 'distance', 'mean', 'date')
+
+var profile = images.limit(10).map(function(i) {
+  var image = i.normalizedDifference(['green', 'swir'])
+  return utils.reduceImageProfile(image, geometry, ee.Reducer.mean(), scale).map(function(f) {
+    return f.set({ date: i.date().format('YYYY-MM-dd') })
+  })
+}).flatten()
+
+print(ui.Chart.feature.groups(profile, 'distance', 'mean', 'date'))
+
+var seriesCount = 0
+
+ee.List(profile.aggregate_array('date')).distinct().size().evaluate(function(i) {
+  seriesCount = i
+  print(seriesCount)
+})
+
+throw(0)
+function getColor(i) {
+  var colors = palettes.colorbrewer.Paired[12]
+  return colors[i % colors.length]
+}
+
+function selectSeries(index) {
+  // not loaded yet
+  if(!seriesCount) {
+    return
+  }
+  
+  var series = {} 
+  
+  utils.range(seriesCount).map(function(i) {
+    series[i] = { color: getColor(i), width: i === index ? 3 : 1 }
+  })
+
+  var chartOptions = {
+    series: series
+  }
+}
+
+animation.animate(images, {
+  vis: { min: 0, max: 0.35 },
+  onChange: function(i) {
+    selectSeries(i)
+  }
+})

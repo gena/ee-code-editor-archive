@@ -1,0 +1,17 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var table = ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies-reservoirs");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var palettes = require('users/gena/packages:palettes')
+
+var hydro = require('users/gena/packages:hydro')
+hydro.Map.addDem({ palette: palettes.cb.Greys[9].slice(2) })
+
+Map.addLayer(ee.Image(1), { palette: ['000000']}, 'black', true, 0.7)
+
+var fa = ee.ImageCollection('users/imerg/flow_acc_3s').mosaic()
+
+Map.addLayer(fa.mask(fa.unitScale(1000, 10000)), {min: 1000, max: 100000, palette: palettes.cb.OrRd[9].slice(0).reverse().slice(2) }, 'FA, 90m', true)
+
+Map.addLayer(fa.mask(fa.unitScale(100, 5000)).updateMask(ee.Image(1).subtract(fa.unitScale(100, 5000))), {min: 100, max: 5000, palette: palettes.cb.OrRd[9].slice(2) }, 'FA, 90m', true)
+
+Map.addLayer(table.style( {fillColor: '00ffff44', color: '00ffff'} ), {}, 'reservoirs')

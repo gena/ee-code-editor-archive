@@ -1,0 +1,28 @@
+var roi = ee.Geometry.Point(-122.26032, 37.87187);
+var bandNames = ee.List(['B2']);
+var  collection = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+  .select(bandNames)
+  .filterBounds(roi)
+  .filterDate('2014-06-01', '2014-12-31')
+  
+/*print(collection.toArray().reduceRegion(ee.Reducer.max(), roi, 30).get('array'))
+print(Chart.image.series(collection, roi, ee.Reducer.mean(), 30))
+*/  
+var region = roi.buffer(100)
+
+Map.addLayer(region, {}, 'region')
+Map.addLayer(collection.mean().clip(region), {min:0, max: 0.4}, 'mean')
+Map.addLayer(roi, {}, 'roi')
+Map.centerObject(region)
+
+var values = collection.getRegion(region, 30).map(function(l) { return ee.List(l).slice(1)}).slice(1)
+print(values)
+var array = ee.Array(values)
+print(array)
+
+
+var randomPoints = ee.FeatureCollection.randomPoints(region, 50);
+var samples = ee.Image(collection.toArray()).sampleRegions(randomPoints, ['B2'], 30)
+print(samples.aggregate_array('array'))
+Map.addLayer(randomPoints, {color:'ff0000'}, 'random points')
+

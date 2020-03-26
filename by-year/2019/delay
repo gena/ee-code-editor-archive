@@ -1,0 +1,27 @@
+function delay(millis, callback) {
+  var before = Date.now();
+  
+  function loop() {
+    ee.Number(Date.now()).evaluate(function(now) { 
+      if(now < before + millis) {
+        loop()
+      } else {
+        callback()
+      }
+    })
+  }
+  
+  loop()
+}
+
+
+function setTimeout(interval, action) {
+  delay(interval, function() {
+    action()
+    
+    setTimeout(interval, action)
+  }) 
+}
+  
+// this never stops, even after Reset 
+setTimeout(100, function() { print(1) })

@@ -1,0 +1,72 @@
+// NN example
+
+function show(desc, image) {
+  print('==> ' + desc + ' <==');
+  var result = ee.ImageCollection([image])
+    .getRegion(ee.Geometry.Point(-122.3437, 43.2292), 30)
+    .getInfo();
+  print(result[1][4]);
+}
+
+// Get the feature collection and convert it into an array
+// For now, just specify the array below for testing
+// 
+// var coll = 
+//   ee.FeatureCollection('ft:1q6FP28utnGrH10sjoJTX2rBDAdAVYdIphIgJ31Os')
+// var fields = ee.List(['BLUE', 'GREEN', 'RED'])
+// var arrays = fields.map(function(e) {
+//   return coll.aggregate_array(e)
+// })
+// var arr = ee.Array.cat(arrays, 1)
+
+// Candidate 'neighbors' in RGB space, and indices (both in 2D with the given axis names.)
+var bandAxis = 0;
+var featureAxis = 1;
+var neighbors_arr = ee.Array([[0,0,255],[0,255,0],[255,255,0],[255,0,0],[0,255,255],[255,0,255]]).transpose();
+var nbr_colors = ['0000ff', '00ff00', 'ffff00', 'ff0000', '00ffff', 'ff00ff'];
+var indices = ee.Array([[1,2,3,4,5,6]]);
+
+// Get a sample image in B4, B3, B2
+var target_coll = ee.ImageCollection('LANDSAT/LT5_L1T_TOA')
+  .filterDate('2011-09-01', '2011-09-30')
+  .filter(new ee.Filter.equals('WRS_PATH', 45))
+  .filter(new ee.Filter.equals('WRS_ROW', 30))
+var target_image = ee.Image(target_coll.first())
+  .multiply(255)
+  .int()
+  .select("B4", "B3", "B2")
+
+// Compress the bands in this image to an array to match the format
+// of the neighbor image
+var target_arr = target_image.toArray(bandAxis)
+
+// Main function to find neighbors based on simple Euclidean distance
+function find(array, neighbors) {
+  var obs = array.arrayRepeat(featureAxis, neighbors.length().get([featureAxis]))
+  var diff = obs.subtract(neighbors)
+  var sum = diff.multiply(diff).arrayReduce('sum', [bandAxis])
+  // We just reduced all values in the 'band' direction, so add the indices there.
+  var min_value = sum.arraySort().arrayGet([0,0]);
+  var index = ee.Image(indices).arraySort(sum).arrayGet([0,0]);
+  return(index)
+}
+var neighbor_image = find(target_arr, neighbors_arr)
+
+show('target_arr', target_arr)
+show('neighbor_image', neighbor_image)
+
+Map.addLayer(target_image, {
+ 'bands': 'B4,B3,B2',
+ 'max': '200,200,200',
+ 'min': '0,0,0'
+})
+
+Map.addLayer(neighbor_image, {
+  'min': 0,
+  'max': nbr_colors.length,
+  'palette': nbr_colors
+})
+
+
+
+

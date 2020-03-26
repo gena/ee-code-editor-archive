@@ -1,0 +1,23 @@
+var gl = require('users/gena/packages:gl')
+var animation = require('users/gena/packages:animation')
+
+var image = ee.Image(ee.ImageCollection('COPERNICUS/S2').filterBounds(Map.getCenter()).first())
+
+var proj = ee.Projection('EPSG:3857')
+var scale = Map.getScale()
+var coords = ee.Image.pixelCoordinates(proj)
+
+var angles = ee.List.sequence(0, Math.PI * 2, Math.PI / 10)
+
+var center = ee.Geometry(Map.getCenter()).transform(proj).coordinates()
+var relative = coords.subtract(ee.Image.constant(center))
+
+var images = angles.map(function(angle) {
+  var displacement = gl.rotate(relative, ee.Number(angle)).subtract(relative)
+  
+  return image.displace(displacement)
+})
+
+animation.animate(images, { vis: { min: 500, max: 5000, gamma: 1.4, bands: ['B8', 'B12', 'B4'] }, maxFrames: 20 })
+
+

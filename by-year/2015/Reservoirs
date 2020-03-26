@@ -1,0 +1,588 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var aoi = /* color: ffc82d */ee.Geometry.Polygon(
+        [[[73.06328755717857, 40.75414750292487],
+          [73.06491751575959, 40.740623415712065],
+          [73.06938077283212, 40.73307923176494],
+          [73.07109740984163, 40.74101360896686],
+          [73.07298571042384, 40.75479896426042],
+          [73.07264238276753, 40.76195061687737],
+          [73.08912210062954, 40.75661945814981],
+          [73.09942192416543, 40.758699961401824],
+          [73.10182521649006, 40.747906644183246],
+          [73.10972174788151, 40.745825803343884],
+          [73.10731845590772, 40.73060767556591],
+          [73.10646013736402, 40.72436333404177],
+          [73.10723304399676, 40.71831362365025],
+          [73.11075173057077, 40.712523495010124],
+          [73.12233878047232, 40.71154775526738],
+          [73.13289642584164, 40.70809939237788],
+          [73.14791533118728, 40.71219792255385],
+          [73.1519508690941, 40.728786464371744],
+          [73.14525613892852, 40.73359954829791],
+          [73.14456948405484, 40.73737171775167],
+          [73.1460287293853, 40.74198880075892],
+          [73.13924790863985, 40.75011746641381],
+          [73.12465649193109, 40.75961016119147],
+          [73.13032139489735, 40.76598120980143],
+          [73.1397628998925, 40.76975154272746],
+          [73.15023438726769, 40.77131161788428],
+          [73.16225084808138, 40.764421009336836],
+          [73.16813080867564, 40.758440017014756],
+          [73.17812961162531, 40.755319108062245],
+          [73.18984608392509, 40.749466900937875],
+          [73.20568169026626, 40.75752972402062],
+          [73.20791331702367, 40.768581478395205],
+          [73.19572507874511, 40.77950124637495],
+          [73.17976054874487, 40.78730027652025],
+          [73.17461063704286, 40.79496826756636],
+          [73.17881570584632, 40.8008811828629],
+          [73.21083168452162, 40.81043152061581],
+          [73.21735490832202, 40.8121858766589],
+          [73.21838540334716, 40.81939683639208],
+          [73.20645480497092, 40.83284161462733],
+          [73.1802755409675, 40.83147654644291],
+          [73.16860182276957, 40.82615169985315],
+          [73.1569292731914, 40.817057527266904],
+          [73.15143603373133, 40.810431521428356],
+          [73.14285286327504, 40.800946076418974],
+          [73.13358300573282, 40.7941885003659],
+          [73.12431316436619, 40.79067950063128],
+          [73.11006507489037, 40.78795014085973],
+          [73.0997652512101, 40.78509069123826],
+          [73.08053891368832, 40.78223111835456],
+          [73.06714914303393, 40.77742155920025],
+          [73.06199923125905, 40.77560163518374],
+          [73.0596815725196, 40.774301644541914],
+          [73.05787934899513, 40.77066158324373],
+          [73.0573219374188, 40.767085215685604]]]),
+    l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA"),
+    l7 = ee.ImageCollection("LANDSAT/LE7_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// India
+/*var damsIndia = ee.FeatureCollection('ft:1Hr91a55EaBpeF-Hj_c4tSGsb-amGO2-HWeDW7n1B')
+Map.addLayer(damsIndia, {}, 'dams (India)')
+aoi = ee.Feature(damsIndia.filter(ee.Filter.eq('name', 'Malampuzha Dam')).first()).buffer(10000).geometry()
+print(aoi)
+*/
+
+var showPansharpened = true;
+
+var LC8_BANDS = ['B1',    'B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',    'B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8', 'B7'];
+var STD_NAMES = ['blue2', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+var dem = ee.Image('USGS/SRTMGL1_003');
+var info = dem.getInfo()
+var crs = info.bands[0].crs
+var crs_transform = info.bands[0].crs_transform
+crs_transform = [crs_transform[0], crs_transform[1], 0.0, crs_transform[3], crs_transform[4], 0.0];
+
+function getEdge(mask) {
+  var canny = ee.Algorithms.CannyEdgeDetector(mask, 0.99, 0);
+  return canny.mask(canny)
+}
+
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, azimuth, zenith, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+var pansharpen = function(image) {
+    var pan = image.select('pan');
+    var rgb = image.select('red', 'green', 'blue');
+    var hsv  = rgb.rgbtohsv();
+    var huesat = hsv.select('hue', 'saturation');
+    var upres = ee.Image.cat(huesat, pan.multiply(2)).hsvtorgb();
+ 
+    return upres;
+}
+
+var slope_threshold = 0.3
+
+function getSlopeMask(dem) {
+  var slope = radians(ee.call('Terrain', dem).select(['slope']));
+  var slopeMask = slope.gt(slope_threshold)
+    //.focal_max({radius:90, units: 'meters'}).focal_min({radius:90, units: 'meters'})
+  
+  return slopeMask;
+}
+
+var demThreshold = 915
+
+function maskHills(demImage) {
+  return demImage.lt(demThreshold)
+}
+
+Map.centerObject(aoi, 12)
+
+print('Map scale: ' + Map.getScale())
+
+//aoi = ee.Geometry(Map.getBounds(true))
+var bounds = aoi.buffer(1000).bounds()
+
+var demMask = dem.gt(demThreshold)
+demMask = demMask.mask(demMask).clip(bounds)
+
+
+var coords = ee.List(bounds.coordinates().get(0))
+var xmin = ee.Number(ee.List(coords.get(0)).get(0))
+var xmax = ee.Number(ee.List(coords.get(1)).get(0))
+var ymin = ee.Number(ee.List(coords.get(0)).get(1))
+var ymax = ee.Number(ee.List(coords.get(2)).get(1))
+
+var dem = ee.Image('USGS/SRTMGL1_003'); var dem_name = 'SRTM 30m'
+
+var slopeMask = getSlopeMask(dem);
+
+
+function addDemScaledToBounds(bounds) {
+  var azimuth = 90;
+  var zenith = 30;
+  
+  Map.addLayer(dem, {}, 'dem (raw)', false)
+  
+  // compute min/max dynamically
+  var demMinMax = dem.reduceRegion(ee.Reducer.minMax(), bounds, 300).getInfo()
+  var dem_min = demMinMax['elevation_min']
+  var dem_max = demMinMax['elevation_max']
+  print('dem min: ' + dem_min)
+  print('dem max: ' + dem_max)
+  var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+  var v = dem.visualize({palette:colors_dem, min:dem_min, max:dem_max, opacity: 1.0});
+  var demRendered = hillshadeit(v, dem, azimuth, zenith, 1.0, 3.0);
+  Map.addLayer(demRendered, {}, 'elevation ' + dem_name);
+
+  var s = slopeMask.mask(slopeMask)
+  s = s.visualize({opacity:0.7, palette:['000000']})
+  Map.addLayer(s, {}, 'slope mask', false)
+
+  return demRendered;
+}
+
+var demVis = addDemScaledToBounds(bounds)
+
+var images = l8
+  .select(LC8_BANDS, STD_NAMES)
+
+//var images = l7
+//  .select(LC7_BANDS, STD_NAMES)
+  //.filterDate('2013-09-01', '2013-11-01')
+  
+  .filterBounds(bounds)
+  .sort('DATE_ACQUIRED')
+
+var fileName = 'Andijan'
+
+var scale = 15
+
+var I_min = 0.2
+var I_max = 0.4
+var gamma = 1.0
+
+// A helper to apply an expression and linearly rescale the output.
+var rescale = function(img, exp, thresholds) {
+  return img.expression(exp, {img: img})
+      .subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+};
+
+// Compute a cloud score.  This expects the input image to have the common
+// band names: ["red", "blue", etc], so it can work across sensors.
+var cloudScore = function(img) {
+  // Compute several indicators of cloudyness and take the minimum of them.
+  var score = ee.Image(1.0);
+  
+  // Clouds are reasonably bright in the blue band.
+  score = score.min(rescale(img, 'img.blue', [0.1, 0.3]));
+
+  // Clouds are reasonably bright in all visible bands.
+  score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.3, 0.8]));
+
+  // Clouds are reasonably bright in all infrared bands.
+  score = score.min(rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]));
+
+  // Clouds are reasonably cool in temperature.
+  score = score.min(rescale(img, 'img.temp', [300, 290]));
+
+  // However, clouds are not snow.
+  var ndsi = img.normalizedDifference(['green', 'swir1']);
+  
+  return score.min(rescale(ndsi, 'img', [0.8, 0.6]));
+};
+
+var cloudThreshold = 0.6 // lower - more clouds 
+
+var maskClouds = function(img) { 
+  return cloudScore(img).gt(cloudThreshold).rename(['cloud'])
+};
+
+
+function snowScore(img){
+      // Compute several indicators of snowyness and take the minimum of them.
+      var score = ee.Image(1.0)
+      
+      // Snow is reasonably bright in the blue band.
+      score = score.min(rescale(img, 'img.blue', [0.1, 0.3]));
+    
+      // Snow is reasonably bright in all visible bands.
+      score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]));
+    
+      // // Excluded this for snow reasonably bright in all infrared bands.
+      score = score.min(rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]));
+    
+      // Snow is reasonably cool in temperature.
+      //Changed from [300,290] to [290,275] for AK
+      score = score.min(rescale(img, 'img.temp', [300, 285]));
+      
+      // Snow is high in ndsi.
+      var ndsi = img.normalizedDifference(['green', 'swir1']);
+      ndsi = rescale(ndsi, 'img', [0.5, 0.7]);
+      score = score.min(ndsi);
+      
+      return score.clamp(0,1).toFloat()
+      }
+
+var snowThresh = 0.5; //Lower number masks more out (0-1)
+
+function maskSnow(img){
+  return snowScore(img).gt(snowThresh).rename(['snow'])
+  //return img.mask(img.mask().and(ss.lt(snowThresh)))
+}
+
+
+function maskWater(i) {
+  var ndwiThreshold = 0.05
+
+//var ndwi = i.normalizedDifference(['green', 'nir']);
+  var ndwi = i.normalizedDifference(['green', 'swir1']);
+  var water = ndwi.gt(ndwiThreshold);
+  
+  return water;
+}
+
+var ndviThreshold = 0.35
+
+function maskVegetation(i) {
+  var ndvi = i.normalizedDifference(['nir', 'red']);
+  return ndvi.lt(ndviThreshold);
+}
+
+var blobMinPixelCount = 150
+
+// pre-computed cloud-free water masks
+var cloudfree = ee.FeatureCollection('ft:1TEpTbfTfSfSPOHNj4JG9N5zY7MUjYm7yvGXWK3IV')
+
+var count = 45;
+
+var waterOccurance = ee.ImageCollection(cloudfree.map(function(f) {
+  var image = ee.Image(0).toByte();
+  image = image.paint(ee.FeatureCollection(f), 1); // paint fill
+  return image;
+})).sum().divide(count)
+
+Map.addLayer(waterOccurance.mask(waterOccurance.gt(0)), {min:0, max:1, palette:['ffffff', '0000ff']}, 'water occurance (exported)', false)
+
+var collection = images
+  .map(function(i){
+    // limt to temperature
+    i = ee.Image(i.mask(i.select('temp').mask()))
+    
+    var rgb = i.select('red', 'green', 'blue', 'pan');
+    //var rgb = i.select('swir2', 'nir', 'green');
+    var image = pansharpen(rgb);
+    var imageVis = image.visualize({gamma:gamma, min:0.15, max:[0.5, 0.5, 0.6]})
+
+    var snow = maskSnow(i);
+    var clouds = maskClouds(i).and(snow.not());
+    var vegetation = maskVegetation(i);
+    var hills = maskHills(dem)
+    var slopes = slopeMask.not()
+
+    var sceneEdge = getEdge(i.select('red').mask().not())
+      //.focal_max({radius:30, units: 'meters'})
+    var sceneEdgeVis = sceneEdge.visualize({palette:['FFFF00'], opacity:0.9, forceRgbOutput: true});
+
+    var water = maskWater(i)
+      .mask(vegetation.or(hills).or(slopes).or(clouds).or(snow))
+
+    water = water.mask(water.mask(waterOccurance.gt(0).focal_max({radius:90, units:'meters'})))
+      //.connectedPixelCount(blobMinPixelCount, false)
+      //.eq(blobMinPixelCount)
+      //.reproject(crs, crs_transform)
+      
+      .clip(bounds)
+      
+    water = water.updateMask(water)      
+
+    // show water as original image, RGB, stretched
+    if(!showPansharpened) {
+      var waterVis = i.select(['red', 'green', 'blue'])
+        .mask(water).visualize({gamma:gamma, min:0.03, max:[0.4, 0.4, 0.5]});
+    } else {
+      var waterVis = pansharpen(i.select(['red', 'green', 'blue', 'pan']))
+        .mask(water).visualize({gamma:gamma, min:0.03, max:[0.4, 0.4, 0.5]})
+    }
+
+    var waterEdge = getEdge(water.mask())
+
+    var waterEdgeVis = waterEdge
+      .visualize({palette:['0000ff'], opacity:0.8, forceRgbOutput: true})
+
+    var nearEdge = i.select('red').mask().not().focal_min({radius:90, units:'meters'})
+
+    // edge between water and land
+    var waterLandEdge = waterEdge.mask()
+      .and(sceneEdge.mask().focal_max({radius:90, units:'meters'}).not()) // not near scene edge
+      .and(clouds.focal_max({radius:150, units:'meters'}).not()) // not near/within clouds
+      
+    var waterLandEdgeVis = waterLandEdge.mask(waterLandEdge).focal_max(0.5, 'square')
+      .visualize({palette:['40ee40'/*'0147fa'*/], opacity:1.0, forceRgbOutput: true})
+      
+    var snowEdge = getEdge(snow);
+
+    // number of snow pixels overlapping with water
+    var snowWaterPixelCount = ee.Dictionary(snow.focal_max({radius:60, units:'meters'}).and(water)
+      .reduceRegion({reducer: ee.Reducer.sum(), geometry: aoi, scale: 30, maxPixels:1e9})).get('snow')
+
+    // number of cloud pixels overlapping with water
+    var cloudWaterPixelCount = ee.Dictionary(clouds.focal_max({radius:60, units:'meters'}).and(water)
+      .reduceRegion({reducer: ee.Reducer.sum(), geometry: aoi, scale: 30, maxPixels:1e9})).get('cloud')
+
+    var snowVis = snow.mask(snow).visualize({palette:['00FFFF'], opacity:0.6, forceRgbOutput: true});
+    var snowEdgeVis = snowEdge.visualize({palette:['00FFFF'], opacity:0.9, forceRgbOutput: true});
+    
+    var cloudsVis = clouds.mask(clouds.multiply(cloudScore(i)))
+      .visualize({palette: ['FFFFFF', 'FF0000'], opacity:0.5})
+
+    var cloudsEdgeVis = getEdge(clouds)
+        .visualize({palette: ['FF0000'], opacity:0.8})
+
+    var vegetationEdgeVis = getEdge(vegetation)
+        .visualize({palette: ['00FF00'], opacity:0.8})
+
+    var hillsEdgeVis = getEdge(hills)
+        .visualize({palette: ['000000'], opacity:0.8})
+        
+    // compute scalars
+    var waterAtSceneEdge = waterEdge.and(sceneEdge).reduceRegion(ee.Reducer.sum(), bounds, 30).get('nd')
+      
+    var waterArea = ee.Number(water.reduceRegion(ee.Reducer.sum(), bounds, 30).get('nd')).multiply(30*30)
+
+    image = ee.ImageCollection.fromImages([
+      //imageVis,
+      //vegetationEdgeVis,
+      //hillsEdgeVis,
+      //snowVis,
+      //snowEdgeVis,
+      //cloudsVis,
+      //cloudsEdgeVis,
+      sceneEdgeVis,
+      waterVis,
+      waterEdgeVis,
+      waterLandEdgeVis
+    ]).mosaic()
+
+    return image
+      .set('id', i.get('LANDSAT_SCENE_ID'))
+      .set('date', i.get('DATE_ACQUIRED'))
+      .set('cloud_pixels', cloudWaterPixelCount)
+      .set('snow_pixels', snowWaterPixelCount)
+      .set('water_area', waterArea)
+      .set('water_at_edge', waterAtSceneEdge)
+      .clip(bounds)
+      .addBands(water.rename('water'))
+      .addBands(i.select('red').mask().eq(1).rename('mask'))
+      .addBands(waterLandEdge.rename('water_land_edge'))
+  });
+
+// filter images with clouds over area
+print('All:', collection.aggregate_count('date')); 
+ 
+collection = collection
+  //.filterMetadata('water_at_edge', 'greater_than', 20)
+  .filterMetadata('water_at_edge', 'less_than', 100)
+  .filterMetadata('cloud_pixels', 'less_than', 100) // cloud pixels at water edge
+  .filterMetadata('water_area', 'greater_than', 10000)
+  .sort('water_area')
+  
+
+//  .filterMetadata('date', 'equals', '2015-05-06') // thin clouds
+//  .filterMetadata('date', 'equals', '2015-06-23')
+//  .filterMetadata('date', 'equals', '2013-07-19')
+
+//collection = collection.filterMetadata('snow_pixels', 'greater_than', 10)
+//print('With snow:', collection.aggregate_count('cloud_pixels')); 
+
+// select only images where water intersets with the edge
+//collection = collection.filterMetadata('water_at_edge', 'greater_than', 0)
+
+// select only with clouds
+//collection = collection.filterMetadata('cloud_pixels', 'greater_than', 10);
+
+print('Filered:', collection.aggregate_count('date')); 
+
+// compute water occurance with correction on mask
+var waterOccuranceCorrected = collection.select('water').sum().divide(collection.select('mask').sum())
+
+
+var waterOccuranceSld = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#00ff00" quantity="0.0" label="0.0"/>\
+    <ColorMapEntry color="#f7fbff" quantity="0.1" label="0.1"/>\
+    <ColorMapEntry color="#deebf7" quantity="0.2" label="0.2" />\
+    <ColorMapEntry color="#c6dbef" quantity="0.3" label="0.3" />\
+    <ColorMapEntry color="#9ecae1" quantity="0.4" label="0.4" />\
+    <ColorMapEntry color="#6baed6" quantity="0.5" label="0.5" />\
+    <ColorMapEntry color="#4292c6" quantity="0.6" label="0.6" />\
+    <ColorMapEntry color="#2171b5" quantity="0.7" label="0.7" />\
+    <ColorMapEntry color="#08519c" quantity="0.8" label="0.8" />\
+    <ColorMapEntry color="#08306b" quantity="0.9" label="0.9" />\
+    <ColorMapEntry color="#000050" quantity="1.0" label="1" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+var waterOccuranceCorrectedVis = waterOccuranceCorrected.sldStyle(waterOccuranceSld).visualize({})
+Map.addLayer(waterOccuranceCorrectedVis, {}, 'water occurance (corrected)', true)
+
+// compute water occurance without correction on mask
+var waterOccurance = collection.select('water').sum().divide(ee.Number(collection.aggregate_count('date')))
+Map.addLayer(waterOccurance, {min:0, max:1, palette:['ffffff', '0000ff']}, 'water occurance', false)
+
+// prepare polygons
+var waterPolygons = collection.map(function(i){
+  var g = ee.FeatureCollection(i.select('water')
+        .reduceToVectors({scale: 30, geometry: bounds}))
+        .geometry();
+        
+  var waterPolygon = ee.Feature(g)
+    .set('id', i.get('id'))
+    .set('date', i.get('date'))
+    .set('water_area_geom', g.area(1))
+    .set('water_area', i.get('water_area'))
+    .set('water_at_edge', i.get('water_at_edge'))
+    .set('cloud_pixels', i.get('cloud_pixels'))
+
+  return waterPolygon;
+})
+
+Export.table(waterPolygons, 'reservoir_water_polygons', {fileFormat:'KML'})
+
+// also get image mask polygons
+var maskPolygons = collection.map(function(i){
+  var g = ee.FeatureCollection(i.select('mask')
+        .reduceToVectors({scale: 30, geometry: bounds})
+          //.filter(ee.Filter.gt('count', 300))
+          )
+        .geometry();
+
+  var mask = ee.Feature(g)
+    .set('id', i.get('id'))
+    .set('date', i.get('date'))
+    .set('water_area_geom', g.area(1))
+    .set('water_area', i.get('water_area'))
+    .set('water_at_edge', i.get('water_at_edge'))
+    .set('cloud_pixels', i.get('cloud_pixels'))
+
+  return mask;
+})
+
+Export.table(maskPolygons, 'reservoir_water_mask_polygons', {fileFormat:'KML'})
+
+var wateLandEdgePolygons = collection.map(function(i){
+  var g = ee.FeatureCollection(i.select('water_land_edge')
+        .reduceToVectors({scale: 30, geometry: bounds})
+          .filter(ee.Filter.eq('label', 1))
+          )
+        .geometry();
+
+  var mask = ee.Feature(g)
+    .set('id', i.get('id'))
+    .set('date', i.get('date'))
+    .set('water_area_geom', g.area(1))
+    .set('water_area', i.get('water_area'))
+    .set('water_at_edge', i.get('water_at_edge'))
+    .set('cloud_pixels', i.get('cloud_pixels'))
+
+  return mask;
+})
+
+Export.table(wateLandEdgePolygons, 'reservoir_land_water_edge', {fileFormat:'KML'})
+
+var f0 = ee.Feature(ee.List(wateLandEdgePolygons.toList(1,0)).get(0))
+Map.addLayer(f0, {color:'0000ff'}, 'e0', false)
+print(f0)
+
+var f0 = ee.Feature(ee.List(waterPolygons.toList(5,0)).get(4))
+Map.addLayer(f0, {color:'0000ff'}, 'f0', false)
+print(f0)
+
+var count = 6;
+var start = 0
+var list = collection.toList(count, start);
+
+for(var i=0; i < count - 1; i++) {
+  var image = ee.Image(list.get(i)).clip(bounds)
+  
+  Map.addLayer(image.clip(bounds), {}, i.toString() + ' - ' + image.get('id').getInfo(), i === 0);
+}   
+
+var coords = ee.List(bounds.bounds(1, ee.Projection('EPSG:3857')).coordinates().get(0)).getInfo()
+var w = Math.round((coords[1][0] - coords[0][0])/scale)
+var h = Math.round((coords[2][1] - coords[1][1])/scale)
+print(w + 'x' + h)
+
+// export video without clouds
+Export.video(collection.select([0,1,2]), fileName, {
+  dimensions: w + 'x' + h,
+  framesPerSecond: 5,
+  region: JSON.stringify(bounds.getInfo()) //region
+});
+  
+
+/*
+// bootstrap
+function getCollectionWithWaterOccurance(ic) {
+  return ic
+  .map(function(i){ return ee.ImageCollection.fromImages([
+      demVis.visualize({forceRgbOutput: true}),
+      waterOccuranceCorrectedVis.visualize({opacity: 0.8, forceRgbOutput: true}),
+      i.visualize({opacity: 0.8, forceRgbOutput: true})
+      .set('id', i.get('id'))
+    ]).mosaic()});
+}
+
+// get with water occurance and dem
+collection = getCollectionWithWaterOccurance(collection);
+
+list = collection.toList(count, start);
+for(var i=0; i < count - 1; i++) {
+  var image = ee.Image(list.get(i)).clip(bounds)
+  Map.addLayer(image.clip(bounds), {}, i.toString() + ' - WO ' + image.get('id').getInfo(), i === 0);
+}  
+
+Export.video(collection.select([0,1,2]), fileName + '-with-occurance', {
+  dimensions: w + 'x' + h,
+  framesPerSecond: 5,
+  region: JSON.stringify(bounds.getInfo()) //region
+});
+*/
+
+Map.addLayer(demMask, {opacity:0.7, palette:['000000']}, 'dem > ' + demThreshold, false);

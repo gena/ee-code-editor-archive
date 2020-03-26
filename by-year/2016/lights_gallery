@@ -1,0 +1,28 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var light = ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([-102.18521118164062, 32.34052084371423]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var imageGallery = require('users/gena/packages:gallery');
+
+light = light.select(0)
+  
+var bufferSize = Map.getScale()*50
+var bounds = geometry.buffer(bufferSize).bounds()
+Map.addLayer(bounds, {color: 'yellow'}, 'bounds', true, 0.5)
+
+Map.addLayer(light.median(), {min:0, max:3, palette:['222222', 'ff0000', 'ffff00', 'ffffff']}, 'light (median)', false)
+
+var options = {proj: 'EPSG:3857', flipX: false, flipY: true }
+var rows = 5
+var columns = 10
+var scale = Map.getScale()
+var gallery = imageGallery.draw(light, bounds, rows, columns, scale, options)
+
+print(ui.Chart.image.histogram(gallery.reproject(ee.Projection(options.proj).atScale(Map.getScale())), ee.Geometry(Map.getBounds(true)), Map.getScale()))
+
+gallery = gallery  
+    .where(gallery.lte(0), 0.001)
+    .mask(gallery.multiply(0.5))
+
+Map.addLayer(gallery, {min:0, max:3, palette:['222222', 'ff0000', 'ffff00', 'ffffff']}, 'light (gallery')
+

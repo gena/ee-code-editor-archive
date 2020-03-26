@@ -1,0 +1,306 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-107.97709960937499, 39.16224393178247],
+          [-108.24489135742186, 39.05141800554017],
+          [-108.26137084960936, 38.88057650835539],
+          [-107.67909545898436, 38.908366283548766],
+          [-107.74501342773436, 39.179278605171774],
+          [-108.31218261718749, 39.1377493603036]]]),
+    imageVisParam = {"opacity":0.01,"gamma":0.1},
+    Presence = /* color: #98ff00 */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Point([-107.99190047088621, 39.009884686249215]),
+            {
+              "presence": 1,
+              "system:index": "0"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-108.00035479370115, 39.00985133941474]),
+            {
+              "presence": 1,
+              "system:index": "1"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-108.00795080963132, 39.0095845641729]),
+            {
+              "presence": 1,
+              "system:index": "2"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.98816683593748, 39.020854941299774]),
+            {
+              "presence": 1,
+              "system:index": "3"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.988081005249, 39.023388861583946]),
+            {
+              "presence": 1,
+              "system:index": "4"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.9730606347656, 39.02132172291293]),
+            {
+              "presence": 1,
+              "system:index": "5"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.98743727508543, 39.01815421575709]),
+            {
+              "presence": 1,
+              "system:index": "6"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.98464777770994, 39.02165513646411]),
+            {
+              "presence": 1,
+              "system:index": "7"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.98486235443113, 39.02342220203497]),
+            {
+              "presence": 1,
+              "system:index": "8"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.98636439147947, 39.021588453879666]),
+            {
+              "presence": 1,
+              "system:index": "9"
+            })]),
+    Absence = /* color: #0b4a8b */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Point([-107.99035551849363, 39.02125504001402]),
+            {
+              "presence": 0,
+              "system:index": "0"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.96997072998045, 39.01805418690405]),
+            {
+              "presence": 0,
+              "system:index": "1"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.96288969818113, 39.02065489109359]),
+            {
+              "presence": 0,
+              "system:index": "2"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.9626322061157, 39.019521262566755]),
+            {
+              "presence": 0,
+              "system:index": "3"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.96155932250974, 39.018520987007655]),
+            {
+              "presence": 0,
+              "system:index": "4"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.98344614807127, 39.025155883820545]),
+            {
+              "presence": 0,
+              "system:index": "5"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.98988344970701, 39.02522256304014]),
+            {
+              "presence": 0,
+              "system:index": "6"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.99958231750486, 39.01998805298493]),
+            {
+              "presence": 0,
+              "system:index": "7"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-108.0085945397949, 39.019121154041216]),
+            {
+              "presence": 0,
+              "system:index": "8"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.99679282012937, 39.01732063765778]),
+            {
+              "presence": 0,
+              "system:index": "9"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.9955911904907, 39.01898778402956]),
+            {
+              "presence": 0,
+              "system:index": "10"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.98099997344968, 39.018721043251546]),
+            {
+              "presence": 0,
+              "system:index": "11"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.97662260833738, 39.01965463157213]),
+            {
+              "presence": 0,
+              "system:index": "12"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.97615053955076, 39.02405566761677]),
+            {
+              "presence": 0,
+              "system:index": "13"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.97520640197752, 39.02525590262636]),
+            {
+              "presence": 0,
+              "system:index": "14"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.97632220092771, 39.02555595819469]),
+            {
+              "presence": 0,
+              "system:index": "15"
+            })]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// call in NAIP imagery as an image collection
+var NAIP = ee.ImageCollection("USDA/NAIP/DOQQ");
+// filter the data based on date and area for 2015
+var naip2015 = NAIP
+  .filterBounds(geometry)
+  .filterDate("2015-01-01", "2015-12-31");
+// filter the data based on date and area for 2016
+var naip2016 = NAIP
+  .filterBounds(geometry)
+  .filterDate("2016-01-01", "2016-12-31");
+  
+  //define viewing parameters for multi band images
+var visParamsFalse = {bands:['N', 'R', 'G']};
+var visParamsTrue = {bands:['R', 'G', 'B']};
+
+// add 2015 imagery to the map with false color and true color composites
+Map.addLayer(naip2015,visParamsFalse,"2015_false",false );
+Map.addLayer(naip2015,visParamsTrue,"2015_true",false );
+
+// add 2016 imagery to the map with false color and true color composites
+Map.addLayer(naip2016,visParamsFalse,"2016_false",false );
+Map.addLayer(naip2016,visParamsTrue,"2016_true",false );
+
+
+//add National Land Cover Database (NLCD) with color palette
+var dataset = ee.ImageCollection('USGS/NLCD');
+print(dataset);
+
+// select the land cover bands in each image of the image collection
+var landcoverAll =  dataset.select('landcover');
+print(landcoverAll);
+
+// convert the image collection to a list with 4 elements 
+var landCoverList = landcoverAll.toList(4);
+print(landCoverList);
+
+ // Pull element 3, 2011 NLCD landcover class from the list of Images 
+// Note that list indices start at 0
+// Wrap the selected image in ee.Image, which redefines datatype for proper visualization. 
+var landcover = ee.Image(landCoverList.get(3)); 
+print(landcover);
+//
+
+var landcoverVis = {
+  min: 11.0,
+  max: 95.0,
+  palette: [
+    '5475A8', 'ffffff', 'E8D1D1', 'E29E8C', 'ff0000', 'B50000', 'D2CDC0',
+    '85C77E', '38814E', 'D4E7B0', 'AF963C', 'DCCA8F', 'FDE9AA', 'D1D182',
+    'A3CC51', '82BA9E', 'FBF65D', 'CA9146', 'C8E6F8', '64B3D5'
+  ],
+};
+
+Map.addLayer(landcover, landcoverVis, 'National Land Cover Database (NLCD)',false);
+Map.setCenter(-107.993660, 39.007467, 10);
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////Legend////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// set position of panel
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+
+// Create legend title
+var legendTitle = ui.Label({
+  value: 'National Land Cover Database (NLCD)',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '18px',
+    margin: '0 0 4px 0',
+    padding: '0'
+    }
+});
+
+// Add the title to the panel
+legend.add(legendTitle);
+    
+// Creates and styles 1 row of the legend.
+var makeRow = function(color, name) {
+      
+      // Create the label that is actually the colored box.
+      var colorBox = ui.Label({
+        style: {
+          backgroundColor: '#' + color,
+          // Use padding to give the box height and width.
+          padding: '8px',
+          margin: '0 0 4px 0'
+        }
+      });
+      
+      // Create the label filled with the description text.
+      var description = ui.Label({
+        value: name,
+        style: {margin: '0 0 4px 6px'}
+      });
+      
+      // return the panel
+      return ui.Panel({
+        widgets: [colorBox, description],
+        layout: ui.Panel.Layout.Flow('horizontal')
+      });
+};
+
+
+//  Palette with the colors
+var palette =['5475A8','E8D1D1','E29E8C','ff0000','B50000','D2CDC0','85C77E','38814E','D4E7B0',
+'DCCA8F','FDE9AA','FBF65D','CA9146','C8E6F8','64B3D5'];
+    
+
+// name of the legend
+var names = [
+'Open water (11)', 'Developed open space (21)','Developed low intensity (22)','Developed medium intensity (23)','Developed high intensity (24)', 'Barren land (31)', 'Deciduous forest (41)','Evergreen forest (42)','Mixed forest (43)','Shrub/scrub (52)','Grassland/herbaceous (71)','Pasture/hay (81)','Cultivated crops (82)','Woody wetlands (90)', 'Emergent herbaceous wetlands (95)'
+];
+
+// Add color and and names
+for (var i = 0; i < names.length; i++) {
+  legend.add(makeRow(palette[i], names[i]));
+  }  
+
+// add legend to map (alternatively you can also print the legend to the console)  
+//Map.add(legend);
+
+
+//Merge presence and absence datasets
+var samples = Presence.merge(Absence)
+print(samples, 'Samples');
+
+//export presence points
+Export.table.toDrive({
+  collection: samples,
+  description:'presenceAbsencePointsForForest',
+  fileFormat: 'csv'
+});
+

@@ -1,0 +1,43 @@
+// timeAtMax Error
+
+// FUNCTIONS --------------------------------------------------------------------------------------
+
+//Algorithm from Vincent2004 to estimate phycocyanin content (PC) from a linear combination of LANDSAT bands
+var calculateLBPC_7 = function(image) {
+  var result = image.expression("47.7-9.21*b('30')/b('10')+29.7*b('40')/b('10')-118*b('40')/b('30')-6.81*b('50')/b('30')+41.9*b('70')/b('30')-14.7*b('70')/b('40')");
+  return result.copyProperties(image, ["system:time_start"]);
+};
+
+function timeAtMax(img) {
+   // An image that is 1 if the pixel equals the max, 0 otherwise.
+   var isMax = img.eq(val)
+
+   // Return an image created from the image's acquisition time,
+   // but set to 0s everywhere that isn't equal to the max value.
+   // You could also just multiply by isMax instead of using where().
+   // Note: times in EE are represented in microseconds since 1970.
+   var result = img.metadata("system:time_start").where(isMax.not(), 0);
+   return result.mask(img.mask());
+}
+
+// SCRIPT --------------------------------------------------------------------------------------
+
+// Filter to only include images covering Lake Erie
+var polygon = ee.Feature.Polygon([[  [-83, 41.5], [-82, 41.5], [-82, 42], [-83, 42], ]]); // box around lake Erie
+var collection = ee.ImageCollection('L7_L1T').filterDate(new Date("2002-06-01"),new Date("2002-10-31")).filterBounds(polygon);
+// calculate PC for each image in filtered collection
+var PC_col = collection.map(calculateLBPC_7);
+var val = PC_col.max();
+
+// Apply the timeAtMax function to every image in the collection.
+var time_col = PC_col.map(timeAtMax);
+
+// Get the maximum of all the times.
+var maxTimes = time_col.max();
+
+addToMap(maxTimes, {min:1029599920128, max:1039599920128});
+//addToMap(val,{min:0,max:15,palette: "0000FF,0000FF,0000FF,00FFFF,FFFF00,FF0000"},'Phyocyanin Content'); //blue to cyan to yellow to red
+
+
+centerMap(-82.5,41.8,9);
+

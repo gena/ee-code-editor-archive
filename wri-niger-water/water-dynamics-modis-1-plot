@@ -1,0 +1,128 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var images = ee.ImageCollection("users/gena/water-niger/modis-monthly-upper-niger"),
+    catchment = ee.FeatureCollection("users/gena/water-niger/catchment"),
+    geometryPlot = /* color: #d63000 */ee.Geometry.LineString(
+        [[-2.5308550552745146, 13.20531455231505],
+         [1.9912482067076098, 15.01425891107405]]),
+    catchments = ee.FeatureCollection("users/gena/water-niger/wflow/catchments"),
+    catchmentsHomogenized = ee.FeatureCollection("users/gena/water-niger/catchments-homogenized"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([-4.0134765625000455, 15.968932136866163]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+var charting = require('users/gena/packages:charting')
+var palettes = require('users/gena/packages:palettes')
+var assets = require('users/gena/packages:assets')
+var hydro = require('users/gena/packages:hydro')
+var thresholding = require('users/gena/packages:thresholding')
+
+Map.addLayer(catchmentsHomogenized, {}, 'catchments')
+
+var geometrySampling = catchmentsHomogenized
+  //.filterBounds(Map.getCenter())
+  .filterBounds(geometry)
+  .first()
+  
+geometrySampling = ee.Feature(geometrySampling).geometry()
+
+Map.addLayer(geometrySampling, { color: 'yellow' }, 'selection', true, 0.5)
+
+// Map.centerObject(ee.FeatureCollection([geometryPlot, geometrySampling]))
+
+// Map.addLayer(catchment, {}, 'catchment', false)
+// Map.addLayer(catchments, {}, 'catchments')
+
+var level = 9
+var catchments00 = ee.Image("users/rutgerhofste/PCRGlobWB20V04/support/global_Standard_lev00_30sGDALv01")
+var catchments = catchments00.divide(ee.Number(10).pow(ee.Number(12).subtract(level))).floor().clipToCollection(catchment)
+// Map.addLayer(catchments.randomVisualizer(), {}, 'catchments', true, 0.5)
+
+Map.addLayer(ee.Image(0), { min: 0, max: 1 }, 'background', true, 0.5)
+
+images = images.map(function(i) { return i.resample('bicubic') })
+
+//var start = ee.Date('2010-01-01')
+var start = ee.Date('2000-01-01')
+var stop = ee.Date('2019-01-01')
+
+images = images.filterDate(start, stop)
+
+var monthCount = stop.difference(start, 'month').int()
+
+var vis = { min: 300, max: 5000, bands: ['sur_refl_b06', 'sur_refl_b02', 'sur_refl_b04'] }
+
+
+// PLOT
+
+var plot = new charting.Plot(geometryPlot.bounds())
+
+plot.setMinMax(start.millis(), stop.millis(), 0, 1)
+
+var N = 2500 // number of samples
+var w = monthCount // column widths as a fraction of chart width
+var p = 15 // percentile
+
+//geometrySampling = ee.Geometry.Polygon(geometrySampling.coordinates())
+//geometrySampling = ee.Geometry.Polygon(geometrySampling2.coordinates())
+//geometrySampling = catchments.int().reduceToVectors({geometry: Map.getBounds(true), scale: 450}).filterBounds(geometry).geometry()
+
+plot.addColorbarSeries('colorbar', images, geometrySampling, vis, 100, N, w, p)
+
+// LANDSAT and MODIS
+var images = assets.getImages(geometrySampling, {
+  filterMasked: true,
+  missions: ['S2', 'L8', 'L7', 'L5', 'L4'],
+  filter: ee.Filter.date(start, '2010-01-01')
+})
+print('Count (LANDSAT, SENTINEL)', images.size())
+var vis = { min: 0.03, max: 0.5, bands: ['swir', 'nir', 'green'] }
+
+var w = 400
+
+//plot.addColorbarSeries('colorbar (all)', images, geometrySampling, vis, 30, N, w, p)
+images = assets.getMostlyCleanImages(images, geometrySampling, { percentile: 75 })
+// plot.addColorbarSeries('colorbar (all, cloudfree)', images, geometrySampling, vis, 30, N, w, p)
+
+plot.show()
+
+// animate
+var styleSelection = { width: 2, color: '00ffff', fillColor: '00ffff33' }
+
+images = images.map(function(i) {
+  var position = plot.getVLine(i.date().millis()).buffer(Map.getScale() * 5).bounds()
+  
+  return ee.ImageCollection([
+    i.visualize(vis),
+    ee.FeatureCollection(position).style(styleSelection)
+  ]).mosaic()
+  .set({
+    date: i.date().format('YYYY-MMM')
+  })
+})
+
+/*
+animation.animate(images.sort('system:time_start'), { 
+  maxFrames: 20,
+  label: 'date'
+})
+.then(function() {
+  // water occurrence
+  var waterOccurrence = ee.Image("JRC/GSW1_0/GlobalSurfaceWater")
+    .select('occurrence')
+    .divide(100)
+    .unmask(0)
+    .resample('bilinear')
+  
+  Map.addLayer(waterOccurrence.multiply(2).mask(waterOccurrence.multiply(2)), {min:0 , max: 1, palette: palettes.cb.YlOrRd[9].reverse().slice(1) }, 'water occurrence')
+
+  // var rivers = ee.FeatureCollection('users/gena/HydroEngine/riv_15s_lev05')  
+  // hydro.Map.addRivers({
+  //   catchments: catchments
+  // })
+
+  Map.addLayer(ee.FeatureCollection(geometrySampling).style(styleSelection), {}, 'aoi')
+})
+*/
+
+
+// TODO: Niger, compare to https://onisdin.info/en/hydrology/monitoring-water-quantity
+

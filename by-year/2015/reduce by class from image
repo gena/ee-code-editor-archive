@@ -1,0 +1,9 @@
+// reduce by class from image
+
+var spectrumImage = ee.Image('LANDSAT/LC8_L1T_32DAY_TOA/20130407');
+var classImage = ee.Image('MCD12Q1/MCD12Q1_005_2001_01_01').select('Land_Cover_Type_1');
+var image = spectrumImage.addBands(classImage);
+
+var rect = ee.Geometry.Rectangle(-100, 19, -99, 20);
+var reducer = ee.Reducer.mean().unweighted().forEachBand(spectrumImage);
+print(image.reduceRegion(reducer.group(12), rect, 1000));

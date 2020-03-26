@@ -1,0 +1,36 @@
+// kernels, edges, gaussian
+
+// Select a Landsat image displaying a portion of the Nile River in Egypt.
+var nileImage = ee.Image('LT51750422003277MTI01');
+
+// Define the gaussian kernel's parameters.
+var gaussianKernel = ee.Kernel.gaussian(2.0, 1.0);
+
+// Used a fixed kernel to create a log kernel.
+var logKernel = ee.Kernel.fixed(5, 5, 
+                          [[0, 0, 1, 0, 0],
+                           [0, 1, 2, 1, 0],
+                           [1, 2, -16, 2, 1],
+                           [0, 1, 2, 1, 0],
+                           [0, 0, 1, 0, 0]]);
+
+// Apply the gaussian kernel using a convolve(). 
+var gaussianImage = nileImage.convolve(gaussianKernel);
+
+// Apply a circle kernel using convolve().
+var circleImage = nileImage.convolve(
+  ee.Kernel.circle(6));
+
+// Apply a focal convolution using focal_mode().
+var imageFocal = nileImage.focal_mode();
+
+
+// Apply the log kernel to the image using convolve(). 
+var logImage = nileImage.convolve(logKernel);
+
+Map.addLayer(nileImage.select(['30', '20', '10']), {'gain': [1.9, 1.8, 1.0]},'Original');
+Map.addLayer(gaussianImage.select(['30', '20', '10']), {'gain': [1.9, 1.8, 1.0]},'Gaussian');
+Map.addLayer(circleImage.select(['30', '20', '10']), {gain:[1.9,1.8,1.0]},'Circle');
+Map.addLayer(imageFocal.select(['30','20','10']),{'gain': [1.9, 1.8, 1.0]}, 'Focal');
+Map.addLayer(logImage.select(['30', '20', '10']), {'min':0, 'max':1},'Log');
+Map.setCenter(32.25,26.15,9);

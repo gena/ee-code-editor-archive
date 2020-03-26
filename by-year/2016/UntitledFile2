@@ -1,0 +1,1430 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var aoi = /* color: d63000 */ee.Geometry.Polygon(
+        [[[-120.13781547546387, 39.37504697058432],
+          [-120.13326644897461, 39.37929311183573],
+          [-120.13824462890625, 39.38287559262373],
+          [-120.13978944325117, 39.38479941281629],
+          [-120.1413345336914, 39.389774667175914],
+          [-120.14897346496582, 39.39037167040836],
+          [-120.1517630200903, 39.38635855593795],
+          [-120.16176223754883, 39.389907335002306],
+          [-120.16674041013675, 39.38771853899016],
+          [-120.17480850219727, 39.39083600272453],
+          [-120.17789843439749, 39.391764637908786],
+          [-120.1768684387207, 39.38712125767802],
+          [-120.17077445983887, 39.38141608560946],
+          [-120.1620302615708, 39.37926011043577],
+          [-120.15843618830496, 39.37750176036189],
+          [-120.16484137400715, 39.37584315724959],
+          [-120.17287723584599, 39.37677189069475],
+          [-120.17206192016602, 39.373454601030474],
+          [-120.16356468200684, 39.36701840406483],
+          [-120.15412330627441, 39.37060151475313],
+          [-120.15176325507196, 39.37723632094731],
+          [-120.14828681945801, 39.37703738145347],
+          [-120.14463920832839, 39.37640716332671]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/***
+ * Surface water detection and reconstruction using multiple sensors:
+ *  + Landsat 4 (30m)
+ *  + Landsat 5 (30m)
+ *  + Landsat 7 (15-30m)
+ *  + Landsat 8 (15-30m)
+ *  - Sentinel 1 (SAR, ~10-30m)
+ *  + Sentinel 2 (10-20m)
+ *  + ASTER (15m multispectral and 90m thermal)
+ *  - PROBA-V (100m and 333m)
+ *  - MODIS (250m Terra and Aqua)
+ * 
+ * Author: Gennadii Donchyts
+ * Credits: Ian Housman, Karis Tenneson, Carson Stam, Matt Hancher
+ * 
+ */ 
+
+// number of processed images to add for inspection (water detection, count per asset)
+var mapLayerCountToAddProcessed = 10
+
+// number of rendered frames to added before video export
+var mapLayerCountToAddRendered = 0
+
+var start = '2010-03-01'
+var stop = '2016-06-01'
+
+var errorMargin = Map.getScale()
+
+//aoi = ee.Geometry(Map.getBounds(true)).centroid(1)
+//aoi = ee.Geometry(Map.getBounds(true)).bounds()
+aoi = ee.Geometry(Map.getBounds(true)).centroid(errorMargin).buffer(Map.getScale() * 200, ee.ErrorMargin(errorMargin))
+
+// when true - use permanent water mask to zoom in to the reservoir within AOI area
+var usePermanentWaterMask = false
+
+// where to perform analysis (focal area), defined around permanent water / AOI
+var focusSmoothDistance = 1000
+var focusSearchDistance = 1000
+
+var only = [
+  'ASTER T',
+  //'ASTER',
+  //'Landsat 8',
+  //'Landsat 7',
+  //'Landsat 5',
+  //'Landsat 4',
+  //'Sentinel 2', 
+  //'PROBA-V 100m', 
+  //'PROBA-V 333m', 
+  //'MODIS Aqua MYD09GQ',
+  //'MODIS Terra MOD09GQ',
+  //'Sentinel 1 VV', 
+  //'Sentinel 1 VH', 
+  //'Sentinel 1 VV+VH', 
+]
+
+var skip = [
+  //'ASTER T',
+  //'ASTER'
+  //'Landsat 8',
+  //'Landsat 7',
+  //'Landsat 5',
+  //'Landsat 4',
+  //'Sentinel 2', 
+  //'PROBA-V 100m', 
+  'PROBA-V 333m', 
+  'MODIS Aqua MYD09GQ',
+  'MODIS Terra MOD09GQ',
+  //'Sentinel 1 VV', 
+  'Sentinel 1 VH',  // too noisy
+  //'Sentinel 1 VV+VH', 
+]
+
+var Palettes = {
+  water: ['eff3ff', 'c6dbef', '9ecae1', '6baed6', '3182bd', '08519c']
+}
+
+// permanent water mask
+var glcf = ee.ImageCollection('GLCF/GLS_WATER')
+var waterMaskPermanent = glcf.map(function(i) { return i.eq(2) }).sum().gt(0)
+  
+if(usePermanentWaterMask) {
+  var waterMaskPermanentVector = waterMaskPermanent.mask(waterMaskPermanent).reduceToVectors({geometry: aoi.buffer(focusSearchDistance), scale: errorMargin})
+    //.filter(ee.Filter.gt('label', 0)) // skip background
+} else {
+  var waterMaskPermanentVector = ee.FeatureCollection([aoi.buffer(focusSearchDistance)])
+}
+
+var waterPermanentCenter = waterMaskPermanentVector.geometry().centroid(90).buffer(90);
+
+var focusNearWaterVector = aoi.buffer(focusSearchDistance)
+
+if(usePermanentWaterMask) {
+  // focus around permanent water
+  var nearWater = waterMaskPermanent.clip(focusNearWaterVector)
+    .focal_max(focusSearchDistance, 'circle', 'meters')
+    .distance(ee.Kernel.euclidean(focusSmoothDistance, 'meters'), false)
+  
+  nearWater = ee.Image(focusSmoothDistance).subtract(nearWater).divide(focusSmoothDistance)
+    .unmask()
+  
+  var focusNearWater = nearWater.reproject('EPSG:3857', null, 120)
+} else {
+  // focus near user-defined AOI
+  var focusNearWater = ee.Image().float().paint(focusNearWaterVector, 1).unmask()
+}
+
+var b = Map.getBounds()
+print('Map w/h ratio: ', (b[2] - b[0])/(b[3]-b[1]))
+
+// text
+var _0xd087=["\x66\x72\x6F\x6D\x43\x68\x61\x72\x43\x6F\x64\x65","\x31\x36","\x66\x6F\x6E\x74\x53\x69\x7A\x65","\x75\x73\x65\x72\x73\x2F\x67\x65\x6E\x61\x2F\x66\x6F\x6E\x74\x73\x2F\x41\x72\x69\x61\x6C","\x70\x72\x6F\x6A\x65\x63\x74\x69\x6F\x6E","\x73\x63\x61\x6C\x65","\x63\x68\x61\x6E\x67\x65\x50\x72\x6F\x6A","\x68\x65\x69\x67\x68\x74","\x67\x65\x74","\x77\x69\x64\x74\x68","\x63\x65\x6C\x6C\x5F\x68\x65\x69\x67\x68\x74","\x63\x65\x6C\x6C\x5F\x77\x69\x64\x74\x68","\x70\x61\x72\x73\x65","\x4E\x75\x6D\x62\x65\x72","\x6D\x61\x70","\x2C","\x73\x70\x6C\x69\x74","\x63\x68\x61\x72\x5F\x77\x69\x64\x74\x68\x73","\x63\x6F\x6C\x75\x6D\x6E\x73","\x63\x65\x6C\x6C\x57\x69\x64\x74\x68","\x64\x69\x76\x69\x64\x65","\x72\x6F\x77\x73","\x63\x65\x6C\x6C\x48\x65\x69\x67\x68\x74","\x61\x64\x64","\x69\x74\x65\x72\x61\x74\x65","","\x70\x69\x78\x65\x6C\x4C\x6F\x6E\x4C\x61\x74","\x49\x6D\x61\x67\x65","\x72\x6F\x75\x6E\x64","\x66\x6C\x6F\x6F\x72","\x73\x65\x6C\x65\x63\x74","\x6C\x74","\x61\x6E\x64","\x67\x74\x65","\x6D\x75\x6C\x74\x69\x70\x6C\x79","\x73\x75\x62\x74\x72\x61\x63\x74","\x74\x72\x61\x6E\x73\x6C\x61\x74\x65","\x6D\x61\x73\x6B","\x63\x68\x61\x72\x57\x69\x64\x74\x68\x73","\x73\x6C\x69\x63\x65","\x73\x69\x7A\x65","\x73\x65\x71\x75\x65\x6E\x63\x65","\x4C\x69\x73\x74","\x7A\x69\x70","\x6D\x6F\x64","\x63\x6F\x6F\x72\x64\x69\x6E\x61\x74\x65\x73","\x74\x72\x61\x6E\x73\x66\x6F\x72\x6D","\x6D\x6F\x73\x61\x69\x63","\x74\x65\x78\x74\x43\x6F\x6C\x6F\x72","\x66\x66\x66\x66\x66\x66","\x6F\x75\x74\x6C\x69\x6E\x65\x43\x6F\x6C\x6F\x72","\x30\x30\x30\x30\x30\x30","\x6F\x75\x74\x6C\x69\x6E\x65\x57\x69\x64\x74\x68","\x74\x65\x78\x74\x4F\x70\x61\x63\x69\x74\x79","\x74\x65\x78\x74\x57\x69\x64\x74\x68","\x6F\x75\x74\x6C\x69\x6E\x65\x4F\x70\x61\x63\x69\x74\x79","\x76\x69\x73\x75\x61\x6C\x69\x7A\x65","\x66\x6F\x63\x61\x6C\x5F\x6D\x61\x78","\x66\x72\x6F\x6D\x49\x6D\x61\x67\x65\x73","\x49\x6D\x61\x67\x65\x43\x6F\x6C\x6C\x65\x63\x74\x69\x6F\x6E"];var Text={draw:function(_0xf49ax2,_0xf49ax3,_0xf49ax4,_0xf49ax5){_0xf49ax2= ee.String(_0xf49ax2);var _0xf49ax6={};for(var _0xf49ax7=32;_0xf49ax7< 128;_0xf49ax7++){_0xf49ax6[String[_0xd087[0]](_0xf49ax7)]= _0xf49ax7};_0xf49ax6= ee.Dictionary(_0xf49ax6);var _0xf49ax8=_0xd087[1];if(_0xf49ax5&& _0xf49ax5[_0xd087[2]]){_0xf49ax8= _0xf49ax5[_0xd087[2]]};var _0xf49ax9=ee.Image(_0xd087[3]+ _0xf49ax8);var _0xf49axa=_0xf49ax9[_0xd087[4]]();_0xf49ax9= _0xf49ax9[_0xd087[6]](_0xf49axa,_0xf49axa[_0xd087[5]](1,-1));var _0xf49axb={height:ee.Number(_0xf49ax9[_0xd087[8]](_0xd087[7])),width:ee.Number(_0xf49ax9[_0xd087[8]](_0xd087[9])),cellHeight:ee.Number(_0xf49ax9[_0xd087[8]](_0xd087[10])),cellWidth:ee.Number(_0xf49ax9[_0xd087[8]](_0xd087[11])),charWidths:ee.String(_0xf49ax9[_0xd087[8]](_0xd087[17]))[_0xd087[16]](_0xd087[15])[_0xd087[14]](ee[_0xd087[13]][_0xd087[12]])};_0xf49axb[_0xd087[18]]= _0xf49axb[_0xd087[9]][_0xd087[20]](_0xf49axb[_0xd087[19]]);_0xf49axb[_0xd087[21]]= _0xf49axb[_0xd087[7]][_0xd087[20]](_0xf49axb[_0xd087[22]]);function _0xf49axc(_0xf49ax2){return ee.List(_0xf49ax2[_0xd087[16]](_0xd087[25])[_0xd087[24]](function(_0xf49axd,_0xf49axe){return ee.List(_0xf49axe)[_0xd087[23]](_0xf49ax6[_0xd087[8]](_0xf49axd))},ee.List([])))}function _0xf49axf(_0xf49ax10,_0xf49ax11,_0xf49ax12,_0xf49ax13,_0xf49ax14,_0xf49ax15,_0xf49ax16){var _0xf49ax17=ee[_0xd087[27]][_0xd087[26]]();var _0xf49ax18=_0xf49ax17[_0xd087[29]]()[_0xd087[28]]()[_0xd087[6]](_0xf49ax17[_0xd087[4]](),_0xf49ax10[_0xd087[4]]());var _0xf49ax19=_0xf49ax18[_0xd087[30]](0);var _0xf49ax1a=_0xf49ax18[_0xd087[30]](1);var _0xf49ax1b=_0xf49ax19[_0xd087[33]](_0xf49ax11)[_0xd087[32]](_0xf49ax19[_0xd087[31]](_0xf49ax12))[_0xd087[32]](_0xf49ax1a[_0xd087[33]](_0xf49ax13))[_0xd087[32]](_0xf49ax1a[_0xd087[31]](_0xf49ax14));return _0xf49ax10[_0xd087[37]](_0xf49ax1b)[_0xd087[36]](ee.Number(_0xf49ax11)[_0xd087[34]](-1)[_0xd087[23]](_0xf49ax15),ee.Number(_0xf49ax13)[_0xd087[34]](-1)[_0xd087[35]](_0xf49ax16))}var _0xf49ax1c=_0xf49axc(_0xf49ax2);var _0xf49ax1d=_0xf49ax1c[_0xd087[14]](function(_0xf49ax1e){return ee.Number(_0xf49axb[_0xd087[38]][_0xd087[8]](ee.Number(_0xf49ax1e)))});var _0xf49ax1f=ee.List(_0xf49ax1d[_0xd087[24]](function(_0xf49ax20,_0xf49ax21){_0xf49ax21= ee.List(_0xf49ax21);var _0xf49ax22=ee.Number(_0xf49ax21[_0xd087[8]](-1));var _0xf49ax15=_0xf49ax22[_0xd087[23]](_0xf49ax20);return _0xf49ax21[_0xd087[23]](_0xf49ax15)},ee.List([0])))[_0xd087[39]](0,-1);var _0xf49ax23=_0xf49ax1f[_0xd087[43]](ee[_0xd087[42]][_0xd087[41]](0,_0xf49ax1f[_0xd087[40]]()));var _0xf49ax24=_0xf49ax1c[_0xd087[14]](function(_0xf49ax1e){_0xf49ax1e= ee.Number(_0xf49ax1e)[_0xd087[35]](32);var _0xf49ax16=_0xf49ax1e[_0xd087[20]](_0xf49axb[_0xd087[18]])[_0xd087[29]]()[_0xd087[34]](_0xf49axb[_0xd087[22]]);var _0xf49ax15=_0xf49ax1e[_0xd087[44]](_0xf49axb[_0xd087[18]])[_0xd087[34]](_0xf49axb[_0xd087[19]]);return [_0xf49ax15,_0xf49ax16]});var _0xf49ax25=_0xf49ax24[_0xd087[43]](_0xf49ax1d)[_0xd087[43]](_0xf49ax23);_0xf49ax3= ee.Geometry(_0xf49ax3)[_0xd087[46]](_0xf49axa)[_0xd087[45]]();var _0xf49ax26=ee.Number(_0xf49ax3[_0xd087[8]](0));var _0xf49ax27=ee.Number(_0xf49ax3[_0xd087[8]](1));var _0xf49ax28=ee.ImageCollection(_0xf49ax25[_0xd087[14]](function(_0xf49ax29){_0xf49ax29= ee.List(_0xf49ax29);var _0xf49ax2a=ee.List(_0xf49ax29[_0xd087[8]](0));var _0xf49ax2b=ee.Number(_0xf49ax2a[_0xd087[8]](1));var _0xf49ax2c=ee.List(_0xf49ax2a[_0xd087[8]](0));var _0xf49ax2d=ee.Number(_0xf49ax2c[_0xd087[8]](0));var _0xf49ax2e=ee.Number(_0xf49ax2c[_0xd087[8]](1));var _0xf49ax23=ee.List(_0xf49ax29[_0xd087[8]](1));var _0xf49ax15=ee.Number(_0xf49ax23[_0xd087[8]](0));var _0xf49ax7=ee.Number(_0xf49ax23[_0xd087[8]](1));var _0xf49ax2f=_0xf49axf(_0xf49ax9,_0xf49ax2d,_0xf49ax2d[_0xd087[23]](_0xf49ax2b),_0xf49ax2e,_0xf49ax2e[_0xd087[23]](_0xf49axb[_0xd087[22]]),_0xf49ax15,0,_0xf49axa);return _0xf49ax2f[_0xd087[6]](_0xf49axa,_0xf49axa[_0xd087[36]](_0xf49ax26,_0xf49ax27)[_0xd087[5]](_0xf49ax4,_0xf49ax4))}))[_0xd087[47]]();_0xf49ax28= _0xf49ax28[_0xd087[37]](_0xf49ax28);if(_0xf49ax5){_0xf49ax5= {textColor:_0xf49ax5[_0xd087[48]]|| _0xd087[49],outlineColor:_0xf49ax5[_0xd087[50]]|| _0xd087[51],outlineWidth:_0xf49ax5[_0xd087[52]]|| 0,textOpacity:_0xf49ax5[_0xd087[53]]|| 0.9,textWidth:_0xf49ax5[_0xd087[54]]|| 1,outlineOpacity:_0xf49ax5[_0xd087[55]]|| 0.4};var _0xf49ax30=_0xf49ax28[_0xd087[56]]({opacity:_0xf49ax5[_0xd087[53]],palette:[_0xf49ax5[_0xd087[48]]],forceRgbOutput:true});if(_0xf49ax5[_0xd087[54]]> 1){_0xf49ax30[_0xd087[57]](_0xf49ax5[_0xd087[54]])};if(!_0xf49ax5|| (_0xf49ax5&& !_0xf49ax5[_0xd087[52]])){return _0xf49ax30};var _0xf49ax31=_0xf49ax28[_0xd087[57]](_0xf49ax5[_0xd087[52]])[_0xd087[56]]({opacity:_0xf49ax5[_0xd087[55]],palette:[_0xf49ax5[_0xd087[50]]],forceRgbOutput:true});return ee[_0xd087[59]][_0xd087[58]](ee.List([_0xf49ax31,_0xf49ax30]))[_0xd087[47]]()}else {return _0xf49ax28}}}
+
+// rescales to given ranges
+var rescale = function(img, exp, thresholds) {
+  return img.expression(exp, {img: img}).subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+};
+
+// used as aside function for debugging
+var show = function(image, name, vis) {
+  // Map.addLayer(image, vis || {}, '  ' + name, false)
+  
+  return image
+}
+
+// Return the DN that maximizes interclass variance in B5 (in the region).
+var otsu = function(histogram) {
+  histogram = ee.Dictionary(histogram)
+  
+  var counts = ee.Array(histogram.get('histogram'));
+  var means = ee.Array(histogram.get('bucketMeans'));
+  var size = means.length().get([0]);
+  var total = counts.reduce(ee.Reducer.sum(), [0]).get([0]);
+  var sum = means.multiply(counts).reduce(ee.Reducer.sum(), [0]).get([0]);
+  var mean = sum.divide(total);
+  
+  var indices = ee.List.sequence(1, size);
+  
+  // Compute between sum of squares, where each mean partitions the data.
+  var bss = indices.map(function(i) {
+    var aCounts = counts.slice(0, 0, i);
+    var aCount = aCounts.reduce(ee.Reducer.sum(), [0]).get([0]);
+    var aMeans = means.slice(0, 0, i);
+    var aMean = aMeans.multiply(aCounts)
+        .reduce(ee.Reducer.sum(), [0]).get([0])
+        .divide(aCount);
+    var bCount = total.subtract(aCount);
+    var bMean = sum.subtract(aCount.multiply(aMean)).divide(bCount);
+    return aCount.multiply(aMean.subtract(mean).pow(2)).add(
+           bCount.multiply(bMean.subtract(mean).pow(2)));
+  });
+  
+  // Return the mean value corresponding to the maximum BSS.
+  return means.sort(bss).get([-1]);
+};
+
+/***
+ * Filters feature collection to filterCollection
+ */
+function filterTo(featureCollection, filterCollection) {
+    return featureCollection.map(function(f) { 
+      return f.set('intersects', f.intersects(filterCollection.geometry(ee.ErrorMargin(errorMargin)), ee.ErrorMargin(errorMargin)))
+    })
+    .filter(ee.Filter.eq('intersects', true))  
+} 
+
+/***
+ * Function for finding dark outliers in time series, masks pixels that are dark, and dark outliers.
+ * 
+ */
+function simpleTDOM2(c, zShadowThresh, irSumThresh, dilatePixels){
+  var shadowSumBands = ['nir','swir1'];
+  
+  //Get some pixel-wise stats for the time series
+  var irStdDev = c.select(shadowSumBands).reduce(ee.Reducer.stdDev());
+  var irMean = c.select(shadowSumBands).mean();
+  
+  //Mask out dark dark outliers
+  c = c.map(function(img){
+    var z = img.select(shadowSumBands).subtract(irMean).divide(irStdDev);
+    var irSum = img.select(shadowSumBands).reduce(ee.Reducer.sum());
+    var m = z.lt(zShadowThresh).reduce(ee.Reducer.sum()).eq(2).and(irSum.lt(irSumThresh)).not();
+    m = m.focal_min(dilatePixels);
+
+    return img.addBands(m.rename('TDOMMask'));
+  });
+  
+  return c;
+}
+
+/***
+ * Basic cloud shadow shift.
+ */
+function projectShadows(cloudMask, TDOMMask, image, meanAzimuth, meanZenith, cloudHeights, dilatePixels) {
+  //Find dark pixels
+  var darkPixels = image.select(['nir','swir1','swir2']).reduce(ee.Reducer.sum()).lt(irSumThresh);//.gte(1);
+  
+  //Get scale of image
+  var nominalScale = cloudMask.projection().nominalScale();
+
+  // Find where cloud shadows should be based on solar geometry
+  
+  //Convert to radians
+  var azR =ee.Number(meanAzimuth).multiply(Math.PI).divide(180.0).add(ee.Number(0.5).multiply(Math.PI ));
+  var zenR  =ee.Number(0.5).multiply(Math.PI ).subtract(ee.Number(meanZenith).multiply(Math.PI).divide(180.0));
+  
+  // Find the shadows
+  var shadows = cloudHeights.map(function(cloudHeight){
+    cloudHeight = ee.Number(cloudHeight);
+    
+    var shadowCastedDistance = zenR.tan().multiply(cloudHeight);//Distance shadow is cast
+    var x = azR.cos().multiply(shadowCastedDistance).divide(nominalScale).round();//X distance of shadow
+    var y = azR.sin().multiply(shadowCastedDistance).divide(nominalScale).round();//Y distance of shadow
+    return cloudMask.changeProj(cloudMask.projection(), cloudMask.projection().translate(x, y));
+  });
+
+  var shadow = ee.ImageCollection.fromImages(shadows).max();
+ 
+  // Create shadow mask
+  shadow = shadow.updateMask(shadow.mask().and(cloudMask.mask().not()));
+  shadow = shadow.focal_max(dilatePixels);
+  shadow = shadow.updateMask(shadow.mask().and(darkPixels).and(TDOMMask));
+
+  return shadow;
+}
+
+/***
+ * Function for wrapping cloud and shadow masking together 
+ * Assumes image has cloud mask band called "cloudMask" and a TDOM mask called "TDOMMask"
+ * If TDOM is not being used, TDOMMask just needs to be a constant raster band with value 1
+ */ 
+function cloudProject(img,dilatePixels,cloudHeights,azimuthField,zenithField){
+  
+  //Get the cloud mask
+  var cloud = img.select('cloudMask').not();
+  cloud = cloud.focal_max(dilatePixels);
+  cloud = cloud.updateMask(cloud);
+  
+  //Get TDOM mask
+  var TDOMMask = img.select(['TDOMMask']).not();
+  
+  //Project the shadow finding pixels inside the TDOM mask that are dark and inside the expected area given the solar geometry
+  var shadow = projectShadows(cloud,TDOMMask,img, img.get(azimuthField),img.get(zenithField),cloudHeights,dilatePixels);
+  
+  //Combine the cloud and shadow masks
+  var combinedMask = cloud.mask().or(shadow.mask()).eq(0);
+  
+  //Update the image's mask and return the image
+  img = img.updateMask(img.mask().and(combinedMask));
+  img = img.addBands(combinedMask.rename(['cloudShadowMask']));
+ 
+  return img;
+}
+
+/***
+ * Makes offset from the left bounds Geometry margin and splits into count pieces, returns locations.
+ */
+function getLeftMarginLocations(bounds, marginSize, count, scale) {
+  var leftMarginSize = ee.Number(marginSize).multiply(scale)
+  var boundsSmall = bounds.buffer(leftMarginSize.multiply(-1)).bounds()
+  var coords = ee.List(boundsSmall.coordinates().get(0))
+  var pt0 = ee.List(coords.get(0))
+  var pt3 = ee.List(coords.get(3))
+  var leftMarginLine = ee.Geometry.LineString([pt0, pt3])
+
+  var distances = ee.List.sequence(0, leftMarginLine.length(), leftMarginLine.length().divide(count))
+  
+  var lineToFirstPoint = function(g) { 
+    var coords = ee.Geometry(g).coordinates().get(0)
+    return ee.Feature(ee.Algorithms.GeometryConstructors.Point(coords))
+  }
+  
+  var points = ee.FeatureCollection(leftMarginLine.cutLines(distances).geometries().map(lineToFirstPoint))
+  
+  // Map.addLayer(points, {color: 'green'}, 'text locations')
+  
+  return points.toList(10).map(function(o) { return ee.Feature(o).geometry() })
+}
+
+var ProbaV = {}
+
+/***
+ * PROBA-V time offset is stored in TIME band, extract it and update system:time_start
+ */
+ProbaV.correctTime = function(image) {
+  var bounds = ee.Geometry(image.get('bounds'))
+  // add offset stored in TIME band and return as system:time_start      
+  var time = image.get('system:time_start')
+  var offset = image.select('time').reduceRegion(ee.Reducer.first(), bounds.centroid(90), 90).values().get(0)
+  var timeActual = ee.Date(time).advance(offset, 'minute').millis()
+
+  return image.set('system:time_start', timeActual)
+}
+
+ProbaV.detectClouds = function(image) {
+  return image
+}
+  
+ProbaV.detectSnow = function(image) {
+  return image  
+}
+  
+ProbaV.detectWater = function(image) {
+  return image
+}
+
+var Landsat = {}
+
+/**
+ * Compute a cloud score. Tuned for Landsat sensor.
+ */
+Landsat.cloudScore = function(img, opt_skipBlue) {
+  // Compute several indicators of cloudyness and take the minimum of them.
+  var score = ee.Image(1.0);
+  
+  // Clouds are reasonably bright in the blue band.
+  score = score.min(rescale(img, 'img.blue', [0.1, 0.3])).aside(show, 'score blue')
+
+  // Clouds are reasonably bright in all visible bands.
+  score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.3, 0.8])).aside(show, 'score vis')
+
+  // Clouds are reasonably bright in all infrared bands.
+  score = score.min(rescale(img, 'img.nir + img.swir + img.swir2', [0.3, 0.8])).aside(show, 'score ir')
+
+  // Clouds are reasonably cool in temperature.
+  score = score.min(rescale(img, 'img.temp', [300, 290])).aside(show, 'score temp')
+
+  // However, clouds are not snow.
+  var ndsi = img.normalizedDifference(['red', 'swir']);
+  score = score.min(rescale(ndsi, 'img', [0.8, 0.6])).aside(show, 'score ndsi')
+
+  return score;
+};
+
+/**
+ * Compute a snow score.
+ */
+Landsat.snowScore = function(img, opt_bands) {
+  // Compute several indicators of snowyness and take the minimum of them.
+  var score = ee.Image(1.0)
+  
+  // Snow is reasonably bright in the blue band.
+  score = score.min(rescale(img, 'img.blue', [0.1, 0.3])).aside(show, 'score blue')
+
+  // Snow is reasonably bright in all visible bands.
+  score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8])).aside(show, 'score vis')
+
+  // Excluded this for snow reasonably bright in all infrared bands.
+  score = score.min(rescale(img, 'img.nir + img.swir + img.swir2', [0.2, 0.4])).aside(show, 'score ir')
+
+  // Snow is reasonably cool in temperature.
+  // start from 0C
+  score = score.min(rescale(img, 'img.temp', [300, 273.15])).aside(show, 'score temp')
+
+  // Snow is high in ndsi.
+  var ndsi = img.normalizedDifference(['red', 'swir']);
+  ndsi = rescale(ndsi, 'img', [0.3, 0.5]);
+  score = score.min(ndsi).aside(show, 'score ndsi').aside(show, 'score ndsi')
+
+  return rescale(score.clamp(0, 0.5), 'img', [0, 0.5]).toFloat()
+}
+
+Landsat.vegetationScore = function(i) {
+  var ndvi = i.normalizedDifference(['nir', 'red']).rename('ndvi');
+  return rescale(ndvi, 'img.ndvi', [0.3, 0.5])
+}
+
+Landsat.maskClouds = function(img) { 
+  var cloudThreshold = 0.5 // lower - more clouds 
+  return cloudScore(img).gt(Landsat.cloudThreshold).rename(['cloud'])
+};
+
+Landsat.maskSnow = function(img){
+  var snowThresh = 0.5; //Lower number masks more out (0-1)
+  return snowScore(img).gt(Multispectral.snowThresh).rename(['snow'])
+  //return img.mask(img.mask().and(ss.lt(snowThresh)))
+}
+
+/***
+ * Compute a water score using MNDWI and a few additional bands.
+ */
+Landsat.waterScore2 = function(img){
+  // Compute several indicators of water and take the minimum of them.
+  var score = ee.Image(1.0);
+  
+  //Set up some params
+  var darkBands = ['green','red','nir','swir2','swir'];//,'nir','swir','swir2'];
+  var brightBand = 'blue';
+  var shadowSumBands = ['nir','swir','swir2'];
+
+  //Water tends to be dark
+  var sum = img.select(shadowSumBands).reduce(ee.Reducer.sum());
+  var sum = rescale(sum,'img',[0.35,0.2]).clamp(0,1)
+  score = score.min(sum)
+  
+  //It also tends to be relatively bright in the blue band
+  var mean = img.select(darkBands).reduce(ee.Reducer.mean());
+  var std = img.select(darkBands).reduce(ee.Reducer.stdDev());
+  var z = (img.select([brightBand]).subtract(std)).divide(mean)
+  z = rescale(z,'img',[0,1]).clamp(0,1)
+  score = score.min(z)
+  
+  // Water is at or above freezing
+  score = score.min(rescale(img, 'img.temp', [273, 275]));
+
+  // Water is nigh in ndsi
+  var ndsi = img.normalizedDifference(['red', 'swir']);
+  ndsi = rescale(ndsi, 'img', [0.3, 0.8]);
+
+  score = score.min(ndsi);
+  
+  return score.clamp(0,1)
+}
+
+/***
+ * Compute a water score using NDWI only
+ */
+Landsat.waterScore = function(image, bands) {
+  return image.normalizedDifference(['green', 'swir'])
+}
+
+/***
+ * Compute a threshold using Otsu method (bimodal)
+ */
+function computeThresholdUsingOtsu(image, scale, bounds, th, g, skipShort, debug) {
+  var mask = image.mask().gt(0).focal_min(scale * 5, 'circle', 'meters')
+
+  // detect sharp changes
+  var edge = ee.Algorithms.CannyEdgeDetector(image, th, g);
+  edge = edge.multiply(mask)
+
+  // advanced, detect edge lengths
+  if(skipShort) {
+    var connected = edge.mask(edge).lt(0.8).connectedPixelCount(200, true)
+    
+    var edgeLong = connected.gte(100)
+    
+    edge = edgeLong
+    
+    var coonnectedVis = connected.updateMask(edgeLong).visualize({palette:['ffffff', 'ff0000'], min:0, max:200})
+  }
+
+  // buffer around NDWI edges
+  var edgeBuffer = edge.focal_max(ee.Number(scale).multiply(1), 'square', 'meters');
+  var imageEdge = image.mask(edgeBuffer)
+  
+  // compute threshold using Otsu thresholding
+  var buckets = 100
+  var hist = ee.Dictionary(ee.Dictionary(imageEdge.reduceRegion(ee.Reducer.histogram(buckets), bounds, scale)).values().get(0))
+
+  var threshold = ee.Algorithms.If(hist.contains('bucketMeans'), otsu(hist), 0.3);
+
+  threshold = ee.Number(threshold).add(0.05)
+
+  if(debug) {
+    Map.addLayer(edge.mask(edge), {palette:['ff0000']}, 'edges', false)
+    if(skipShort) {
+      Map.addLayer(coonnectedVis, {}, 'edges (connected)', false)
+    }
+
+    print('Threshold: ', threshold)
+  
+    print(ui.Chart.image.histogram(image, bounds, scale, buckets))
+    Map.addLayer(mask.mask(mask), {palette:['000000']}, 'image mask', false)
+  }
+
+  return threshold;
+}
+
+Landsat.onLayerAdd = function(image, info) {
+  var waterScore = Landsat.waterScore2(image)
+  //waterScore = rescale(waterScore, 'img', [-0.2, 0.35])
+  //waterScore = waterScore.mask(waterScore)
+  Map.addLayer(waterScore, {palette: Palettes.water}, 'water score (all bands)', false)
+
+  // NDWI
+  var waterScore = image.resample('bicubic').normalizedDifference(['green', 'nir'])
+  //var waterScore = rescale(waterScore, 'img', [-0.2, 0.35])
+  //waterScore = waterScore.mask(waterScore)
+  
+  Map.addLayer(waterScore, {palette: Palettes.water}, 'water score (NDWI)', false)
+
+  // MNDWI
+  var waterScore = image.normalizedDifference(['green', 'swir'])
+  //waterScore = rescale(waterScore, 'img', [-0.2, 0.35])
+  //waterScore = waterScore.mask(waterScore)
+  Map.addLayer(waterScore, {palette: Palettes.water}, 'water score (MNDWI)', false)
+
+  var i = rescale(waterScore, 'img',[-0.3, 0.4]).updateMask(focusNearWater)
+  var th = computeThresholdUsingOtsu(i, errorMargin, aoi, 0.3, 2, false, true)
+  
+  var water = waterScore.gte(ee.Image.constant(th))
+  Map.addLayer(water.mask(water), {}, 'water mask (NDWI)', false)
+
+  var waterVector = water.mask(water).reduceToVectors({geometry: focusNearWaterVector, scale: errorMargin})
+  waterVector = filterTo(waterVector, waterMaskPermanentVector)
+
+  Map.addLayer(waterVector, {color:'blue'}, 'water mask', false, 0.6)
+
+  var snow = Landsat.snowScore(image);
+  Map.addLayer(snow.mask(snow), {palette:['000000', 'FFFF00'], min:0, max:1}, ' snow score', false);
+
+  var clouds = Landsat.cloudScore(image);
+  Map.addLayer(clouds.mask(clouds), {palette:['000000', 'FF0000'], min:0, max:1}, 'cloud score', false);
+
+  var vegetation = Landsat.vegetationScore(image);
+  Map.addLayer(vegetation.mask(vegetation), {palette:['000000', '00FF00'], min:0, max:1}, 'vegetation score', false);
+}
+
+Landsat.detectClouds = function(image) {
+  return image
+}
+
+Landsat.detectSnow = function(image) {
+  return image  
+}
+  
+Landsat.detectWater = function(image) {
+  return image
+}
+
+var Sentinel2 = {}
+
+/***
+ * Cloud masking algorithm for Sentinel2.
+ */
+Sentinel2.cloudScore = function(img) {
+  // Compute several indicators of cloudyness and take the minimum of them.
+  var score = ee.Image(1);
+  
+  // Clouds are reasonably bright in the blue and cirrus bands.
+  score = score.min(rescale(img, 'img.blue', [0.1, 0.5])).aside(show, 'score blue')
+  score = score.min(rescale(img, 'img.coastal', [0.1, 0.3])).aside(show, 'score coastal')
+  score = score.min(rescale(img, 'img.coastal + img.cirrus', [0.15, 0.2])).aside(show, 'score cirrus')
+  
+  // Clouds are reasonably bright in all visible bands.
+  score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8])).aside(show, 'score visible')
+
+  // Clouds are reasonably bright in all infrared bands.
+  // score = score.min(rescale(img, 'img.nir2+img.nir + img.swir + img.swir2', [0.3, 0.4]));
+  // Map.addLayer(img.select('cb').add(img.select('cirrus')),{'min':0.15,'max':0.25},'cbCirrusSum')
+  // Map.addLayer(img.select('cirrus'),{'min':0,'max':0.1},'cirrus')
+  // score = score.min(rescale(img, 'img.cirrus', [0.06, 0.09]))
+  
+  // score = score.max(rescale(img, 'img.cb', [0.4, 0.6]))
+  // score = score.min(rescale(img,'img.re1+img.re2+img.re3',[0.6,2]))
+  // Map.addLayer(rescale(img,'img.re1+img.re2+img.re3',[0.6,2]),{'min':0,'max':1},'re1')
+  // Clouds are reasonably cool in temperature.
+  // score = score.min(rescale(img, 'img.temp', [300, 290]));
+
+  // However, clouds are not snow.
+  var ndsi = img.normalizedDifference(['red', 'swir']);
+  // Map.addLayer(ndsi,{'min':0.6,'max':0.8},'ndsi')
+  // score=score.min(rescale(ndsi, 'img', [0.8, 0.6]))
+
+  return score;
+}
+
+Sentinel2.onLayerAdd = function(image, info) {
+  image = image.unitScale(info.unitScale[0], info.unitScale[1])
+  
+  // MNDWI (20m)
+  var waterScore = image.normalizedDifference(['green', 'swir'])
+  //waterScore = rescale(waterScore, 'img', [-0.2, 0.35])
+  //waterScore = waterScore.mask(waterScore)
+  Map.addLayer(waterScore, {palette: Palettes.water}, 'water score (MNDWI)', false)
+
+  // NDWI (10m)
+  var waterScore = image.resample('bicubic').normalizedDifference(['green', 'nir'])
+  //var waterScore = rescale(waterScore, 'img', [-0.2, 0.35])
+  //waterScore = waterScore.mask(waterScore)
+  
+  Map.addLayer(waterScore, {palette: Palettes.water}, 'water score (NDWI)', false)
+
+  var i = rescale(waterScore, 'img',[-0.3, 0.4]).updateMask(focusNearWater)
+  var th = computeThresholdUsingOtsu(i, errorMargin, aoi, 0.3, 2, false, true)
+
+  var water = waterScore.gte(ee.Image.constant(th))
+  Map.addLayer(water.mask(water), {}, 'water mask (NDWI)', false)
+
+  var waterVector = water.mask(water).reduceToVectors({geometry: aoi.buffer(focusSearchDistance), scale: errorMargin})
+  waterVector = filterTo(waterVector, waterMaskPermanentVector)
+
+  Map.addLayer(waterVector, {color:'blue'}, 'water mask', false, 0.6)
+
+  //var snow = Landsat.snowScore(image);
+  //Map.addLayer(snow.mask(snow), {palette:['000000', 'FFFF00'], min:0, max:1}, ' snow score', false);
+
+  var clouds = Sentinel2.cloudScore(image);
+  Map.addLayer(clouds.mask(clouds), {palette:['000000', 'FF0000'], min:0, max:1}, 'cloud score', false);
+
+  //var vegetation = Sentinel2.vegetationScore(image);
+  //Map.addLayer(vegetation.mask(vegetation), {palette:['000000', '00FF00'], min:0, max:1}, 'vegetation score', false);
+}
+
+Sentinel2.detectClouds = function(image) {
+  return image
+}
+  
+Sentinel2.detectSnow = function(image) {
+  return image  
+}
+  
+Sentinel2.detectWater = function(image) {
+  return image
+}
+
+var Aster = {}
+
+Aster.temperatureFromDN = function(image) {
+  //var bands = ['B10',  'B11',   'B12',   'B13',   'B14']
+  var bands = ['temp', 'temp2', 'temp3', 'temp4', 'temp5']
+  var multiplier = ee.Image([0.006822, 0.006780, 0.006590, 0.005693, 0.005225])
+  var k1 = ee.Image([3040.136402, 2482.375199, 1935.060183, 866.468575, 641.326517])
+  var k2 = ee.Image([1735.337945, 1666.398761, 1585.420044, 1350.069147, 1271.221673])
+
+  var radiance = image.select(bands).subtract(1).multiply(multiplier)
+  var t = k2.divide(k1.divide(radiance).add(1).log())
+  
+  return t.rename(bands)
+}
+
+/**
+ * Compute a cloud score. Tuned for Landsat sensor.
+ */
+Aster.cloudScore = function(img, opt_skipBlue) {
+  // Compute several indicators of cloudyness and take the minimum of them.
+  var score = ee.Image(1.0);
+  
+  // Clouds are reasonably bright in all visible bands.
+  //score = score.min(rescale(img, 'img.red + img.green', [0.4, 0.8])).aside(show, 'score vis')
+
+  // Clouds are reasonably bright in all infrared bands.
+  //score = score.min(rescale(img, 'img.nir', [0.4, 0.8])).aside(show, 'score ir')
+
+  // Clouds are reasonably cool in temperature.
+  // How to correctly compute ASTER temperature?
+  //    Check maching Landsat7 and ASTER images: https://code.earthengine.google.com/c5002da643fc012fad57a6cbdd296387
+  //    Use multiplier = 4 as the first guess
+  
+  var t = Aster.temperatureFromDN(img.multiply(255))
+  score = score.min(rescale(t, 'img.temp2', [280, 263.15])).aside(show, 'score temp')
+
+  // However, clouds are not snow.
+  //var ndsi = img.normalizedDifference(['red', 'swir']);
+  //score = score.min(rescale(ndsi, 'img', [0.8, 0.6])).aside(show, 'score ndsi')
+
+  return score;
+};
+
+/**
+ * Compute a snow score.
+ */
+Aster.snowScore = function(img, opt_bands) {
+  // Compute several indicators of snowyness and take the minimum of them.
+  var score = ee.Image(1.0)
+  
+  // Snow is reasonably bright in all visible bands.
+  score = score.min(rescale(img, 'img.red + img.green', [0.3, 0.8])).aside(show, 'score vis')
+
+  // Excluded this for snow reasonably bright in all infrared bands.
+  score = score.min(rescale(img, 'img.nir', [0.3, 0.7])).aside(show, 'score ir')
+
+  // Snow is reasonably cool in temperature.
+  // start from 0C
+  var t = Aster.temperatureFromDN(img.multiply(255))
+  Map.addLayer(t, {}, 'temp', false)
+  score = score.min(rescale(t, 'img.temp2', [300, 273.15])).aside(show, 'score temp')
+
+  // Snow is high in ndsi.
+  // TODO: generate reflectance or at least radiance
+  //Map.addLayer(img.select('red'), {}, 'red', false)
+  //Map.addLayer(img.select('nir'), {}, 'nir', false)
+  //var ndsi = img.normalizedDifference(['red', 'nir']);
+  //Map.addLayer(ndsi, {}, 'ndsi', false)
+  //score = score.min(rescale(ndsi, 'img', [-1, -0.5])).aside(show, 'score ndsi')
+
+  return score
+}
+
+Aster.detectClouds = function(image) {
+  return image
+}
+  
+Aster.detectSnow = function(image) {
+  return image  
+}
+
+// ASTER water detection from temperature band-only  
+Aster.detectWater = function(image) {
+  return image
+}
+
+Aster.onLayerAdd = function(image, info) {
+  image = image.unitScale(info.unitScale[0], info.unitScale[1]) // TODO: fix temperature
+  
+  // NDWI
+  var waterScore = image.resample('bicubic').normalizedDifference(['green', 'nir'])
+  //var waterScore = rescale(waterScore, 'img', [-0.2, 0.35])
+  //waterScore = waterScore.mask(waterScore)
+  
+  Map.addLayer(waterScore, {palette: Palettes.water}, 'water score (NDWI)', false)
+
+  var i = rescale(waterScore, 'img',[-0.3, 0.4]).updateMask(focusNearWater)
+  var th = computeThresholdUsingOtsu(i, errorMargin, aoi, 0.3, 2, false, true)
+
+  var water = waterScore.gte(ee.Image.constant(th))
+  Map.addLayer(water.mask(water), {}, 'water mask (NDWI)', false)
+
+  var waterVector = water.mask(water).reduceToVectors({geometry: focusNearWaterVector, scale: errorMargin})
+  waterVector = filterTo(waterVector, waterMaskPermanentVector)
+
+  Map.addLayer(waterVector, {color:'blue'}, 'water mask', false, 0.6)
+
+  var snow = Aster.snowScore(image);
+  Map.addLayer(snow.mask(snow), {palette:['000000', 'FFFF00'], min:0, max:1}, 'snow score', false);
+
+  var clouds = Aster.cloudScore(image);
+  Map.addLayer(clouds.mask(clouds), {palette:['000000', 'FF0000'], min:0, max:1}, 'cloud score', false);
+
+  var vegetation = Landsat.vegetationScore(image);
+  Map.addLayer(vegetation.mask(vegetation), {palette:['000000', '00FF00'], min:0, max:1}, 'vegetation score', false);
+}
+
+var AsterT = {}
+
+AsterT.onLayerAdd = function(image, info) {
+  AsterT.detectWater(image, info)
+  
+  var water = image.select('water')
+  
+  var waterEdge = water.subtract(water.focal_min(1))
+
+  water = ee.ImageCollection([
+    water.mask(water).visualize({palette:['5050ff'], opacity: 0.2}),
+    waterEdge.mask(waterEdge).visualize({palette:['ffffff'], opacity: 0.9})
+    ]).mosaic()
+    
+  Map.addLayer(water.mask(water), {}, 'water', false)
+}
+
+AsterT.detectWater = function(image, debug) {
+  image = image.updateMask(focusNearWater).resample('bicubic')
+
+  var t = image.select('temp')
+
+  var th = computeThresholdUsingOtsu(t, errorMargin, aoi, 0.9, 4, true, debug)
+
+  // compute mode in the most probable center of the water and assume this value as water
+  var mode = ee.Number(ee.Dictionary(t.reduceRegion(ee.Reducer.mode(), waterPermanentCenter, errorMargin * 5)).get('temp'))
+  
+  if(debug) {
+    print('Mode:', mode)
+  }
+  
+  // TODO: check this, does not work as expected, but the results look fine
+  var water = t.gt(th).multiply(mode.gt(th))
+    .add(t.lte(th).multiply(mode.lte(th)))
+
+  // vectorize
+  var waterVector = water.mask(water).reduceToVectors({geometry: focusNearWaterVector, scale: errorMargin})
+  
+  // filter to overlaps met permanent water center
+  waterVector = filterTo(waterVector, ee.FeatureCollection([waterPermanentCenter]))
+
+  water = ee.Image(0).byte().paint(waterVector, 1).rename('water')
+  
+  return image.addBands(water)
+}
+
+var Sentinel1 = {}
+
+Sentinel1.detectWater = function(image) {
+  return image;  
+}
+
+// =========================== asset info
+
+var collectionInfo = {
+  values: [
+  {
+    name: 'Landsat 8',
+    asset: 'LANDSAT/LC8_L1T_TOA',
+    type: 'optical',
+    bands: {
+      readable: ['coastal', 'blue', 'green', 'red', 'nir', 'swir', 'swir2', 'pan', 'cirrus', 'temp', 'temp2', 'BQA'],
+      native:   ['B1',      'B2',   'B3',    'B4',  'B5',  'B6',   'B7',    'B8',  'B9',     'B10',  'B11',   'BQA']
+    },
+    visual: {bands: ['swir', 'nir', 'green'], min:0.03, max:0.5},
+    transform: function(image) {
+      image = Landsat.detectClouds(image)
+      image = Landsat.detectSnow(image)
+      image = Landsat.detectWater(image)
+      return image
+    },
+    onLayerAdd: function(image, info) {
+      return Landsat.onLayerAdd(image, info)
+    }
+  },
+  {
+    name: 'Landsat 7',
+    asset: 'LANDSAT/LE7_L1T_TOA',
+    type: 'optical',
+    bands: {
+      readable: ['blue', 'green', 'red', 'nir', 'swir', 'temp',      'temp2',     'pan'],
+      native:   ['B1',   'B2',    'B3',  'B4',  'B5',   'B6_VCID_2', 'B6_VCID_2', 'B8']
+    },
+    visual: {bands: ['swir', 'nir', 'green'], min:0.03, max:0.5},
+    transform: function(image) {
+      image = Landsat.detectClouds(image)
+      image = Landsat.detectSnow(image)
+      image = Landsat.detectWater(image)
+      return image
+    },
+    onLayerAdd: function(image, info) {
+      return Landsat.onLayerAdd(image, info)
+    }
+  },
+  {
+    name: 'Landsat 5',
+    asset: 'LANDSAT/LT5_L1T_TOA',
+    type: 'optical',
+    bands: {
+      readable: ['blue', 'green', 'red', 'nir', 'swir', 'swir2', 'temp'],
+      native:   ['B1',   'B2',    'B3',  'B4',  'B5', 'B5',  'B6']
+    },
+    visual: {bands: ['swir', 'nir', 'green'], min:0.03, max:0.5},
+    transform: function(image) {
+      image = Landsat.detectClouds(image)
+      image = Landsat.detectSnow(image)
+      image = Landsat.detectWater(image)
+      return image
+    },
+    onLayerAdd: function(image, info) {
+      return Landsat.onLayerAdd(image, info)
+    }
+  },
+  { 
+    name: 'Landsat 4',
+    asset: 'LANDSAT/LT4_L1T_TOA',
+    type: 'optical',
+    bands: {
+      readable: ['blue', 'green', 'red', 'nir', 'swir', 'swir2', 'temp'],
+      native:   ['B1',   'B2',    'B3',  'B4',  'B5', 'B5',  'B6']
+    },
+    visual: {bands: ['swir', 'nir', 'green'], min:0.03, max:0.5},
+    transform: function(image) {
+      image = Landsat.detectClouds(image)
+      image = Landsat.detectSnow(image)
+      image = Landsat.detectWater(image)
+      return image
+    },
+    onLayerAdd: function(image, info) {
+      return Landsat.onLayerAdd(image, info)
+    }
+  },
+  { 
+    name: 'ASTER T',
+    asset: 'ASTER/AST_L1T_003',
+    type: 'optical',
+    filter: ee.Filter.and(
+        ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B11'),
+        ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B12'),
+        ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B13'),
+        ee.Filter.and(
+          ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B01'),
+          ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B3N')
+          //ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B04')
+        ).not()
+    ),
+    bands: {
+      readable: ['green', 'red', 'nir', 'swir', 'swir2', 'swir3', 'swir4', 'swir5', 'swir6', 'temp', 'temp2', 'temp3', 'temp4', 'temp5'],
+      native:   ['B01',   'B02', 'B3N', 'B04',  'B05',   'B06',   'B07',   'B08',   'B09',   'B10',  'B11',   'B12',   'B13',   'B14',],
+    },
+    visual: {bands: ['temp'/*'temp', 'temp3', 'temp5'*/], min:600, max:1800, forceRgbOutput: true},
+    transform: function(image) {
+      image = AsterT.detectWater(image)
+      return image
+    },
+    onLayerAdd: function(image, info) {
+      return AsterT.onLayerAdd(image, info)
+    }
+  },
+  { 
+    name: 'ASTER',
+    asset: 'ASTER/AST_L1T_003',
+    type: 'optical',
+    filter: ee.Filter.and(
+        ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B01'),
+        ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B3N')
+        //ee.Filter.listContains('ORIGINAL_BANDS_PRESENT', 'B04')
+    ),
+    bands: {
+      readable: ['green', 'red', 'nir', 'swir', 'swir2', 'swir3', 'swir4', 'swir5', 'swir6', 'temp', 'temp2', 'temp3', 'temp4', 'temp5'],
+      native:   ['B01',   'B02', 'B3N', 'B04',  'B05',   'B06',   'B07',   'B08',   'B09',   'B10',  'B11',   'B12',   'B13',   'B14',]
+    },
+    //visual: {bands: ['swir', 'nir', 'green'], min:10, max:255},
+    visual: {bands: ['green', 'nir', 'green'], min:10, max:255},
+    unitScale: [0, 255],
+    transform: function(image) {
+      image = Aster.detectClouds(image)
+      image = Aster.detectSnow(image)
+      image = Aster.detectWater(image)
+      return image
+    },
+    onLayerAdd: function(image, info) {
+      return Aster.onLayerAdd(image, info)
+    }
+  },  
+  { 
+    name: 'Sentinel 2', 
+    asset: 'COPERNICUS/S2', 
+    type: 'optical',
+    bands: {
+      readable:  ['coastal', 'blue', 'green', 'red', 'red2', 'red3', 'red4', 'nir', 'nir2', 'water_vapour', 'cirrus', 'swir', 'swir2', 'QA10', 'QA20', 'QA60'],
+      native: ['B1',      'B2',   'B3',    'B4',  'B5',   'B6',   'B7',   'B8',  'B8A',  'B9',           'B10',    'B11',  'B12',   'QA10', 'QA20', 'QA60']
+    },
+    visual: {bands: ['green', 'nir', 'green'], min:500, max:7000},
+    unitScale: [0, 10000],
+    transform: function(image) {
+      image = Sentinel2.detectClouds(image)
+      image = Sentinel2.detectSnow(image)
+      image = Sentinel2.detectWater(image)
+      return image
+    },
+    onLayerAdd: function(image, info) {
+      return Sentinel2.onLayerAdd(image, info)
+    }
+  },
+  { 
+    name: 'PROBA-V 100m', 
+    asset: 'VITO/PROBAV/S1_TOC_100M', 
+    type: 'optical',
+    bands: {
+      readable:  ['blue', 'red', 'nir', 'swir', 'SM', 'time'],
+      native:    ['BLUE', 'RED', 'NIR', 'SWIR', 'SM', 'TIME']
+    },
+    
+    visual: {bands: ['red', 'nir', 'red'], min:10, max:1000},
+    unitScale: [0, 1000],
+    transform: function(image) { 
+      image = ProbaV.correctTime(image)
+      image = ProbaV.detectClouds(image)
+      image = ProbaV.detectSnow(image)
+      image = ProbaV.detectWater(image)
+      return image
+    },
+  },
+  { 
+    name: 'PROBA-V 333m', 
+    asset: 'VITO/PROBAV/S1_TOC_333M',
+    type: 'optical',
+    bands: {
+      readable:  ['blue', 'red', 'nir', 'swir', 'SM', 'time'],
+      native:    ['BLUE', 'RED', 'NIR', 'SWIR', 'SM', 'TIME']
+    },
+    visual: {bands: ['red', 'nir', 'red'], min:10, max:500},
+    unitScale: [0, 1000],
+  },
+  { 
+    name: 'MODIS Aqua MYD09GQ',
+    asset: 'MODIS/MYD09GQ',
+    type: 'optical',
+    bands: {
+      readable:  ['red',          'nir',          'quality', 'coverage'],
+      native:    ['sur_refl_b01', 'sur_refl_b02', 'QC_250m', 'obscov']
+    },
+    visual: {bands: ['red', 'nir', 'red'], min:500, max:5000},
+    unitScale: [0, 10000]
+  },
+  { 
+    name: 'MODIS Terra MOD09GQ',
+    asset: 'MODIS/MOD09GQ',
+    type: 'optical',
+    bands: {
+      readable:  ['red',          'nir',          'quality', 'coverage'],
+      native:    ['sur_refl_b01', 'sur_refl_b02', 'QC_250m', 'obscov']
+    },
+    visual: {bands: ['red', 'nir', 'red'], min:500, max:5000},
+    unitScale: [0, 10000]
+  },
+  { 
+    name: 'Sentinel 1 VV', 
+    asset: 'COPERNICUS/S1_GRD', 
+    type: 'radar',
+    filter: ee.Filter.eq('transmitterReceiverPolarisation', 'VV'),
+    bands: { 
+      readable: ['VV'],
+      native: ['VV']
+    },
+    visual: {bands: ['VV'], min:-20, max:-5, forceRgbOutput: true},
+    transform: function(image) { 
+      image = Sentinel1.detectWater(image)
+      return image
+    },
+  },
+  { 
+    name: 'Sentinel 1 VH', 
+    asset: 'COPERNICUS/S1_GRD', 
+    type: 'radar',
+    filter: ee.Filter.eq('transmitterReceiverPolarisation', 'VH'),
+    bands: { 
+      readable: ['VH'],
+      native: ['VH']
+    },
+    visual: {bands: ['VH'], min:-20, max:-5, forceRgbOutput: true},
+    transform: function(image) { 
+      image = Sentinel1.detectWater(image)
+      return image
+    },
+  },
+  { 
+    name: 'Sentinel 1 VV+VH', 
+    asset: 'COPERNICUS/S1_GRD', 
+    type: 'radar',
+    filter: ee.Filter.eq('transmitterReceiverPolarisation', ['VV', 'VH']),
+    bands: { 
+      readable: ['VV', 'VH'],
+      native: ['VV', 'VH']
+    },
+    visual: {bands: ['VV', 'VH', 'VV'], min:-20, max:-5},
+    transform: function(image) { 
+      image = Sentinel1.detectWater(image)
+      return image
+    },
+  },
+  { 
+    name: 'Sentinel 1 HH+HV', 
+    asset: 'COPERNICUS/S1_GRD', 
+    type: 'radar',
+    filter: ee.Filter.eq('transmitterReceiverPolarisation', ['HH', 'HV']),
+    bands: { 
+      readable: ['HH', 'HV'],
+      native: ['HH', 'HV']
+    },
+    visual: {bands: ['HH', 'HV', 'HH'], min:-20, max:-5},
+    transform: function(image) { 
+      image = Sentinel1.detectWater(image)
+      return image
+    },
+  }
+  ],
+  
+  getByName: function(name) {
+    var values = collectionInfo.values
+    
+    for(var i = 0; i < values.length; i++) {
+      if(values[i].name === name) {
+        return values[i]
+      }
+    }
+
+    return null;
+  }
+}
+
+// ========================== testing 
+
+var assert = {
+  isTrue: function(assertionName, condition) {
+    print(ee.String(ee.Algorithms.If(ee.Algorithms.IsEqual(condition, 1), ' passed: ', 'failed: ')).cat(assertionName))
+  },
+  
+  isFalse: function(assertionName, condition) {
+    print(ee.String(ee.Algorithms.If(ee.Algorithms.IsEqual(condition, 0), ' passed: ', 'failed: ')).cat(assertionName))
+  }
+}
+
+var TestSuite = {
+  probaTransformExtractTime: function() {
+    // find image at location
+    var pt = ee.Geometry.Point(-120.16, 39.38)
+    var info = collectionInfo.getByName('PROBA-V 100m')
+    
+    // BUG: filterBounds() does not filter empty image
+    var image = ee.Image(ee.ImageCollection(info.asset).select('TIME').filterBounds(pt)
+      .map(function(i) {
+        var valueExists = i.reduceRegion(ee.Reducer.first(), pt, 90).values().get(0)
+        return i.set('value_exists', valueExists)
+      }).filter(ee.Filter.neq('value_exists', null)).first())
+    
+    // get time
+    var time = image.get('system:time_start')
+    print('Start time: ', ee.Date(time).format('YYYY-MM-dd HH:ss'))
+    
+    // get time offset
+    var offset = image.select('TIME').reduceRegion(ee.Reducer.first(), pt, 90).values().get(0)
+    print('Time offset (minutes): ', offset)
+
+    var expected = ee.Date(time).advance(offset, 'minute')
+    print('Expected time: ', expected.format('YYYY-MM-dd HH:ss'))
+    
+    // Asserts, check if transform() changes time in a given image
+    image = image.set('bounds', pt) // used within transform()
+    
+    image = info.transform(image)
+    var actual = image.get('system:time_start')
+    
+    assert.isTrue('transform() should add time offset to system:time_start from TIME band for PROBA images', 
+      expected.millis().eq(actual))
+    
+  },
+  
+  run: function() {
+    Object.keys(TestSuite).map(function(name) { 
+      if(name === 'run') {
+        return
+      }
+      
+      TestSuite[name]()
+    })
+  }
+}
+
+// TestSuite.run(); return
+
+// ==================================================== main program
+
+print('Date range: ' + start + '..' + stop)
+
+// the actual number of image collections, used for progress
+var collectionCount = collectionInfo.values.length
+if(only.length > 0) {
+  collectionCount = only.length
+} else {
+  collectionCount = collectionCount - skip.length
+}
+
+function exportMerged() {
+    // export all images video
+  renderedImagesAll = renderedImagesAll.sort('system:time_start')
+
+  // add to map
+  mapLayerCountToAddRendered = Math.min(totalImageCount, mapLayerCountToAddRendered)
+  var list = renderedImagesAll.toList(mapLayerCountToAddRendered, 0)
+  for(var i = 0; i < mapLayerCountToAddRendered; i++) {
+    var image = ee.Image(list.get(i))
+    Map.addLayer(image, {}, 'frame ' + i, i < 5)
+    pushLayer(image, ee.Dictionary(image.get('info')).get('name'))
+    
+    if(i > 6 && i < 9) {
+     print(image)
+    }
+  }
+
+  var resolutionW = 1920
+  var fps = 1
+
+  function exportWithoutText() {
+    Export.video.toDrive({
+      collection: renderedImagesAll,
+      description: 'multisensor-' + start + '_' + stop + '_fps' + fps,
+      
+      dimensions: resolutionW,
+      region: ee.Geometry(Map.getBounds(true)),
+      framesPerSecond: fps,
+      crs: 'EPSG: 3857',
+      maxFrames: 2000
+    })
+  }
+  exportWithoutText()  
+
+  function exportWithText() {
+    var textScale = Map.getScale() * 2
+    var textBounds = ee.Geometry(Map.getBounds(true))
+    var textMarginSize = 20 // scale units
+    var textLocationCount = 20
+    var textLocations = getLeftMarginLocations(textBounds, textMarginSize, textLocationCount, textScale)
+    
+    // add to rendered (for export)
+    function renderWithText(i) { 
+      var info = ee.Dictionary(i.get('info'))
+  
+      var startTime = i.get('system:time_start')
+      var startTime = i.get('system:id')
+      
+      var str = ee.Date(startTime).format('YYYY-MM-dd HH:MM')
+      var pt1 = textLocations.get(1)
+      var textDate = Text.draw(str, pt1, textScale, {outlineColor: '000000', outlineWidth: 3, outlineOpacity: 0.6, fontSize:16, textColor:'white'})
+    
+      var pt2 = textLocations.get(3)
+      var textSensor = Text.draw(info.get('name'), pt2, textScale, {outlineColor: '000000', outlineWidth: 3, outlineOpacity: 0.6, fontSize: 16, textColor:'white'})
+  
+      //var permenentWaterEdgeBg = waterMaskEdge.focal_max(2)
+      //permenentWaterEdgeBg = permenentWaterEdgeBg.mask(permenentWaterEdgeBg).visualize({palette: ['000000'], opacity:0.5})
+      //var permenentWaterEdge = waterMaskEdge.mask(waterMaskEdge).visualize({palette: ['ffffff']})
+  
+      var rendered = ee.ImageCollection.fromImages([
+        i,
+        //permenentWaterEdgeBg,
+        //permenentWaterEdge,
+        textDate,
+        textSensor
+      ]).mosaic()
+        .set('system:time_start', startTime)
+        .set('info', info)
+        .set('system:id', id)
+      
+      rendered = rendered.copyProperties(i)
+              
+      return rendered
+    }
+  
+    var renderedImagesAll = renderedImagesAll.map(renderWithText)
+
+    Export.video.toDrive({
+      collection: renderedImagesAll,
+      description: 'multisensor-' + start + '_' + stop + '-text' + '_fps' + fps,
+      
+      dimensions: resolutionW,
+      region: ee.Geometry(Map.getBounds(true)),
+      framesPerSecond: fps,
+      crs: 'EPSG: 3857',
+      maxFrames: 2000
+    })
+  }
+
+  // exportWithText()
+  
+  var map = ee.Feature(ee.Geometry(Map.getBounds(true)), {})
+  
+  Export.table.toDrive({collection: ee.FeatureCollection(map), description: 'multisensor-' + start + '_' + stop + '_extent', fileFormat:'GeoJSON'})
+
+  var features = ee.FeatureCollection(renderedImagesAll)
+  Export.table.toDrive({collection: features, description: 'multisensor-' + start + '_' + stop + '_info', fileFormat:'GeoJSON'})
+  
+  // update dates
+  updateLayerNames()
+}
+
+function addBaseLayers() {
+  // lake and reservoir locations retrieved from USGS NWIS: http://maps.waterdata.usgs.gov/mapper/nwisquery.html?URL=http://waterdata.usgs.gov/usa/nwis/current?type=lake&format=sitefile_output&sitefile_output_format=xml&column_name=agency_cd&column_name=site_no&column_name=station_nm&column_name=site_tp_cd&column_name=dec_lat_va&column_name=dec_long_va&column_name=agency_use_cd
+  var reservoirs = ee.FeatureCollection('ft:1POcfYkRBhBSZIbnrNudwnozHYtpva9vdyYBMf5QZ')
+  
+  var index = 3
+  var reservoir = ee.Feature(reservoirs.toList(1, index).get(0))
+  
+  Map.addLayer(reservoirs, {color: 'ff0000', opacity:0.7}, 'USA reservoirs and lakes locations', false)
+  
+  // add permanent watermask
+  Map.addLayer(waterMaskPermanent.mask(waterMaskPermanent), {palette: ['0000aa'], opacity: 0.2}, 'permanent mask water (GLCF)', false)
+
+  Map.addLayer(waterMaskPermanentVector, {palette: ['0000aa'], opacity: 0.2}, 'permanent mask water vector (GLCF)', false)
+  
+  var waterMaskPermanentEdge = ee.Algorithms.CannyEdgeDetector(waterMaskPermanent, 0.99)
+  Map.addLayer(waterMaskPermanentEdge.mask(waterMaskPermanentEdge), {palette: ['ffffff']}, 'permanent water mask edge (GLCF)')
+
+  Map.addLayer(waterPermanentCenter, {}, 'permanent water mask center', false)
+
+  // focus on the images near water
+  Map.addLayer(focusNearWater.mask(focusNearWater.subtract(1).multiply(-1)), {min:0, max:1, palette: ['000000']}, 'potential water focus', true, 0.3)
+  
+  //Map.centerObject(reservoir, 13)
+  Map.addLayer(aoi, {}, 'aoi', false)
+}
+
+//Map.centerObject(aoi, 14)
+
+Map.setOptions('HYBRID')
+
+// add progress label
+function updateProgress() {
+  var progressLabel = ui.Label({ 
+    value: 'Scanning image collections ' + processedCount + ' of ' + collectionCount,
+    style: {fontWeight: 'bold', fontSize: '12px', margin: '10px 5px'} 
+  })
+  
+  progressPanel.clear()
+  progressPanel.add(progressLabel)
+}
+
+var processedCount = 0
+var progressPanel = ui.Panel();
+Map.add(progressPanel)
+updateProgress()
+
+// keep layer info in order to update dates async
+var layerInfos = []
+function pushLayer(image, text) {
+  var layers = Map.layers();
+  layerInfos.push({image: image, text: text, layer: layers.get(layers.length() - 1)})
+}
+
+// updates layer names at the end (async), add date
+function updateLayerName(layerInfo) {
+  function onGetDate(date, error) {
+    if(layerInfo.text) {
+      ee.String(layerInfo.text).getInfo(function(text) {
+        layerInfo.layer.setName(layerInfo.layer.getName() + ' ' + date + ' ' + text);
+      })
+    } else {
+      layerInfo.layer.setName(layerInfo.layer.getName() + ' ' + date);
+    }
+  }
+
+  ee.Date(layerInfo.image.get('system:time_start')).format('YYYY-MM-dd HH:mm').getInfo(onGetDate);
+}
+
+function updateLayerNames() {
+  layerInfos.map(updateLayerName);
+}
+
+// update progress and add base layers at the end
+var totalImageCount = 0
+function onProcessed(info) {
+  processedCount++
+  updateProgress()
+
+  if(processedCount == collectionCount) {
+    Map.remove(progressPanel)
+    
+    exportMerged()
+    addBaseLayers()
+    
+    
+    print('Total images found: ' + totalImageCount)
+  }
+}
+
+// all rendered images from all sensors
+var renderedImagesAll = ee.ImageCollection([])
+
+// process image collection (add layers, export, query)
+function processImages(info) {
+  if(only.length && only.indexOf(info.name) === -1) {
+     return;
+  }
+  
+  if(skip.indexOf(info.name) != -1) {
+    return
+  }
+
+  // print number of images at AOI
+  var images = ee.ImageCollection(info.asset)
+    .filterBounds(aoi)
+    .select(info.bands.native, info.bands.readable)
+    .map(function(i) { return i.set('bounds', aoi)})
+    
+  if(info.filter) {
+    images = images.filter(info.filter)
+  }
+  
+  if(start && stop) {
+    images = images.filterDate(start, stop)
+  }
+
+  // BUT: EE does image footprints are not alway correct, make sure we have images with values  
+  images = images.map(function(image) {
+      var value = ee.Dictionary(image.select(info.visual.bands[0]).reduceRegion(ee.Reducer.mean(), aoi, 100)).values().get(0)
+      return image.set('aoi_value', value)
+          //.updateMask(focusNearWater)
+
+    }).filter(ee.Filter.neq('aoi_value', null))
+
+  // apply addition transform if needed
+  if(info.transform) {
+    images = images.map(info.transform)
+  }
+  
+  renderedImagesAll = renderedImagesAll.merge(images.map(function(i) { 
+    var rendered = i.visualize(info.visual)
+      .set('info', info)
+      .set('system:time_start', i.get('system:time_start'))
+      .set('system:id', i.get('system:id')) 
+      
+    rendered = rendered.copyProperties(i)
+    
+    return rendered
+  }))
+    
+  // add to map (client, async)
+  function processOnCount(count, error) {
+    print(info.name + ': ', count)
+    
+    if(count === 'undefined') { 
+      onProcessed(info);
+      return;
+    }
+    
+    totalImageCount += count
+
+    // add a few layers
+    var layerCount = Math.min(mapLayerCountToAddProcessed, count)
+    var list = images.toList(layerCount, 0)
+    for(var i = 0; i < layerCount; i++) {
+      var image = ee.Image(list.get(i));
+      Map.addLayer(image, info.visual, info.name + ' ' + i, i === 0)
+
+      pushLayer(image, info.name);
+      
+      if(info.onLayerAdd) {
+        info.onLayerAdd(image, info)
+      }
+    }
+    
+    onProcessed(info);
+  }
+  
+  var count = images.select(0).aggregate_count('system:id')
+  count.getInfo(processOnCount)
+}
+
+collectionInfo.values.map(processImages)
+

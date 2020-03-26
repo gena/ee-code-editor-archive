@@ -1,0 +1,31 @@
+// TRMM, export 
+
+var precip = ee.ImageCollection('TRMM/3B42').select('precipitation');
+var test = ee.Image(precip.first());
+var border = ee.FeatureCollection('ft:1rWmQrWDf2EIwkNWjlu_9LcdegqIH65fnT_lrYhJN');
+//test = test.clip(border);
+
+print(test.getInfo());
+/*
+var path = test.getDownloadURL({'name' : 'TestImage2', 
+  //'region' : '[[-66.809703, -19.480177000000026], [-45.694159, -19.480177000000026], [-45.694159, -5.167584999999974], [-66.809703, -5.167584999999974], [-66.809703, -19.480177000000026]]',
+  //'scale' : 27000
+  'crs' : 'EPSG:4326', 
+  'crs_transform' : JSON.stringify([0.25,0,-180,0,-0.25,50]),
+  'dimensions' : JSON.stringify([1440,400])
+});
+print(path);
+*/
+
+addToMap(test);
+centerMap(-51.35010, -14.65724, 4);
+
+exportImage(
+  test,
+  "My_Task",
+  {
+    'crs' : 'EPSG:4326', 
+    'crs_transform' : JSON.stringify([0.25,0,-180,0,-0.25,50]),
+    'dimensions' : JSON.stringify([1440,400])
+  }
+  );

@@ -1,0 +1,15 @@
+// kernels
+
+// Euclidean
+var d = ee.Kernel.euclidean(9);
+print(d.getInfo()) // no weights can be inspected
+
+// Custom
+var w = [[1, 1, 1], 
+         [0, 0, 0], 
+         [0, 0, 0]];
+         
+var k2 = ee.Kernel.fixed(3, 3, w);
+print(k2.getInfo().weights)
+
+print(k2.rotate(1)) // no weights can be inspected

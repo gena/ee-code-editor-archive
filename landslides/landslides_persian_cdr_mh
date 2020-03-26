@@ -1,0 +1,336 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var modis = ee.ImageCollection("MODIS/006/MOD13Q1"),
+    pakistan = /* color: #d63000 */ee.Geometry({
+      "type": "GeometryCollection",
+      "geometries": [
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                68.55325787940569,
+                30.020852122014016
+              ],
+              [
+                76.19974225440569,
+                30.020852122014016
+              ],
+              [
+                75.84817975440569,
+                35.27187983358961
+              ],
+              [
+                67.98196881690569,
+                35.200092301484176
+              ]
+            ]
+          ],
+          "geodesic": true,
+          "evenOdd": true
+        },
+        {
+          "type": "Point",
+          "coordinates": [
+            63.19192975440569,
+            31.718142972849357
+          ]
+        }
+      ],
+      "coordinates": []
+    }),
+    target = /* color: #98ff00 */ee.Geometry.Point([62.13724225440569, 35.2359940092415]),
+    ASTER_Temperature = ee.Image("NASA/ASTER_GED/AG100_003"),
+    NCEP_temperature = ee.ImageCollection("NCEP_RE/surface_temp"),
+    MODIS_temperature = ee.ImageCollection("MODIS/006/MOD11A1"),
+    soil_moisture = ee.ImageCollection("NASA_USDA/HSL/soil_moisture"),
+    Rainfall_TRMM3B42 = ee.ImageCollection("TRMM/3B42"),
+    persiann_cdr = ee.ImageCollection("NOAA/PERSIANN-CDR");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+
+
+
+//----------------------------------visualization------------------------------------------//
+
+// // var visParams1= {bands: ['susm','ssm','ssma' ],min:0, max: 25.39, pallette:'FFFFFF,CE7E45, DF923D, F1B555, FCD163, 99B718, 74A901, 66A000, 529400,' +
+// //     '3E8601, 207401, 056201, 004C00, 023B01, 012E01, 011D01, 011301'};
+
+// var visParams1= {bands: ['precipitation'],min:0, max: 718.62, palette: [ '#CDC9A5','#EEE8CD', '#B4CDCD','#2F4F4F'  ]};
+
+
+// // Map.addLayer(temporalFiltered.select ('air'), visParams, 'temperature',false);
+
+// // Create temporal filter
+
+// var temporalFilter= Rainfall_TRMM3B42.filterDate('2015-06-22', '2015-06-23')
+// print ('temporal',temporalFilter)
+// Map.addLayer(temporalFilter.select('precipitation'), {}, 'precipitation_pers',false)
+
+// var temporalFilter= persiann.filterDate('2010-08-04', '2010-08-13')
+// print ('temporal',temporalFilter)
+// Map.addLayer(temporalFilter.select('precipitation'), {}, 'precipitation_per',false)
+
+// // crs and scale
+// var image = Rainfall_TRMM3B42.select(0);
+// print ('este', image.limit(10))
+// print('Projection, crs, and crs_transform:', image.first().projection());
+// print('Scale in meters:', image.first().projection().nominalScale());
+
+//------------------------------visualization----------------------------------------------//
+
+
+//  (I) Add  landslides ocurrences 
+
+var events = ee.FeatureCollection('ft:1B6LxrrIRytfR_HOoTCVEeRD5luO-Op2WIB7xJKhV', 'latitude')
+
+print(events.distinct('landslide_size').aggregate_array('landslide_size'))
+print(events.distinct('landslide_id').aggregate_array('landslide_id'))
+print(events.distinct('location_accuracy').aggregate_array('location_accuracy'))
+
+// add readable date/time
+events = events.map(function(f) {
+    return f.set({t: ee.Date(f.get('event_date'))}) 
+    .set({event_date: ee.Number(f.get('event_date'))})
+  })
+
+// events = events.filter(ee.Filter.inList('landslide_size', ['very_large', 'catastrophic'])) //filter by landslide size
+// events = events.filter(ee.Filter.gt('event_date', ee.Date('2017-07-01').millis())) 
+
+// events = events.filter(ee.Filter.lte('location_accuracy', ee.Number(25)))   // location accuracy 25, greater than and lower than
+// events = events.filter(ee.Filter.notEquals('location_accuracy', ee.Number(2)))
+
+// events = events.filter(ee.Filter.equals('location_accuracy', ee.Number(2)))//unknown 50000
+
+events = events.filter(ee.Filter.gt('location_accuracy', ee.Number(25))) //accuracy dependent 
+
+//location accuracy values: 25 = 25Km, 1=1Km, k=5km, 3=unknown, 2= unknown
+
+// events = events.filter(ee.Filter.inList('landslide_id', [336]))//filter by landslide_id
+
+print ('size', events.size())
+Map.addLayer(events, {color: 'blue'}, 'landslide point')
+
+
+
+ //-----------------------------------//---------------------------//---------------------------------------
+
+//(II)function to calculate the mean:
+
+var calStatsUW = function (image,buffer) {
+  var listVar= [75]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  reducer: ee.Reducer.stdDev().unweighted(),// calculate mean 
+  // reducer: ee.Reducer.median().unweighted(),// calculate median
+    // reducer: ee.Reducer.max(),// calculate max
+    // reducer: ee.Reducer.min(),// calculate min
+  geometry: buffer_processed.geometry(),
+  scale: 25000,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+var calStatsW = function (image,buffer) {
+  var listVar= [25]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  // reducer: ee.Reducer.stdDev(),// calculate mean 
+  reducer: ee.Reducer.stdDev(),// calculate median
+    // reducer: ee.Reducer.max(),// calculate max
+    // reducer: ee.Reducer.min(),// calculate min
+  geometry: buffer_processed.geometry(),
+  scale: 25000,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+
+
+
+var dateRange= function (landslide) {
+
+    var event_date = ee.Date(landslide.get('event_date')) //convert date to milliseconds 
+  // var diavento= ee.Date(events.first().get('event_date'))
+  
+    var event_date= ee.Date.fromYMD (event_date.get ('Year'), 
+    event_date.get ('Month'), event_date.get ('Day')).millis() //initialize timezone to cero
+    
+    var ten_days=864000000  // 10 days in miliseconds 
+    
+    var date_minus_10days = event_date.subtract (ten_days)
+    var recorded_date= ee.Date (date_minus_10days) // get new date in miliseconds 
+
+return recorded_date}
+
+
+//(III) function to calculate buffer
+
+var calcBuffer = function(landslide){
+  var location_accuracy= landslide.get('location_accuracy')
+  
+  var buffer_radius=  ee.Number.parse(location_accuracy).multiply(1000) //buffer radius in meters 
+  // var buffer_radius=25000
+    // var buffer_radius=50000
+    return buffer_radius
+  }
+
+
+// (IV) Function to calculate values 10 previous days before landslide ocurrence
+
+var setMean_rainfall = function (landslide) {
+
+    var event_date1 =ee.Date(landslide.get('t')) 
+    var previous_tenDays= dateRange(landslide)
+
+
+// (V) function to calculated values per day
+
+    var day_mean = ee.List.sequence(0, 10).map(function(n) { // .sequence: number of days from 10 days before landslide occurrence 
+    var start = previous_tenDays.advance(n, 'day'); // Starting date
+    var end = start.advance(1, 'day'); // Step by each iteration
+
+  return persiann_cdr.select ('precipitation').filterDate(start, end).mean().set('system:time_start', start)
+    })
+    
+  var collection = ee.ImageCollection(day_mean)
+  
+  
+
+  
+//calculate the mean by day using the buffer
+ 
+  var collectionTolist= collection.toList(collection.size())
+
+  var day_minus10W = calStatsW(ee.Image(collectionTolist.get(0)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus9W = calStatsW(ee.Image(collectionTolist.get(1)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus8W = calStatsW(ee.Image(collectionTolist.get(2)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus7W = calStatsW(ee.Image(collectionTolist.get(3)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus6W = calStatsW(ee.Image(collectionTolist.get(4)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus5W = calStatsW(ee.Image(collectionTolist.get(5)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus4W= calStatsW(ee.Image(collectionTolist.get(6)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus3W = calStatsW(ee.Image(collectionTolist.get(7)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus2W = calStatsW(ee.Image(collectionTolist.get(8)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus1W = calStatsW(ee.Image(collectionTolist.get(9)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_0W = calStatsW(ee.Image(collectionTolist.get(10)),landslide.geometry().buffer(calcBuffer(landslide)))  
+    
+    
+  var day_minus10UW = calStatsUW(ee.Image(collectionTolist.get(0)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus9UW = calStatsUW(ee.Image(collectionTolist.get(1)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus8UW = calStatsUW(ee.Image(collectionTolist.get(2)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus7UW = calStatsUW(ee.Image(collectionTolist.get(3)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus6UW = calStatsUW(ee.Image(collectionTolist.get(4)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus5UW = calStatsUW(ee.Image(collectionTolist.get(5)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus4UW= calStatsUW(ee.Image(collectionTolist.get(6)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus3UW = calStatsUW(ee.Image(collectionTolist.get(7)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus2UW = calStatsUW(ee.Image(collectionTolist.get(8)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus1UW = calStatsUW(ee.Image(collectionTolist.get(9)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_0UW = calStatsUW(ee.Image(collectionTolist.get(10)),landslide.geometry().buffer(calcBuffer(landslide)))  
+    
+    
+  return  landslide.set({ day_minus10W: day_minus10W, date_minus10:ee.Date(ee.Image(collectionTolist.get(0)).get('system:time_start')),
+                          day_minus9W: day_minus9W,date_minus9:ee.Date(ee.Image(collectionTolist.get(1)).get('system:time_start')),
+                          day_minus8W: day_minus8W,date_minus8:ee.Date(ee.Image(collectionTolist.get(2)).get('system:time_start')), 
+                          day_minus7W: day_minus7W,date_minus7:ee.Date(ee.Image(collectionTolist.get(3)).get('system:time_start')),
+                          day_minus6W: day_minus6W,date_minus6:ee.Date(ee.Image(collectionTolist.get(4)).get('system:time_start')),
+                          day_minus5W: day_minus5W,date_minus5:ee.Date(ee.Image(collectionTolist.get(5)).get('system:time_start')),
+                          day_minus4W: day_minus4W,date_minus4:ee.Date(ee.Image(collectionTolist.get(6)).get('system:time_start')),
+                          day_minus3W: day_minus3W,date_minus3:ee.Date(ee.Image(collectionTolist.get(7)).get('system:time_start')),
+                          day_minus2W: day_minus2W,date_minus2:ee.Date(ee.Image(collectionTolist.get(8)).get('system:time_start')),
+                          day_minus1W: day_minus1W,date_minus1:ee.Date(ee.Image(collectionTolist.get(9)).get('system:time_start')),
+                          day_0W: day_0W,date_0:ee.Date(ee.Image(collectionTolist.get(10)).get('system:time_start')),
+                   
+    
+                          day_minus10UW: day_minus10UW, date_minus10:ee.Date(ee.Image(collectionTolist.get(0)).get('system:time_start')),
+                          day_minus9UW: day_minus9UW,date_minus9:ee.Date(ee.Image(collectionTolist.get(1)).get('system:time_start')),
+                          day_minus8UW: day_minus8UW,date_minus8:ee.Date(ee.Image(collectionTolist.get(2)).get('system:time_start')), 
+                          day_minus7UW: day_minus7UW,date_minus7:ee.Date(ee.Image(collectionTolist.get(3)).get('system:time_start')),
+                          day_minus6UW: day_minus6UW,date_minus6:ee.Date(ee.Image(collectionTolist.get(4)).get('system:time_start')),
+                          day_minus5UW: day_minus5UW,date_minus5:ee.Date(ee.Image(collectionTolist.get(5)).get('system:time_start')),
+                          day_minus4UW: day_minus4UW,date_minus4:ee.Date(ee.Image(collectionTolist.get(6)).get('system:time_start')),
+                          day_minus3UW: day_minus3UW,date_minus3:ee.Date(ee.Image(collectionTolist.get(7)).get('system:time_start')),
+                          day_minus2UW: day_minus2UW,date_minus2:ee.Date(ee.Image(collectionTolist.get(8)).get('system:time_start')),
+                          day_minus1UW: day_minus1UW,date_minus1:ee.Date(ee.Image(collectionTolist.get(9)).get('system:time_start')),
+                          day_0UW: day_0UW,date_0:ee.Date(ee.Image(collectionTolist.get(10)).get('system:time_start')),
+    
+                          date_landslide: event_date1,
+                          buffer_radius:calcBuffer(landslide)
+                          
+  
+    
+  })
+  
+  }
+    
+  events = events.map(setMean_rainfall)
+  
+  // print (events.limit(100))
+  
+
+ //(VI)export the file 
+
+
+Export.table.toDrive({
+  collection: events, 
+  description: 'Rainfall_persiancdr_std_acc_last', 
+  fileFormat: 'CSV',
+  selectors:(["landslide_id","date_landslide","country_code", "longitude", "location_accuracy","buffer_radius",
+  "date_0","day_0W","day_0UW","date_minus1",  "day_minus1W","day_minus1UW", "date_minus2" 
+  ,"day_minus2W", "day_minus2UW", "date_minus3","day_minus3W", "day_minus3UW","date_minus4", 
+    "day_minus4W","day_minus4UW","date_minus5", "day_minus5W","day_minus5UW","date_minus6"
+    ,"day_minus6W", "day_minus6UW", "date_minus7", "day_minus7W", "day_minus7UW",
+    "date_minus8", "day_minus8W","day_minus8UW", "date_minus9", "day_minus9W", "day_minus9UW", 
+    "date_minus10", "day_minus10W","day_minus10UW"]),
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Export.table.toDrive({
+//   collection: events, 
+//   description: 'Rainfal_persianCDR_std_25000', 
+//   fileFormat: 'CSV',
+//   selectors:(["landslide_id","date_landslide","country_code", "longitude", "location_accuracy","buffer_radius",
+//   "date_0", "day_0","date_minus1","day_minus1", "date_minus2","day_minus2","date_minus3", "day_minus3", "date_minus4","day_minus4", 
+//   "date_minus5", "day_minus5","date_minus6", "day_minus6","date_minus7","day_minus7", "date_minus8", "day_minus8", "date_minus9",
+//   "day_minus9","date_minus10","day_minus10"]),
+// });
+
+
+// // // Export.table.toDrive({
+// //   collection: events, 
+// //   description: 'TRMM3B2_days', 
+// //   fileFormat: 'CSV',
+//   selectors:(["landslide_id","date_landslide","t", "country_code","longitude", "location_accuracy","buffer_radius",
+//   "date_day0", "temp_day0","date_day1","temp_day1", "date_day2","temp_day2","date_day3", "temp_day3", "date_day4","temp_day4", 
+//   "date_day5", "temp_day5","date_day6", "temp_day6","date_day7","temp_day7", "date_day8", "temp_day8", "date_day9",
+//   "temp_day9"])
+// });
+
+
+
+
+
+
+
+

@@ -1,0 +1,544 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var pt1 = /* color: d63000 */ee.Geometry.Point([91.71103277478028, 29.266783618320044]),
+    srtm = ee.Image("USGS/SRTMGL1_003"),
+    hand = ee.Image("users/gena/GlobalHAND/30m/hand-5000");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+//Map.setCentere
+Map.centerObject(pt1, 12)
+
+// hit-or-miss
+// http://en.wikipedia.org/wiki/Hit-or-miss_transform
+//
+// HoM = erode(A, SE1).and(erode(not(A), SE2)
+
+// TODO: 
+//
+// * add prunning http://www.dabi.temple.edu/~shape/partshape/structure/3.php
+//                http://reference.wolfram.com/language/ref/Pruning.html
+
+// I(n+1, i, j) = I(n, i, j) + lambda * (cN * dN(I) + cS * dS(I) + cE * dE(I), cW * dW(I))
+var peronaMalikFilter = function(I, iter, K, method) {
+    var dxW = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 1, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dxE = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  1],
+                            [ 0,  0,  0]]);
+  
+  var dyN = ee.Kernel.fixed(3, 3,
+                           [[ 0,  1,  0],
+                            [ 0, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dyS = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  0],
+                            [ 0,  1,  0]]);
+
+  var lambda = 0.2;
+
+  if(method == 1) {
+    var k1 = ee.Image(-1.0/K);
+
+    for(var i = 0; i < iter; i++) {
+      var dI_W = I.convolve(dxW)
+      var dI_E = I.convolve(dxE)
+      var dI_N = I.convolve(dyN)
+      var dI_S = I.convolve(dyS)
+      
+      var cW = dI_W.multiply(dI_W).multiply(k1).exp();
+      var cE = dI_E.multiply(dI_E).multiply(k1).exp();
+      var cN = dI_N.multiply(dI_N).multiply(k1).exp();
+      var cS = dI_S.multiply(dI_S).multiply(k1).exp();
+  
+      I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))))
+    }
+  }
+  else if(method == 2) {
+    var k2 = ee.Image(K).multiply(ee.Image(K));
+
+    for(var i = 0; i < iter; i++) {
+      var dI_W = I.convolve(dxW)
+      var dI_E = I.convolve(dxE)
+      var dI_N = I.convolve(dyN)
+      var dI_S = I.convolve(dyS)
+      
+      var cW = ee.Image(1.0).divide(ee.Image(1.0).add(dI_W.multiply(dI_W).divide(k2)));
+      var cE = ee.Image(1.0).divide(ee.Image(1.0).add(dI_E.multiply(dI_E).divide(k2)));
+      var cN = ee.Image(1.0).divide(ee.Image(1.0).add(dI_N.multiply(dI_N).divide(k2)));
+      var cS = ee.Image(1.0).divide(ee.Image(1.0).add(dI_S.multiply(dI_S).divide(k2)));
+  
+      I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))))
+    }
+  }
+  
+  return I;
+}
+
+var crsTransformSetStep = function(step, t) {
+  return [step, t[1], t[2], t[3], -step, t[5]];
+}
+
+function pad(n, width, z) {
+  z = z || '0';
+  n = n + '';
+  return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
+}
+
+// get L8 image
+print(ee.Geometry(Map.getBounds(true)).centroid(1e-3))
+
+var images = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+      .filterBounds(ee.Geometry(Map.getBounds(true)).centroid(1))
+      .filterMetadata('CLOUD_COVER', 'less_than', 15);
+
+var image = ee.Image(images.toList(30, 0).get(13));
+print(image)
+var info = image.getInfo();
+
+var crs = info.bands[0].crs;
+var crs_transform = info.bands[0].crs_transform;
+
+//crs_transform = crsTransformSetStep(crs_transform[0]*0.5, crs_transform)
+
+Map.addLayer(image.select('B4', 'B3', 'B2'), {min: 0.05, gamma: 1.2, max:[0.3, 0.3, 0.4]}, info.id)
+Map.addLayer(image.select('B8'), {gamma:2.0}, info.id + ' pan', false)
+
+// compute binary image (water mask)
+var ndwi = image.normalizedDifference(['B6', 'B3'])
+Map.addLayer(ndwi, {min:-0.5, max:0.5, color:'000044'}, 'ndwi', false)
+
+ndwi = ndwi
+  //.focal_mode(30, 'circle', 'meters')
+  //.focal_min(30, 'circle', 'meters')
+  //.focal_max(30, 'circle', 'meters')
+  .reproject(crs, crs_transform)
+
+Map.addLayer(srtm, {}, 'srtm', false)
+
+var demMask = srtm.lt(3556).focal_max(6).focal_min(6)
+//var demMask = hand.lt(30)
+Map.addLayer(demMask.mask(demMask), {}, 'srtm mask', false)
+
+
+//ndwi = ndwi.focal_max(60, 'circle', 'meters')
+
+
+var threshold = -0.2;
+var water = ndwi
+  .lt(threshold)
+  .mask(demMask)
+  .focal_max(1)
+  .focal_mode(3, 'circle', 'pixels', 3)
+  .focal_min(1)
+
+Map.addLayer(water.mask(water), {palette:['6599FF'], opacity:0.5}, 'water')
+
+var edge = ee.Algorithms.CannyEdgeDetector(water, 0.9)
+Map.addLayer(edge.mask(edge), {palette:['ffffff'], opacity:0.7}, 'water edge')
+
+water = water//.focal_mode(30, 'circle', 'meters')
+
+// Find the gradient of the distance image, and compute its magnitude.
+var dist = water.not()
+  .distance(ee.Kernel.euclidean(600, "meters")).int()
+  // .reproject(crs, crs_transform)
+  .reproject(crs, [5,0,0,0,5,0])
+  .mask(water);
+Map.addLayer(dist, {min: 0, max:600}, 'dist', false)
+
+var multiplier = 50.0;
+// dist = peronaMalikFilter(dist.multiply(1/multiplier), 5, 0.05, 2).multiply(multiplier)
+
+var terrain = ee.call('Terrain', dist);
+
+function radians(img) { return img.toFloat().multiply(Math.PI).divide(180); }
+
+var slope = radians(terrain.select(['slope']));
+
+Map.addLayer(slope, {}, 'slope', false)
+
+//var slope_valleys = slope.lt(Math.PI / 32.0);
+//Map.addLayer(slope_valleys.mask(slope_valleys), {}, 'slope < 11.25%')
+
+var aspect = radians(terrain.select(['aspect']));
+
+var colorsRainbow = [
+'F26C4F', // Light Red
+'F68E55', // Light Red Orange	
+'FBAF5C', // Light Yellow Orange
+'FFF467', // Light Yellow
+'ACD372', // Light Pea Green
+'7CC576', // Light Yellow Green
+'3BB878', // Light Green
+'1ABBB4', // Light Green Cyan
+'00BFF3', // Light Cyan
+'438CCA', // Light Cyan Blue
+'5574B9', // Light Blue
+'605CA8', // Light Blue Violet
+'855FA8', // Light Violet
+'A763A8', // Light Violet Magenta
+'F06EA9', // Light Magenta
+'F26D7D'  // Light Magenta Red
+];
+Map.addLayer(aspect, {min:0, max:2*Math.PI, palette:colorsRainbow}, 'aspect', false)
+
+/*
+var canny = ee.Algorithms.CannyEdgeDetector(aspect, 0.9, 1)
+  .mask(water.reduceNeighborhood(ee.Reducer.min(), ee.Kernel.circle(120, "meters")))
+  .focal_max(30, 'circle', 'meters')
+  .focal_min(30, 'circle', 'meters');
+
+Map.addLayer(canny.mask(canny).gt(0).connectedPixelCount(50, true), {palette: ['200000', 'FF0000']}, 'connected');
+
+Map.addLayer(canny.mask(canny), {palette: ['000000', 'FF0000']}, 'canny on aspect', true);
+
+// Empirically found threhold.
+var center = slope.lt(0.87);
+Map.addLayer(slope.mask(center), {palette: ['200000', 'FF0000']}, 'slope > 0.5', false);
+
+// The minimum segement size.  Anything smaller than this is ignored.
+var maxDist = 100
+var CL = center.connectedPixelCount(maxDist, true).eq(maxDist).and(center);
+CL = CL.mask(CL);
+Map.addLayer(CL, {palette: ['200000', 'FF0000']}, 'CL');
+
+var bufferDistance = 500;
+//var mask = water.focal_max(bufferDistance, 'circle', 'meters')
+// water = water.mask(mask);
+*/
+
+var maskClouds = function(i) {
+  var bad = [61440,59424,57344,56320,53248,52256,52224,49184,49152];
+  var clear = i.select('BQA').eq(bad).reduce('max').not();
+  var clouds = clear.mask(clear.not());
+  
+  Map.addLayer(clouds, {palette:'ffff00'}, 'clouds', false)
+  
+  // exclude low clouds using buffer
+  var cloudsAndShadows = clouds.focal_max({radius: 2000, units: 'meters'});
+  
+  Map.addLayer(cloudsAndShadows, {palette:'aaaaaa', opacity: 0.6}, 'clouds (maybe)', false)
+}
+
+maskClouds(image);
+
+var upsampleWater = function() {
+  t = crsTransformSetStep(15, crs_transform);
+  
+  // smoothen and reproject water
+  var water2 = water
+    .focal_max({radius: 30, units: 'meters'}).focal_min({radius: 30, units: 'meters'})
+    .reproject(crs, t)
+    
+  var waterVector2 = water2.not().reduceToVectors({reducer:ee.Reducer.countEvery(), scale:step, maxPixels: 1e9, geometry: Map.getBounds(true), eightConnected:true})
+    .filter(ee.Filter.neq('label', 1));
+  Map.addLayer(waterVector2, {}, 'water vector (smoothed)');
+  
+  Map.addLayer(water2.mask(water2), {palette:'0000aa'}, 'water (upsampled ' + step + ')')
+
+  water = water2;
+}
+
+// perform hit-or-miss
+var hitOrMiss = function(image, se1, se2, crs, crs_transform) {
+  if (typeof crs === 'undefined') { crs = null; }
+
+  var e1 = image.reduceNeighborhood(ee.Reducer.min(), se1);
+  var e2 = image.not().reduceNeighborhood(ee.Reducer.min(), se2);
+  var result = e1.and(e2);
+  
+  if(crs !== null) {
+    result = result.reproject(crs, crs_transform);
+  }
+  
+  return result;
+}
+
+var splitKernel = function(kernel, value) {
+  var result = [];
+  for(var r=0; r<kernel.length; r++) {
+      
+      var row = [];
+      for(var c=0; c<kernel.length; c++) {
+          row.push(kernel[r][c] == value ? 1 : 0);
+      }
+      result.push(row);
+  }
+  
+  return result;
+}
+
+var skeletonize = function(image, iterations, method, crs, crs_transform) {
+  if (typeof crs === 'undefined') { crs = null; }
+
+  var se1w = [[2, 2, 2], 
+              [0, 1, 0], 
+              [1, 1, 1]];
+  
+  if(method == 2) {
+    se1w = [[2, 2, 2], 
+            [0, 1, 0], 
+            [0, 1, 0]];
+  }
+  var se11 = ee.Kernel.fixed(3, 3, splitKernel(se1w, 1));
+  var se12 = ee.Kernel.fixed(3, 3, splitKernel(se1w, 2));
+  
+  var se2w = [[2, 2, 0], 
+              [2, 1, 1], 
+              [0, 1, 0]];
+  
+  if(method == 2) {
+       se2w = [[2, 2, 0], 
+               [2, 1, 1], 
+               [0, 1, 1]];
+  }
+  
+  var se21 = ee.Kernel.fixed(3, 3, splitKernel(se2w, 1));
+  var se22 = ee.Kernel.fixed(3, 3, splitKernel(se2w, 2));
+  
+  var result = image;
+  
+  if (crs !== null) {
+    // ee.Image(0).or(image)
+    
+    //result = image.reproject(crs, crs_transform);
+  }
+
+  for(var i=0; i<iterations; i++) {
+    for(var j=0; j<4; j++) { // rotate kernels
+      result = result.subtract(hitOrMiss(result, se11, se12, crs, crs_transform));
+      se11 = se11.rotate(1);
+      se12 = se12.rotate(1);
+  
+      result = result.subtract(hitOrMiss(result, se21, se22, crs, crs_transform));
+      se21 = se21.rotate(1);
+      se22 = se22.rotate(1);
+
+      //result = result.mask(mask);
+    }
+    
+  
+/*
+if (i%5 === 0) {
+      var color = 'fec4' + pad(parseInt(100.0 * i/iterations), 2);
+      print(color)
+      Map.addLayer(result.mask(result), {palette:color, opacity: 0.5}, 'thining' + i);
+    }  
+*/
+  }
+  
+  return result;
+}
+
+var connectLines = function(image, distance1, distance2, iterations, includeAlone, crs, crs_transform) {
+  if (typeof crs === 'undefined') { crs = null; }
+
+  Map.addLayer(image.mask(image), {palette:'00ff00', opacity: 0.7}, 'input', true)
+
+  // find parts to connect
+  var le11w = [[0, 0, 0], 
+               [0, 1, 0], 
+               [0, 1, 0]];
+  
+  var le12w = [[1, 1, 1], 
+               [1, 0, 1], 
+               [0, 0, 0]];
+  
+  var le11 = ee.Kernel.fixed(3, 3, le11w);
+  var le12 = ee.Kernel.fixed(3, 3, le12w);
+  
+  var input2 = hitOrMiss(image, le11, le12, crs, crs_transform);
+  for(var j=0; j<3; j++) { // rotate kernels
+      le11 = le11.rotate(1);
+      le12 = le12.rotate(1);
+      input2 = input2.or(hitOrMiss(image, le11, le12, crs, crs_transform));
+  }
+  
+  Map.addLayer(input2.mask(input2), {palette:'aa0000'}, 'line ends1', false);
+  
+  var le21w = [[0, 0, 0], 
+               [0, 1, 0], 
+               [0, 0, 1]];
+  
+  var le22w = [[1, 1, 1], 
+               [1, 0, 1], 
+               [1, 1, 0]];
+  
+  var le21 = ee.Kernel.fixed(3, 3, le21w);
+  var le22 = ee.Kernel.fixed(3, 3, le22w);
+  
+  var input3 = hitOrMiss(image, le21, le22, crs, crs_transform);
+  for(var j=0; j<3; j++) { // rotate kernels
+      le21 = le21.rotate(1);
+      le22 = le22.rotate(1);
+      input3 = input3.or(hitOrMiss(image, le21, le22, crs, crs_transform));
+  }
+  
+  Map.addLayer(input3.mask(input3), {palette:'aa0000'}, 'line ends2', false);
+  
+  // connect
+  var ends = input2.or(input3)
+
+  if(includeAlone) {
+    // detect alone pixels
+    var se1w = [[0, 0, 0], 
+                [0, 1, 0], 
+                [0, 0, 0]];
+    
+    var se2w = [[1, 1, 1], 
+                [1, 0, 1], 
+                [1, 1, 1]];
+    
+    
+    var se1 = ee.Kernel.fixed(3, 3, se1w);
+    var se2 = ee.Kernel.fixed(3, 3, se2w);
+    
+    var result = hitOrMiss(image, se1, se2, crs, crs_transform);
+    Map.addLayer(result.mask(result), {palette:'aa0000', opacity: 0.7}, 'single pixel', false);
+    
+    ends = ends.or(result);
+  }
+  
+  var lines = ends
+    .reduceNeighborhood(ee.Reducer.max(), ee.Kernel.octagon(distance1, 'meters'))
+    .reduceNeighborhood(ee.Reducer.min(), ee.Kernel.octagon(distance2, 'meters'));
+  Map.addLayer(lines.mask(lines), {palette:'0000ff', opacity: 0.7}, 'connect', false);
+  
+  lines = skeletonize(lines, iterations, 2, crs, crs_transform)
+  
+  return lines;
+}
+
+// upsampleWater();
+
+water = water.clip(Map.getBounds(true))
+
+var skel = skeletonize(water, 20, 2, crs, crs_transform);
+Map.addLayer(skel.mask(skel), {palette:'fec44f', opacity: 0.7}, 'skeleton', false);
+
+var w = skel.gt(0);
+
+var w2 = connectLines(w, 90, 60, 3, true, crs, crs_transform);
+Map.addLayer(w2.mask(w2), {palette:'0000ff', opacity: 0.7}, 'connect (skel1)', false);
+
+/*
+var w3 = connectLines(w2.or(w), 150, 90, 6, true);
+Map.addLayer(w3.mask(w3), {palette:'0000ff', opacity: 0.7}, 'connect (skel2)', false);
+
+var w4 = connectLines(w3.or(w2).or(w), 240, 180, 6, false);
+Map.addLayer(w4.mask(w4), {palette:'0000ff', opacity: 0.7}, 'connect (skel2)', false);
+
+var w5 = connectLines(w4.or(w3).or(w2).or(w), 600, 510, 6, false);
+Map.addLayer(w5.mask(w5), {palette:'0000ff', opacity: 0.7}, 'connect (skel3)', false);
+*/
+
+// distance transform
+/*
+var distanceKernel = ee.Kernel.euclidean(3);
+
+var dilated = input.reduceNeighborhood(ee.call("Reducer.max"), distanceKernel);
+Map.addLayer(dilated.mask(dilated), {min:0, max:10, palette:['000000','ff0000'], opacity: 1.0}, 'distance1');
+
+var dilated = dilated.reduceNeighborhood(ee.call("Reducer.max"), distanceKernel);
+Map.addLayer(dilated.mask(dilated), {min:0, max:10, palette:['000000','ff0000'], opacity: 1.0}, 'distance2');
+
+var dilated = dilated.reduceNeighborhood(ee.call("Reducer.max"), distanceKernel);
+Map.addLayer(dilated.mask(dilated), {min:0, max:10, palette:['000000','ff0000'], opacity: 1.0}, 'distance3');
+
+var dilated = dilated.reduceNeighborhood(ee.call("Reducer.max"), distanceKernel);
+Map.addLayer(dilated.mask(dilated), {min:0, max:10, palette:['000000','ff0000'], opacity: 1.0}, 'distance4');
+*/
+
+/*
+var t = crsTransformSetStep(15, crs_transform);
+
+input = input.focal_max({radius: 30, units: 'meters'}).focal_min({radius: 30, units: 'meters'})
+    .reproject(crs, t);
+
+var skeleton = input.not().reduceToVectors({reducer:ee.Reducer.countEvery(), scale:15, maxPixels: 1e9, geometry: Map.getBounds(true), eightConnected:false})
+    .filter(ee.Filter.neq('label', 1));
+Map.addLayer(skeleton, {min: 0, max: 256, palette: ['FFFF00', 'FF0000']}, 'skeleton');
+
+print(skeleton.aggregate_count('label'))
+
+var coordinates = ee.Feature(skeleton.first()).geometry().coordinates().get(0);
+print(ee.List(coordinates).get(0))
+print(ee.Geometry.MultiPoint(coordinates.getInfo()))
+
+var skeleton_points = skeleton.map(function(f){
+  return ee.List(f.geometry().coordinates().get(0)).get(0);
+});
+
+print(skeleton_points.first())
+*/
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+WORKING VERSION
+
+
+// =================== skeleton of LANDSAT water
+var input = water;
+var info = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+      .filterBounds(Map.getBounds(true)).first().getInfo()
+var crs = info.bands[0].crs;
+var crs_transform = info.bands[0].crs_transform;
+
+var hitOrMiss = function(image, se1, se2) {
+  var e1 = image.reduceNeighborhood(ee.call("Reducer.min"), se1);
+  var e2 = image.not().reduceNeighborhood(ee.call("Reducer.min"), se2);
+  return e1.and(e2).reproject(crs, crs_transform);
+}
+
+// thining
+var se1w1 = [[0, 0, 0], 
+             [0, 1, 1], 
+             [0, 1, 0]];
+
+var se2w1 = [[1, 1, 0], 
+             [1, 0, 0], 
+             [0, 0, 0]];
+
+var se11 = ee.Kernel.fixed(3, 3, se1w1);
+var se21 = ee.Kernel.fixed(3, 3, se2w1);
+
+var se1w2 = [[0, 0, 0], 
+             [0, 1, 0], 
+             [1, 1, 1]];
+
+var se2w2 = [[1, 1, 1], 
+             [0, 0, 0], 
+             [0, 0, 0]];
+
+var se12 = ee.Kernel.fixed(3, 3, se1w2);
+var se22 = ee.Kernel.fixed(3, 3, se2w2);
+
+for(var i=0; i<10; i++) { // iteration
+  for(var j=0; j<4; j++) { // rotate kernels
+    input = input.subtract(hitOrMiss(input, se11, se21));
+    se11 = se11.rotate(1);
+    se21 = se21.rotate(1);
+
+    input = input.subtract(hitOrMiss(input, se12, se22));
+    se12 = se12.rotate(1);
+    se22 = se22.rotate(1);
+  }
+}
+
+Map.addLayer(input.mask(input), {palette:['ffffff', 'fec44f'], opacity: 0.7}, 'river skeleton');
+*/

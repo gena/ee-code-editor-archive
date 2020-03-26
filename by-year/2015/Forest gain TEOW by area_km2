@@ -1,0 +1,28 @@
+// Forest gain TEOW by area_km2
+
+// Get forest gain pixels just in the TEOW features using Fusion Table
+// and filter by area_km2 range
+var teow = ee.FeatureCollection('ft:1WFUz9jmLqZswBmo2hQte0AYxaTt6NFtQMOCfUXoF');
+var teowArea = teow.filterMetadata ('area_km2', 'less_than', 1910039);
+
+Map.addLayer(teowArea);
+
+// Get the gain image
+var gfcImage = ee.Image('UMD/hansen/global_forest_change_2013');
+var gainImage = gfcImage.select(['gain']);
+var areaImage = gainImage.multiply(ee.Image.pixelArea());
+
+// Map the reducing function over the image collection.
+var newTEOW = areaImage.reduceRegions(teowArea, 'sum', 30)
+
+var filenamePrefix = 'TEOWGain';
+var selectors = "ECO_NAME,ECO_ID,area_km2,AZE_ID,MapID,SiteNameFi,gain";
+
+var taskParams = {
+    'driveFolder' : '',
+    'driveFileNamePrefix': filenamePrefix,
+    'fileFormat' : 'CSV',
+    'selectors' : selectors
+  };
+  
+Export.table(newTEOW, filenamePrefix, taskParams);

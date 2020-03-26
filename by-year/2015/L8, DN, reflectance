@@ -1,0 +1,21 @@
+// L8, DN, reflectance
+
+// print(ee.Geometry(Map.getBounds(true)).centroid(1e-3))
+Map.setCenter(147.01, -36.10)
+
+var c1 = ee.ImageCollection('LANDSAT/LC8').filterBounds(Map.getBounds(true)).select(['B7', 'B5', 'B3']).sort('system:index');
+var c2 = ee.ImageCollection('LANDSAT/LC8_L1T_TOA').filterBounds(Map.getBounds(true)).select(['B7', 'B5', 'B3']).sort('system:index');
+
+var offset = 2
+
+var i1 = ee.Image(c1.toList(1,offset).get(0));
+var i2 = ee.Image(c2.toList(1,offset).get(0));
+
+print(i1.getInfo())
+print(i2.getInfo())
+
+print(c1.getInfo().features.length)
+print(c2.getInfo().features.length)
+
+Map.addLayer(i1, {min: 0.0 * 65535, max: 0.6 * 65535 }, 'DN')
+Map.addLayer(i2, {min: 0.0, max: 0.6 }, 'TOA')

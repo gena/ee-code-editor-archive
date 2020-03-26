@@ -1,0 +1,300 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var catchments = ee.FeatureCollection("users/gena/water-niger/catchments-homogenized"),
+    modisMonthly = ee.ImageCollection("users/gena/water-niger/modis-monthly-upper-niger"),
+    rivers = ee.FeatureCollection("users/gena/water-niger/wflow/rivers"),
+    catchment = ee.FeatureCollection("users/gena/water-niger/catchment"),
+    b1 = /* color: #d63000 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-5.105055506313533, 14.091067616371863],
+              [-5.011671717251033, 14.091067616371863],
+              [-4.473341639126033, 14.596648374655382],
+              [-4.226149256313533, 15.334293989101862],
+              [-4.517286951626033, 15.3395915255489],
+              [-4.698561365688533, 15.11167668977945],
+              [-5.000685389126033, 14.729504782197067],
+              [-5.044630701626033, 14.45307331059925],
+              [-5.198439295376033, 14.272143191068645],
+              [-5.127028162563533, 14.128359689666846],
+              [-5.132521326626033, 14.011135529984978]]]),
+        {
+          "basin_id": 1,
+          "system:index": "0"
+        }),
+    b2 = /* color: #0b4a8b */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-4.984205896938533, 13.915180296118534],
+              [-4.929274256313533, 13.765837522196252],
+              [-4.824904139126033, 13.643091670122642],
+              [-4.671095545376033, 13.771172841572795],
+              [-4.643629725063533, 13.909848279580155],
+              [-4.517286951626033, 14.037782658836864],
+              [-4.704054529751033, 14.117705434256596]]]),
+        {
+          "basin_id": 2,
+          "system:index": "0"
+        }),
+    b3 = /* color: #ffc82d */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-4.149244959438533, 14.62322609941774],
+              [-3.8581072641260334, 14.798558168800707],
+              [-3.8306414438135334, 15.270713087175327],
+              [-4.094313318813533, 15.32369851330563],
+              [-4.077833826626033, 15.101070009099779]]]),
+        {
+          "basin_id": 3,
+          "system:index": "0"
+        }),
+    b4 = /* color: #00ffff */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-4.253615076626033, 13.749830833925508],
+              [-4.132765467251033, 14.043111712989399],
+              [-4.077833826626033, 14.39455311572145],
+              [-4.385451014126033, 14.373269237436736],
+              [-4.341505701626033, 13.984485308281274],
+              [-4.467848475063533, 13.760502081100528]]]),
+        {
+          "basin_id": 4,
+          "system:index": "0"
+        }),
+    b5 = /* color: #bf04c2 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-3.0615984750635334, 15.207112916376696],
+              [-2.8830706430322834, 15.127585716564129],
+              [-2.6193987680322834, 15.321049560449193],
+              [-2.2815446426052404, 15.436649634858599],
+              [-2.4903094125635334, 15.69157410525942],
+              [-3.3032976938135334, 15.953183158913696],
+              [-3.6273943735010334, 16.00071195004439],
+              [-3.66878149559534, 15.8581043001691],
+              [-4.039381678188533, 15.630747962321458],
+              [-3.8196551156885334, 15.461397696722063]]]),
+        {
+          "basin_id": 5,
+          "system:index": "0"
+        }),
+    b6 = /* color: #ff0000 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-4.198683436001033, 15.773528461703151],
+              [-3.9734637094385334, 15.937337721885731],
+              [-3.7812029672510334, 16.07462314708914],
+              [-3.5669695688135334, 16.132676969318346],
+              [-3.6603533578760334, 16.132676969318346],
+              [-3.7866961313135334, 16.269827380046255],
+              [-4.039381678188533, 15.979589436557697],
+              [-4.407423670376033, 15.884510566313157],
+              [-4.500807459438533, 15.699506614333128],
+              [-4.357985193813533, 15.477280191630111],
+              [-4.220656092251033, 15.546090235649736]]]),
+        {
+          "basin_id": 6,
+          "system:index": "0"
+        }),
+    b7 = /* color: #00ff00 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-3.3527361703760334, 16.2856462798151],
+              [-3.3252703500635334, 16.122122992477518],
+              [-2.6084124399072834, 15.992791268995402],
+              [-2.5836932016260334, 16.09573559248684],
+              [-3.1330096078760334, 16.348909109397177],
+              [-3.2868182016260334, 16.348909109397177],
+              [-3.3472430063135334, 16.306736161332033],
+              [-3.4625994516260334, 16.40688204355567],
+              [-3.3856951547510334, 16.55963687238732],
+              [-3.5779558969385334, 16.59122624535234],
+              [-3.6383807016260334, 16.43322767257763],
+              [-3.5285174203760334, 16.333095319629752]]]),
+        {
+          "basin_id": 7,
+          "system:index": "0"
+        }),
+    b8 = /* color: #0000ff */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-2.7759539438135334, 16.538574412337756],
+              [-2.5617205453760334, 16.6386005739861],
+              [-2.2321307016260334, 16.796430314219023],
+              [-2.6715838266260334, 16.71753176671354],
+              [-2.8418719125635334, 16.71753176671354],
+              [-3.0066668344385334, 16.764874821357267],
+              [-3.3362566781885334, 16.72805346218859],
+              [-3.2428728891260334, 16.57016723931446],
+              [-3.2044016410841323, 16.472750387428228],
+              [-3.0780779672510334, 16.480640798570874],
+              [-2.8363787485010334, 16.44376492415663]]]),
+        {
+          "basin_id": 8,
+          "system:index": "0"
+        }),
+    b9 = /* color: #999900 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-4.039381678188533, 16.317280250709143],
+              [-3.9926897836572834, 16.62017861299759],
+              [-3.8306414438135334, 16.735944352739498],
+              [-3.6493670297510334, 16.835867303487092],
+              [-3.6630999399072834, 16.88055262932235],
+              [-3.9899432016260334, 16.746465031807983],
+              [-4.643629725063533, 16.372627393227514],
+              [-4.423903162563533, 16.164335524756286],
+              [-4.083326990688533, 16.235548725605778]]]),
+        {
+          "basin_id": 9,
+          "system:index": "0"
+        });
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var style = require('users/gena/packages:style')
+var palettes = require('users/gena/packages:palettes')
+var animation = require('users/gena/packages:animation')
+
+style.SetMapStyleDark()
+
+print(catchments.size())
+
+Map.centerObject(catchments, 7)
+
+var basinBoundaries = ee.FeatureCollection([b1, b2, b3, b4, b5, b6, b7, b8, b9])
+
+var basins = basinBoundaries.map(function(f) {
+  var basinCatchments = catchments.filterBounds(f.geometry())
+  return ee.Feature(basinCatchments.geometry().dissolve(), { 
+    catchments: ee.Dictionary([ee.String(f.get('basin_id')), basinCatchments.aggregate_array('HYBAS_ID')]),
+    basin_id: f.get('basin_id')
+  })
+})
+
+print(basins.aggregate_array('catchments'))
+
+Map.addLayer(style.Feature.histogram(basins, 'basin_id', { maxBuckets: 10, palette: palettes.cb.Paired[10] }))
+
+Map.addLayer(style.Feature.label(basins, 'basin_id', { textColor: 'ffffff', outlineColor: '000000' }))
+
+
+Map.addLayer(catchment.style({ width: 3, color: '999999', fillColor: '99999911' }), {}, 'catchment')
+Map.addLayer(catchments.style({ width: 1, color: 'ffffff', fillColor: 'ffffff11' }), {}, 'catchments', true, 0.5)
+Map.addLayer(rivers.style({ width: 1, color: 'cyan'}), {}, 'rivers', true, 0.5)
+
+var vis = { min: 300, max: 5000, bands: ['sur_refl_b06', 'sur_refl_b02', 'sur_refl_b04'] }
+
+modisMonthly = modisMonthly.map(function(i) {
+  return i.set({ label: i.date().format('YYYY-MMM') })
+})
+
+
+var panelCharts = ui.Panel()
+
+var panelMain = ui.Panel([/*panelControls, */panelCharts])
+
+panelMain.style().set({
+  'background-color': '#fafafa',
+  'position': 'bottom-left',
+  'width': '800px',
+  'height': '277px'
+  //height: '477px'
+})
+
+panelMain.style().set({
+  shown: false
+})
+
+/*panelControls.style().set({
+  'background-color': '#fafafa',
+})
+
+*/
+panelCharts.style().set({
+  'background-color': '#fafafa',
+})
+
+Map.widgets().add(panelMain)
+
+animation.animate(modisMonthly.filterDate('2016-01-01', '2019-01-01'), {
+  maxFrames: 48,
+  preload: true,
+  preloadCount: 1,
+  label: 'label',
+  vis: vis,
+  position: 'bottom-right',
+})
+.then(function() {
+  // Map.addLayer(catchments.style({ width: 1, color: 'ffffff', fillColor: 'ffffff11' }), {}, 'catchments', true)
+  
+  // Map.addLayer(rivers.style({ width: 1, color: 'cyan'}), {}, 'rivers', false)
+  // Map.addLayer(rivers.filter(ee.Filter.gt('UP_CELLS', 700)).style({ width: 2, color: 'cyan'}), {}, 'rivers (large)')
+
+  var land = ee.Image("users/gena/land_polygons_image").mask();
+
+  var waterOccurrence = ee.Image("JRC/GSW1_0/GlobalSurfaceWater")
+    .select('occurrence')
+    .divide(100)
+    .unmask(0)
+    .resample('bicubic')
+
+  // PuBu[9]
+  // var palette = ["fff7fb","ece7f2","d0d1e6","a6bddb","74a9cf","3690c0","0570b0","045a8d","023858"]
+  var palette = ["ffffcc","ffeda0","fed976","feb24c","fd8d3c","fc4e2a","e31a1c","bd0026","800026"].reverse().slice(1)
+  
+  // var palette = ['ffffb2', 'fecc5c', 'fd8d3c', 'f03b20', 'bd0026'].reverse()
+  
+  Map.addLayer(waterOccurrence.mask(waterOccurrence.multiply(2).multiply(land)), {min: 0, max: 1, palette: palette}, 'water occurrence', false)
+
+  var layerSelection = ui.Map.Layer(ee.Image(), { color: 'yellow' }, 'selection')
+  Map.layers().add(layerSelection)
+  
+  /*
+  Map.onClick(function(pt) {
+    panelCharts.clear()
+    panelCharts.add(new ui.Label('Loading chart ...'))
+
+    panelMain.style().set({
+      shown: true
+    })
+
+    pt = ee.Geometry.Point([pt.lon, pt.lat])
+    
+    var selection = catchments.filterBounds(pt)
+    
+    layerSelection.setEeObject(selection)
+    
+    var hybasId = ee.Number(ee.Feature(selection.first()).get('HYBAS_ID'))
+
+    var filename = ee.String('water-area-').cat(hybasId.format('%d')).cat('.geojson')
+  
+    filename.evaluate(function(filename) {
+      var timeSeries = ee.Blob('gs://hydro-engine-waterbodies/time-series-niger/' + filename)
+    
+      timeSeries.string().evaluate(function (s) {
+  
+        var json = JSON.parse(s)
+        
+        var axis = 0
+        
+        var values = json.features[0].properties.areaMNDWI
+        values = values.map(function(v) { return v / 1000000 })
+        var chart1 = ui.Chart.array.values(values, axis, json.features[0].properties.times)
+          .setOptions({
+            title: 'Area(t), km^2', 
+            pointSize: 1, 
+            lineWidth: 0.25, 
+            legend: { 
+              position: 'none' 
+            },
+            backgroundColor: '#fafafa',
+            chartArea: { 
+              backgroundColor: '#fafafa' 
+            }
+          })
+          
+        panelCharts.clear()
+        panelCharts.add(chart1)
+
+        panelMain.style().set({
+          shown: true
+        })
+
+        //print(chart1)
+      })
+    })
+  })
+  */
+
+})
+// Map.style().set({ cursor: 'crosshair' })
+

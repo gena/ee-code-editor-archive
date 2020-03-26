@@ -1,0 +1,306 @@
+// OSM
+
+var bounds = Map.getBounds(true);
+
+// MODIS + SRTM (SWBD)
+var mod44w = ee.Image('MODIS/MOD44W/MOD44W_005_2000_02_24');
+addToMap(mod44w.select('water_mask'), {min:1, max:0, opacity:0.8}, 'MOD44W', false)
+
+
+// HydroSHEDS - Public
+//
+// WWF/USGS HydroSHEDS datasets demo
+// http://hydrosheds.cr.usgs.gov
+// =================================
+
+// -----------------------
+// 3 arc-second datasets:
+
+// Flow Accumulation 3s - This dataset is not produced by the data provider. 
+
+// Flow Direction 3s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=3dirb )
+var flowdir03 = ee.Image('WWF/HydroSHEDS/03DIR');
+
+// Conditioned DEM 3s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=3accb )
+var conddem03 = ee.Image('WWF/HydroSHEDS/03CONDEM');
+//   NOTE: conditioned DEM is for flow analysis only, not applicable for other terrain analysis.
+//         For more info, see: http://hydrosheds.cr.usgs.gov/datasets.php#4
+
+// Void-Filled DEM 3s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=3demb )
+var vfdem03 = ee.Image('WWF/HydroSHEDS/03VFDEM');
+
+// -----------------------
+// 15 arc-second datasets:
+
+// Flow Accumulation 15s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=15accb )
+var flowacc15 = ee.Image('WWF/HydroSHEDS/15ACC');
+
+// Flow Direction 15s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=15dirb )
+var flowdir15 = ee.Image('WWF/HydroSHEDS/15DIR');
+
+// Conditioned DEM 15s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=15demb )
+var conddem15 = ee.Image('WWF/HydroSHEDS/15CONDEM');
+//   NOTE: conditioned DEM is for flow analysis only, not applicable for other terrain analysis.
+//         For more info, see: http://hydrosheds.cr.usgs.gov/datasets.php#4
+
+// -----------------------
+// 30 arc-second datasets:
+
+// Flow Accumulation 30s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=30accb )
+var flowacc30 = ee.Image('WWF/HydroSHEDS/30ACC');
+
+// Flow Direction 30s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=30dirb )
+var flowdir30 = ee.Image('WWF/HydroSHEDS/30DIR');
+
+// Conditioned DEM 30s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=30demb )
+var conddem30 = ee.Image('WWF/HydroSHEDS/30CONDEM')
+//   NOTE: conditioned DEM is for flow analysis only, not applicable for other terrain analysis.
+//         For more info, see: http://hydrosheds.cr.usgs.gov/datasets.php#4
+
+// -----------------------
+
+// Style Map for Flow Accumulation                                
+var style_flowacc = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#0000ff" quantity="0" label="none" opacity="0"/>\
+    <ColorMapEntry color="#00ff00" quantity="100" label="1-100" />\
+    <ColorMapEntry color="#00BB66" quantity="10000" label="100-10k" />\
+    <ColorMapEntry color="#0000ff" quantity="100000" label="10k-100k" />\
+    <ColorMapEntry color="#ff00ff" quantity="1000000" label="100k-1M" />\
+    <ColorMapEntry color="#ff0000" quantity="28000000" label="1M-28M" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+// Style Map for Flow Direction
+var style_flowdir = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#0000ff" quantity="0" label="none" opacity="0"/>\
+    <ColorMapEntry color="#3FBB04" quantity="1" label="E (1)" />\
+    <ColorMapEntry color="#027340" quantity="2" label="SE (2)" />\
+    <ColorMapEntry color="#9BD5F9" quantity="4" label="S (4)" />\
+    <ColorMapEntry color="#08A3FF" quantity="8" label="SW (8)" />\
+    <ColorMapEntry color="#0072BF" quantity="16" label="W (16)" />\
+    <ColorMapEntry color="#D09CFE" quantity="32" label="NW (32)" />\
+    <ColorMapEntry color="#F34714" quantity="64" label="N (64)" />\
+    <ColorMapEntry color="#FBB400" quantity="128" label="NE (128)" />\
+    <ColorMapEntry color="#0000ff" quantity="247" label="No Data" opacity="0"/>\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+// Radians Function (used in hilshade computation)
+function radians(img) {
+  return img.toFloat().multiply(3.1415927).divide(180);
+}
+
+// DEM Hillshade function - Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  // Hillshade = cos(Azimuth - Aspect) * sin(Slope) * sin(Zenith) +
+  //     cos(Zenith) * cos(Slope)
+  return azimuth.subtract(aspect).cos()
+    .multiply(slope.sin())
+    .multiply(zenith.sin())
+    .add(
+      zenith.cos().multiply(slope.cos()));
+}
+
+var azimuth = 0;
+var zenith = 60;
+
+var terrain03c = ee.call('Terrain', ee.Image(conddem03));
+var slope03c = radians(terrain03c.select(['slope']));
+var aspect03c = radians(terrain03c.select(['aspect']));
+var conddem03_hillshade = hillshade(azimuth, zenith, slope03c, aspect03c);
+
+
+var terrain03v = ee.call('Terrain', ee.Image(vfdem03));
+var slope03v = radians(terrain03v.select(['slope']));
+var aspect03v = radians(terrain03v.select(['aspect']));
+var vfdem03_hillshade = hillshade(azimuth, zenith, slope03v, aspect03v);
+
+
+var terrain15 = ee.call('Terrain', ee.Image(conddem15));
+var slope15 = radians(terrain15.select(['slope']));
+var aspect15 = radians(terrain15.select(['aspect']));
+var conddem15_hillshade = hillshade(azimuth, zenith, slope15, aspect15);
+
+var terrain30 = ee.call('Terrain', ee.Image(conddem30));
+var slope30 = radians(terrain30.select(['slope']));
+var aspect30 = radians(terrain30.select(['aspect']));
+var conddem30_hillshade = hillshade(azimuth, zenith, slope30, aspect30);
+
+
+// -----------------------
+// Add layers to the Map
+
+// L8, cloudfree, MNDWI
+
+
+var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8',  'B7'];
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+var MEAN_NAMES = ['blue_mean', 'green_mean', 'red_mean', 'nir_mean', 'swir1_mean', 'swir2_mean', 'pan_mean', 'temp_mean', 'BQA_mean'];
+
+var bands = LC8_BANDS;
+
+var images = ee.ImageCollection('LANDSAT/LC8_L1T_TOA') //  LC8_L1T_TOA, LANDSAT/LC8_L1T
+
+//var images = ee.ImageCollection('LE7_L1T')
+//  .filterDate('1999-01-01', '2003-01-01')
+  //.filterDate('2013-04-28', '2013-04-30')
+  //.filterMetadata('CLOUD_COVER', 'less_than', 80)
+  .filterBounds(Map.getBounds(true))
+  .select(bands, STD_NAMES);
+
+
+Map.addLayer(images.select('green', 'swir1'), {gamma : 1.3}, 'images', false);
+  
+var mean = images.reduce(ee.Reducer.intervalMean(10, 20)).select(MEAN_NAMES, STD_NAMES);
+
+//var mean = ee.Image(images.first());
+//Map.addLayer(mean, {gamma : 1.0}, 'interval mean');
+
+    var step = 5;
+    var start = 0;
+    var stop = 80;
+    for(var idx = start; idx < stop; idx+= step) {
+      var names = ['swir2', 'nir', 'green'];
+      var mean_names = ['swir2_mean', 'nir_mean', 'green_mean'];
+      var s = images.select(names);
+      var im = s.reduce(ee.Reducer.intervalMean(idx, idx + step)).select(mean_names, names);
+      Map.addLayer(im, {gamma:1.5, min:0.05, max:0.5}, 'interval mean ' + (idx).toString() + '-' + (idx+step).toString(), false);
+    }
+
+
+var rgb = mean.select(['red','green','blue']);
+print(Chart.image.histogram(rgb, bounds, 30));
+Map.addLayer(rgb, {gamma : 1.0, min:0.05, max:0.2}, 'interval mean (rgb)');
+
+// pan
+var info = ee.Image(images.first()).getInfo();
+var bounds = Map.getBounds();
+var region = '[['+bounds[0]+', '+bounds[1]+'], ['+bounds[2]+', '+bounds[1]+'], ['+bounds[2]+', '+bounds[3]+'], ['+bounds[0]+', ' + bounds[3] + ']]';
+
+var max_value = info.properties['QUANTIZE_CAL_MAX_BAND_1'];
+max_value = 1
+print(max_value)
+var rgb = mean.select('red', 'green', 'blue').unitScale(0, max_value);
+var pan = mean.select('pan').unitScale(0, max_value);
+var hsv  = rgb.rgbtohsv();
+var huesat = hsv.select('hue', 'saturation');
+var upres = ee.Image.cat(huesat, pan).hsvtorgb();
+
+//print(Chart.image.histogram(upres, bounds, 15));
+
+var visparams = {gamma:1.5, min:0.04, max:0.20}
+
+Map.addLayer(upres, visparams, 'interval mean (pan)');
+
+/*print(upres.visualize(visparams).getDownloadURL({
+  name: 'pan-2013-2014', 
+  format: 'png', 
+  // crs: proj,
+  // crs_transform: ts,
+  scale: 15,
+  region: region
+}));
+*/
+
+/*
+Map.addLayer(pan, {}, 'pan');
+
+var canny = ee.Algorithms.CannyEdgeDetector(pan, 0.15, 3);
+Map.addLayer(canny, {}, 'canny');
+*/
+
+var mndwi = mean.normalizedDifference(['swir1','green']);
+Map.addLayer(mndwi, {gamma : 1.3}, 'MNDWI', false);
+
+var water = mndwi.gte(-0.1);
+Map.addLayer(water.mask(water.not()), {palette:'4FD5EE', opacity:0.5}, 'MNDWI <= -0.1', false);
+
+var pan_mndwi = mean.expression('float(float(swir1) - float(pan * green) / float(red + green + blue)) / (float(pan * green) / float(red + green + blue) + float(swir1))',
+                {'swir1': mean.select('swir1'), 
+                'pan': mean.select('pan'),
+                'red': mean.select('red'),
+                'green': mean.select('green'),
+                'blue': mean.select('blue')
+                 });
+Map.addLayer(pan_mndwi, {gamma:1.0, min:-1.0, max:1.0}, 'PMNDWI', false);
+
+//print(Chart.image.histogram(pan_mndwi, bounds, 15));
+
+var water_p = pan_mndwi.gte(0.3);
+Map.addLayer(water_p.mask(water_p.not()), {palette:'EED54F', opacity:0.5}, 'PMNDWI <= 0.3', false);
+
+var water_p = pan_mndwi.gte(0.4);
+Map.addLayer(water_p.mask(water_p.not()), {palette:'EED54F', opacity:0.5}, 'PMNDWI <= 0.4', false);
+
+var water_p = pan_mndwi.gte(0.45);
+Map.addLayer(water_p.mask(water_p.not()), {palette:'EED54F', opacity:0.5}, 'PMNDWI <= 0.45', false);
+
+var water_p = pan_mndwi.gte(0.5);
+Map.addLayer(water_p.mask(water_p.not()), {palette:'EED54F', opacity:0.5}, 'PMNDWI <= 0.5', false);
+
+var water_p = pan_mndwi.gte(0.54);
+Map.addLayer(water_p.mask(water_p.not()), {palette:'EED54F', opacity:0.5}, 'PMNDWI <= 0.54', false);
+
+var water_p = pan_mndwi.gte(0.55);
+Map.addLayer(water_p.mask(water_p.not()), {palette:'EED54F', opacity:0.5}, 'PMNDWI <= 0.55', false);
+
+var water_p = pan_mndwi.gte(0.6);
+Map.addLayer(water_p.mask(water_p.not()), {palette:'EED54F', opacity:0.5}, 'PMNDWI <= 0.6', false);
+
+// Add Conditioned DEM 30s to map - hillshaded and raw data (for pixel interrogation)
+//addToMap(conddem30, {'min':0, 'max':9000}, ' - Conditioned DEM 30s data', false);
+addToMap(conddem30_hillshade, {}, 'Conditioned DEM 30s Hillshade', false);
+
+// Add Flow Direction 30s to map - styled and raw data (for pixel interrogation)
+//addToMap(flowdir30, {'min': 1, 'max': 128}, ' - Flow Direction 30s data', false);
+addToMap(flowdir30.sldStyle(style_flowdir), {}, 'Flow Direction 30s Styled', false);
+
+// Add Flow Accumulation 30s to map - styled and raw data (for pixel interrogation)
+//addToMap(flowacc30, {'min': 1, 'max': 28000000}, ' - Flow Accumulation 30s data', false);
+addToMap(flowacc30.sldStyle(style_flowacc), {}, 'Flow Accumulation 30s Styled', false);
+
+// Add Conditioned DEM 15s to map - hillshaded and raw data (for pixel interrogation)
+//addToMap(conddem15, {'min':0, 'max':9000}, ' - Conditioned DEM 15s data', false);
+addToMap(conddem15_hillshade, {}, 'Conditioned DEM 15s Hillshade', false);
+
+// Add Flow Direction 15s to the map - styled and raw data (for pixel interrogation)
+// addToMap(flowdir15, {'min': 1, 'max': 128}, ' - Flow Direction 15s data', false);
+addToMap(flowdir15.sldStyle(style_flowdir), {}, 'Flow Direction 15s Styled', false);
+
+// Add Flow Accumulation 15s to the map - styled and raw data (for pixel interrogation)
+//addToMap(flowacc15, {'min': 1, 'max': 28000000}, ' - Flow Accumulation 15s data', false);
+addToMap(flowacc15.sldStyle(style_flowacc), {}, 'Flow Accumulation 15s Styled', true);
+
+
+// Add Void-Filled DEM 3s to map - hillshaded and raw data (for pixel interrogation)
+//addToMap(vfdem03, {'min':0, 'max':9000}, ' - Void-Filled DEM 3s data', false);
+addToMap(vfdem03_hillshade, {}, 'Void-Filled DEM 3s Hillshade', false);
+
+// Add Conditioned DEM 3s to map - hillshaded and raw data (for pixel interrogation)
+//addToMap(conddem03, {'min':0, 'max':9000}, ' - Conditioned DEM 3s data', false);
+addToMap(conddem03_hillshade, {}, 'Conditioned DEM 3s Hillshade', false);
+
+// Add Flow Direction 3s to map - styled and raw data (for pixel interrogation)
+//addToMap(flowdir03, {'min': 1, 'max': 128}, ' - Flow Direction 3s data', false);
+addToMap(flowdir03.sldStyle(style_flowdir), {}, 'Flow Direction 3s Styled', false);
+
+
+// Water from OpenStreetMaps for Indonesia
+
+// var coastline = ee.FeatureCollection('ft:1R9ciOoVAsr0obvNKae2AM0OFjIyWrKMuBvx79KHe');
+// Map.addLayer(coastline);
+
+var rivers_polygons = ee.FeatureCollection('ft:1qPv490U6nqGyJ7l4dOy-X7gVjecZtxRwMl8CoY0n');
+Map.addLayer(rivers_polygons, {color: 'A01010'});
+
+var rivers_lines = ee.FeatureCollection('ft:1SVqKSFbktsitAKdTX7jMAJGOAzuzkBxxsYq1ZyWk');
+Map.addLayer(rivers_lines, {color: 'A01010'});
+
+

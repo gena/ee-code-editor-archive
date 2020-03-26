@@ -1,0 +1,85 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var grid = ee.FeatureCollection("users/gena/global_grid"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([85.59242265243438, 25.021786009323183]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.addLayer(grid)
+
+var assets = require('users/gena/packages:assets')
+
+var bandNamesImages = ['swir', 'nir', 'red', 'green', 'blue']
+
+var start = '2018-01-01'
+var stop = '2019-01-01'
+
+// var region = grid.filterBounds(geometry).first().geometry()
+var region = Map.getBounds(true)
+
+var images = assets.getImages(region, {
+  resample: true,
+  filter: ee.Filter.date(start, stop),
+  missions: [
+    'L8', 
+    'S2'
+  ]
+})
+
+print('Image count: ', images.size())
+
+images = assets.getMostlyCleanImages(images, region, {
+   cloudFrequencyThresholdDelta: 0 //0.15
+})
+
+
+/***
+ * Clip an image by displacing a mask (fast).
+ */
+function refineMask(i) {
+  var mask = i.select(['green', 'red', 'nir', 'swir']).mask().reduce(ee.Reducer.allNonZero())
+  
+  i = i.updateMask(mask)
+  
+  return i
+}
+
+var bandNames = ['NDWI', 'NDVI', 'MNDWI']
+
+var min = -0.3
+var max = 0.3
+
+var indices = images.map(function(i) {
+  i = refineMask(i)
+  
+  var ndwi = i.normalizedDifference(['green', 'nir']).clamp(min, max)
+  var mndwi = i.normalizedDifference(['green', 'swir']).clamp(min, max)
+  var ndvi = i.normalizedDifference(['red', 'nir']).clamp(min, max)
+  
+  return ee.Image([ndwi, ndvi, mndwi]).rename(bandNames)
+})
+
+var occurrence = indices.mean()
+  .set({min: min, max: max})
+
+Map.addLayer(occurrence.clip(region))
+    
+
+images = assets.addCdfQualityScore(images, 70, 80, false, {erosion: 0, dilation: 50, weight: 50} )
+  .map(function(i) {
+    return i.updateMask(i.select('weight'))
+  })
+
+var indices = images.map(function(i) {
+  i = refineMask(i)
+  
+  var ndwi = i.normalizedDifference(['green', 'nir']).clamp(min, max)
+  var mndwi = i.normalizedDifference(['green', 'swir']).clamp(min, max)
+  var ndvi = i.normalizedDifference(['red', 'nir']).clamp(min, max)
+  
+  var w = i.select('weight')
+  
+  return ee.Image([ndwi, ndvi, mndwi]).multiply(w).rename(bandNames).addBands(w)
+})
+
+var w = indices.select('weight').sum()
+var occurrence = indices.sum().divide(w)
+
+Map.addLayer(occurrence.unitScale(min, max).clip(region))

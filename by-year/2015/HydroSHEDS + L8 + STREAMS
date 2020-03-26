@@ -1,0 +1,136 @@
+c// HydroSHEDS + L8 + STREAMS
+
+// http://qgissextante.blogspot.nl/2013/01/hydrology-analysis-with-taudem.html
+// http://hydrology.usu.edu/taudem/taudem5/TauDEM5DelineatingASingleWatershed.pdf
+// http://hydrology.usu.edu/taudem/taudem5/help/D8DistanceToStreams.html
+// http://hydrology.usu.edu/taudem/taudem3.0/
+// http://www.mapwindow.org/apps/wiki/lib/exe/fetch.php?media=mapwindow_watershed.pdf
+
+// -----------------------
+// 15 arc-second datasets:
+
+var flowacc15 = ee.Image('WWF/HydroSHEDS/15ACC');
+var flowdir15 = ee.Image('WWF/HydroSHEDS/03DIR');
+var conddem15 = ee.Image('WWF/HydroSHEDS/15CONDEM');
+var flowdir3 = ee.Image('WWF/HydroSHEDS/3DIR');
+var conddem3 = ee.Image('WWF/HydroSHEDS/3CONDEM');
+
+// -----------------------
+
+// Style Map for Flow Accumulation                                
+var style_flowacc = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#0000ff" quantity="0" label="none" opacity="0"/>\
+    <ColorMapEntry color="#00ff00" quantity="100" label="1-100" />\
+    <ColorMapEntry color="#00BB66" quantity="10000" label="100-10k" />\
+    <ColorMapEntry color="#0000ff" quantity="100000" label="10k-100k" />\
+    <ColorMapEntry color="#ff00ff" quantity="1000000" label="100k-1M" />\
+    <ColorMapEntry color="#ff0000" quantity="28000000" label="1M-28M" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+// Style Map for Flow Direction
+var style_flowdir = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#0000ff" quantity="0" label="none" opacity="0"/>\
+    <ColorMapEntry color="#3FBB04" quantity="1" label="E (1)" />\
+    <ColorMapEntry color="#027340" quantity="2" label="SE (2)" />\
+    <ColorMapEntry color="#9BD5F9" quantity="4" label="S (4)" />\
+    <ColorMapEntry color="#08A3FF" quantity="8" label="SW (8)" />\
+    <ColorMapEntry color="#0072BF" quantity="16" label="W (16)" />\
+    <ColorMapEntry color="#D09CFE" quantity="32" label="NW (32)" />\
+    <ColorMapEntry color="#F34714" quantity="64" label="N (64)" />\
+    <ColorMapEntry color="#FBB400" quantity="128" label="NE (128)" />\
+    <ColorMapEntry color="#0000ff" quantity="247" label="No Data" opacity="0"/>\
+    <ColorMapEntry color="#0000ff" quantity="255" label="No Data" opacity="1"/>\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+var style_flowdir_none = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#ffffff" quantity="0" label="none (0)"/>\
+    <ColorMapEntry color="#3FBB04" quantity="1" label="E (1)" opacity="0" />\
+    <ColorMapEntry color="#027340" quantity="2" label="SE (2)" opacity="0" />\
+    <ColorMapEntry color="#9BD5F9" quantity="4" label="S (4)" opacity="0" />\
+    <ColorMapEntry color="#08A3FF" quantity="8" label="SW (8)" opacity="0" />\
+    <ColorMapEntry color="#0072BF" quantity="16" label="W (16)" opacity="0" />\
+    <ColorMapEntry color="#D09CFE" quantity="32" label="NW (32)" opacity="0" />\
+    <ColorMapEntry color="#F34714" quantity="64" label="N (64)" opacity="0" />\
+    <ColorMapEntry color="#FBB400" quantity="128" label="NE (128)" opacity="0" />\
+    <ColorMapEntry color="#00ff00" quantity="247" label="No Data (247)" />\
+    <ColorMapEntry color="#ff0000" quantity="255" label="No Data (255)" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+// Radians Function (used in hilshade computation)
+function radians(img) {
+  return img.toFloat().multiply(3.1415927).divide(180);
+}
+
+// DEM Hillshade function - Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  // Hillshade = cos(Azimuth - Aspect) * sin(Slope) * sin(Zenith) +
+  //     cos(Zenith) * cos(Slope)
+  return azimuth.subtract(aspect).cos()
+    .multiply(slope.sin())
+    .multiply(zenith.sin())
+    .add(
+      zenith.cos().multiply(slope.cos()));
+}
+
+var azimuth = 0;
+var zenith = 60;
+
+var terrain15 = ee.call('Terrain', ee.Image(conddem15));
+var slope15 = radians(terrain15.select(['slope']));
+var aspect15 = radians(terrain15.select(['aspect']));
+var conddem15_hillshade = hillshade(azimuth, zenith, slope15, aspect15);
+
+// Add Conditioned DEM 15s to map - hillshaded and raw data (for pixel interrogation)
+addToMap(conddem15, {'min':0, 'max':9000}, ' - Conditioned DEM 15s data', false);
+addToMap(conddem15_hillshade, {}, 'Conditioned DEM 15s Hillshade', true);
+
+// Add Flow Direction 15s to the map - styled and raw data (for pixel interrogation)
+addToMap(flowdir15, {'min': 1, 'max': 128}, ' - Flow Direction 15s data', false);
+addToMap(flowdir15.sldStyle(style_flowdir), {}, 'Flow Direction 15s Styled', true);
+
+// Add Flow Direction 15s to the map - styled and raw data (for pixel interrogation)
+addToMap(flowdir15.sldStyle(style_flowdir_none), {}, 'Flow Direction 15s Styled (nodata)', true);
+
+// Add Flow Accumulation 15s to the map - styled and raw data (for pixel interrogation)
+addToMap(flowacc15, {'min': 1, 'max': 28000000}, ' - Flow Accumulation 15s data', false);
+addToMap(flowacc15.sldStyle(style_flowacc), {}, 'Flow Accumulation 15s Styled', true);
+
+// river stream
+var stream = flowacc15.gte(1000);
+
+var style_stream = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#ff0000" quantity="0" label="none (0)" opacity="0" />\
+    <ColorMapEntry color="#1010ff" quantity="1" label="Stream (1)" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+addToMap(stream.sldStyle(style_stream), {}, 'Stream (1000)', true);
+
+var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8', 'B7'];
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+var l8_collection = ee.ImageCollection('LC8_L1T_TOA') //LT4_L1T; LT5_L1T; LE7_L1T; LC8_L1T_TOA
+              //.filterDate(new Date('1999-01-01'), new Date('2002-01-01')) 
+              //.select(['B7', 'B5', 'B3'])
+              .select(LC8_BANDS, STD_NAMES)
+              .filterBounds(Map.getBounds(true));
+
+var l8 = l8_collection.reduce(ee.Reducer.intervalMean(15, 20));
+//var Im_plot = Im_export.polynomial([-0.2, 2.4, -1.2]);
+Map.addLayer(l8, {'bands':['swir2_mean', 'nir_mean', 'green_mean'], 'gamma': 1.3}, 'LANDSAT8 (swir2_nir_green)');
+Map.addLayer(l8, {'bands':['pan_mean'], 'gamma': 1.3}, 'LANDSAT8 (pan)');
+

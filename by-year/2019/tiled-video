@@ -1,0 +1,24 @@
+var geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[5.974491823640278, 51.85364420139915],
+          [6.023596925110951, 51.85799212071378],
+          [6.047980845392431, 51.86742862390004],
+          [6.051416082244259, 51.880362021681194],
+          [6.041453341096712, 51.897952095907634],
+          [6.001448124235594, 51.90017694301394],
+          [5.964533298121182, 51.90621333488333],
+          [5.929335710754003, 51.909075210905684],
+          [5.90631307970898, 51.85947518648357]]]);
+
+var tiler = require('users/gena/packages:tiler')
+var assets = require('users/gena/packages:assets')
+
+function pad(num, size) {
+  var s = num + "";
+  while (s.length < size) s = "0" + s;
+  return s;
+}
+
+var zoom = 12
+var tiles = tiler.getTilesForGeometry(geometry, zoom)
+print('Tiles: ' + tiles.size().getInfo())
+var tile = ee.Feature(tiles.toList(1, 3).get(0))

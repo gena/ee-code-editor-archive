@@ -1,0 +1,24 @@
+// flood risk map
+
+// bringing in polygon of Flood risk zone from Google Crisis Maps (which is from NOAA) for 
+// we downloaded the kml, uploading to a fusion table, and using the fusion table idea to make a feature
+var fc = ee.FeatureCollection('ft:1QJ-gk626RaMYPIDbk_l974oevNcfspNDmu7uq9g');
+
+//elevation- this one is National Elevation Data Set, with a 10 meter resolution 
+var ned = ee.Image("ned_13");
+//elevation cliped to flood risk polygon
+var clipped= ned.clip(fc.geometry(1));
+// elevation recolored to highlight low elevation
+var reclass = clipped.where(
+    ned.gt(0).and(ned.lt(100)),
+    1);
+var paletteDEM= ["ff0000","FF3300", "ffff00", "00ff00", "66ffff" ];
+addToMap(clipped, {min:20, max:400, palette:paletteDEM}, "elevation");
+//var max = clipped.reduceRegion(ee.call("Reducer.max"),fc, null, null, null, true);
+
+var max = clipped.reduceRegion({
+  reducer: ee.Reducer.max(),
+  //crs: 'EPSG:4326',
+  bestEffort: true});
+var value = max.getInfo();
+print(value.elevation);

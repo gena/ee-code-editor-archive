@@ -1,0 +1,29 @@
+// roads, compute intersections
+
+Map.setCenter(-121.9031, 36.9775, 15);
+
+// Roads in Santa Cruz County, CA
+var roads = ee.FeatureCollection('ft:121CRiCES306Yx8wv01rAQml1No8THjNLN0sS1NoH');
+
+addToMap(roads, {}, "roads");
+
+// Set up an intersection filter.
+var filter = ee.Filter.intersects({
+  leftField: '.geo',
+  rightField: '.geo'});
+
+// Get the intersection points between roads.
+// At the end, filter out self-intersections by
+// dropping features with length 0.
+var joined = ee.Join.inner('road1', 'road2')
+  .apply(roads, roads, filter);
+var intersections = joined.map(function(tuple) {
+  var dict = ee.Feature(tuple);
+  var road1 = ee.Feature(dict.get('road1'));
+  var road2 = ee.Feature(dict.get('road2'));
+  var intersection = road1.intersection(road2);
+  var length = intersection.length();
+  return intersection.set('length', length);
+}).filter(ee.Filter.eq('length', 0));
+
+addToMap(intersections, {}, 'intersections');

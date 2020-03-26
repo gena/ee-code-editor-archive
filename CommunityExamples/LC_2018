@@ -1,0 +1,704 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var table = ee.FeatureCollection("users/mahyouh/training1_2017_18");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+//Ce script a été développé afin de permettre à l'OCP de se doter d'un système de classification de l'occupation du sol semi automatique
+// basé sur de l'imagerie gratuite et à haute résolution spatiale (10 m), temporelle et spectrale.
+//Celui-ci distingue le territoire selon 9 classes thématiques: surface en eau, surface bâtie et mîne (minérale associée à un angle), forêt, 
+//zone humide (temporairement en eau: savanes humides, mangroves..), savane sèche, prairie, et zone agricole (maraichage + verger)
+//La date peut être changée par un DOUBLE ctrl+F (search+replace all) **en ayant le curseur actif sur le script**. 
+//Attention, en vue de changer l'année d'éxécution les points utilisés en entraînement doivent être vérifiés au préalable par photo-interprétation 
+//afin de s'assurer qu'ils concernent toujours le bon type d'occupation du sol lequel peut avoir changé entre 2018 et l'année d'intérêt.
+//Pour leur saisie nous conseillons, pour le cas du bati, d'utiliser l'imagerie radar en polarisation VV, et de poser les points sur des valeurs fortes.
+//Le script peut être appliquée à d'autres région simplement en re-définissant la variable  "geometry", ainsi qu'en adaptant les points utilisés en entraînement.
+
+//var Maroc = ee.FeatureCollection("users/mahyouh/region_Maroc");
+var Maroc = ee.FeatureCollection("users/mahyouh/Countries_WGS84").
+  filter(ee.Filter.inList("CNTRY_NAME", ["Morocco"]));
+
+
+Map.centerObject(Maroc, 5);
+
+
+////////////////////////Optical Image processing////////////////////////////
+///////////////////////Optical image pre-processing////////////////////////
+/**
+ * Function to mask clouds using the Sentinel-2 QA band
+ * @param {ee.Image} image Sentinel-2 image
+ * @return {ee.Image} cloud masked Sentinel-2 image
+ */
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+
+  // Bits 10 and 11 are clouds and cirrus, respectively.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return image.updateMask(mask).divide(10000);
+}
+// Sentinel 2 cloud function (B4)
+var cloudfunction_ST2 = function(image) {
+  // If band 4 is higher than 2800, the pixel is considered as cloudy.
+  var b4 = image.select("B4");
+  // Get pixels above the threshold.
+  var cloud = b4.gt(2800);      
+  // Create a mask from high likelihood pixels.
+  var cloudmask = image.mask().and(cloud.not());
+  // Mask those pixels from the image.
+  return image.updateMask(cloudmask);
+};   
+
+
+// Sentinel 2 cloud function (B2)
+var cloudfunction_ST21 = function(image) {
+  var b2 = image.select("B2");
+  // Get pixels above the threshold.
+  var cloud = b2.gt(0.5);      
+  // Create a mask from high likelihood pixels.
+  var cloudmask = image.mask().and(cloud.not());
+  // Mask those pixels from the image.
+  return image.updateMask(cloudmask);
+};  
+
+
+// Sentinel 2 cloud function (B3)
+var cloudfunction_ST22 = function(image) {
+  var b3 = image.select("B3");
+  // Get pixels above the threshold.
+  var cloud = b3.gt(0.25);      
+  // Create a mask from high likelihood pixels.
+  var cloudmask = image.mask().and(cloud.not());
+  // Mask those pixels from the image.
+  return image.updateMask(cloudmask);
+};  
+
+
+// Sentinel 2 cloud function (B9)
+var cloudfunction_ST23 = function(image) {
+  var b9 = image.select("B9");
+  // Get pixels above the threshold.
+  var cloud = b9.gt(1.6);      
+  // Create a mask from high likelihood pixels.
+  var cloudmask = image.mask().and(cloud.not());
+  // Mask those pixels from the image.
+  return image.updateMask(cloudmask);
+};  
+
+// Function to mask further cloud using B1 (cirrus cloud) threshold
+var maskcloud2 = function(image) {
+ var B11 = image.select(['B11']);
+ var bin = B11.gt(0.8);
+ return image.updateMask(bin.lt(0.8));
+};
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////New variables computing///////////////////////////
+///////////////////////////////////////////////////////////////////////////////////////
+
+
+// Function to calculate and add an NDVI band
+var addNDVI = function(image) {
+return image.addBands(image.normalizedDifference(['B8', 'B4']).rename('ndvi'));
+};
+
+
+
+// Map the function over one year of data and take the median.
+// Load Sentinel-2 TOA reflectance data.
+// creating two differents images one un=sing the median() reducer, and the other the qualityMosaic() function
+var dataset = ee.ImageCollection('COPERNICUS/S2')
+                  .filterDate('2017-08-01', '2018-02-28')
+                  .filterBounds(Maroc)
+                  // Pre-filter to get less cloudy granules.
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+
+var dataset1= dataset 
+        .filterDate('2017-08-01', '2018-02-28')
+        .map(cloudfunction_ST2) 
+        .map(maskS2clouds)
+        .map(maskcloud2)
+        .map(cloudfunction_ST21)
+        .map(cloudfunction_ST22)
+        .map(cloudfunction_ST23)
+        .map(addNDVI)
+        .select('B8','B11','ndvi',"B9","B6","B5","B4","B3","B2","B1",'B12')
+        .reduce(ee.Reducer.percentile([43]))
+        .clip(Maroc)
+        
+        
+var evi1 =dataset1.expression(
+    '2.5 * ((NIR-RED) / (NIR +6 * RED -7.5* BLUE))', {
+      'NIR':dataset1.select('B8_p43'),
+      'RED':dataset1.select('B4_p43'),
+      'BLUE':dataset1.select('B2_p43')
+    });
+
+var dataset2= dataset 
+        .map(maskS2clouds)
+        .map(addNDVI)
+        .select('B8','B11','ndvi', "B9","B6","B5","B4","B3","B2","B1",'B12')
+        .qualityMosaic('ndvi')
+        .clip(Maroc)
+
+var evi2 =dataset2.expression(
+    '2.5 * ((NIR-RED) / (NIR +6 * RED -7.5* BLUE))', {
+      'NIR':dataset2.select('B8'),
+      'RED':dataset2.select('B4'),
+      'BLUE':dataset2.select('B2')
+    });
+
+
+var rgbVis = {
+  min: 0.0,
+  max: 0.3,
+  bands: ['B8_p43', 'B4_p43', 'B3_p43'],
+};
+// On affiche une image qui par défaut est décochée, il s'agit de l'image calculée en médiane
+Map.addLayer(dataset1, rgbVis, 'optique', false)
+
+//Mapping Winter Crops in Morocc with Multi-Source Satellite Imagery and Phenology-Based Algorithm
+
+// define time windows
+var monthsmin=['2017-08-01','2017-09-01','2017-10-01','2017-11-01','2017-12-01']; // for low NDVI period
+var monthsmax=['2018-01-1','2018-2-20']; // for high NDVI period
+
+
+// NDVI function
+var addNDVI = function(image)
+{return image.addBands(image.normalizedDifference(['nir','red']).rename('ndvi'));};
+
+var s2b10 = ['B2', 'B3', 'B4', 'B8'];
+var STD_NAMES_s2 = ['blue','green','red','nir'];
+
+//compute maximum NDVI value (named ‘ndvi_max’) in high NDVI period
+// Acquire Sentinel-2 data collection
+var s2max = ee.ImageCollection('COPERNICUS/S2')
+.filterDate(monthsmax[0], monthsmax[1])
+.filterBounds(Maroc)
+.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+.map(maskS2clouds)
+.select(s2b10,STD_NAMES_s2);
+var s2_collectionmax = s2max.map(addNDVI).select('ndvi');
+
+// compute maximum NDVI
+var ndvi_max = s2_collectionmax.max().clip(Maroc) .rename('ndvimax');
+
+
+// Sentinel-2 observation frequency for the high NDVI period
+var Sobservation_max = s2_collectionmax.count().int8().clip(Maroc);
+
+//compute minimum and median NDVI value (named ‘ndvi_min’, ‘ndvi_minmed’) in high NDVI period
+//Acquire Sentinel-2 data collection
+var s2min_collection = ee.ImageCollection('COPERNICUS/S2')
+.filterDate(monthsmin[0], monthsmin[1])
+.filterBounds(Maroc)
+.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+.map(maskS2clouds)
+.select(s2b10,STD_NAMES_s2);
+for (var i = 2; i < monthsmin.length-1; i=i+2)
+{
+var s2min = ee.ImageCollection('COPERNICUS/S2')
+.filterDate(monthsmin[i], monthsmin[i+1])
+.filterBounds(Maroc)
+.filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+.map(maskS2clouds)
+.select(s2b10,STD_NAMES_s2);
+var s2min_collection = ee.ImageCollection(s2min_collection.merge(s2min));
+}
+var s2min_collection = s2min_collection.map(addNDVI).select('ndvi');
+
+//Compute minimum and median NDVI value in low NDVI period
+var ndvi_min = s2min_collection.min().clip(Maroc) .rename('ndvimin');
+var ndvi_minmed = s2min_collection.median().clip(Maroc) .rename('ndvimin_med');
+
+// Sentinel-2 observation frequency for the low NDVI period
+var Sobservation_min = s2min_collection.count().int8().clip(Maroc);
+
+
+//slope
+var srtm = ee.Image('USGS/SRTMGL1_003');
+var slope = ee.Terrain.slope(srtm).clip(Maroc);
+
+
+//Difference
+
+var diff = ndvi_max.subtract(ndvi_minmed).rename('diff');
+
+// combine bands
+var composite = ndvi_max.addBands(ndvi_min).addBands(diff)
+.addBands(ndvi_minmed).addBands(slope);
+
+
+////////////////////////////SAR DATA & Processing////////////////////////
+// Function to perform angle correction
+
+function toGamma0(image) {
+ var vh = image.select('VH').subtract(image.select('angle')
+ .multiply(Math.PI/180.0).cos().log10().multiply(10.0));
+ return image.addBands(image.select('VV').subtract(image.select('angle')
+ .multiply(Math.PI/180.0).cos().log10().multiply(10.0)));
+}
+
+
+//Pre-process S1 data
+// Function to mask out edges of images using angle
+// (mask out angles <= 30.63993)
+var maskAngGT30 = function(image) {
+ var ang = image.select(['angle']);
+ return image.updateMask(ang.gt(30));
+};
+
+
+// Function to mask out edges of images using using angle
+// (mask out angles >= 44.73993)
+var maskAngLT45 = function(image) {
+ var ang = image.select(['angle']);
+ return image.updateMask(ang.lt(45));
+};
+
+// import sentinel 1 nd filter data series
+var S1 = ee.ImageCollection('COPERNICUS/S1_GRD')
+.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+.filter(ee.Filter.eq('instrumentMode', 'IW'))
+.filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'))
+.filterBounds(Maroc)
+.filterDate('2017-08-01','2018-02-20')
+.select(["VH","VV","angle"])
+.map(toGamma0)
+.map(maskAngGT30)
+.map(maskAngLT45)
+
+
+//Function to convert from dB
+function toNatural(img) {
+return ee.Image(10.0).pow(img.select(0).divide(10.0));
+}
+//Function to convert to dB
+function toDB(img) {
+return ee.Image(img).log10().multiply(10.0);
+}
+////////////////////////Apllying a Refined Lee Speckle filter as coded in the SNAP 3.0 S1TBX:////////////////////////////
+//https://github.com/senbox-org/s1tbx/blob/master/s1tbx-op-sar-processing/src/main/java/org/esa/s1tbx/sar/gpf/filtering/SpeckleFilters/RefinedLee.java
+//Adapted by Guido Lemoine
+ 
+function RefinedLee(img) {
+// img must be in natural units, i.e. not in dB!
+// Set up 3x3 kernels
+ 
+// convert to natural.. do not apply function on dB!
+var myimg = toNatural(img);
+ 
+var weights3 = ee.List.repeat(ee.List.repeat(1,3),3);
+var kernel3 = ee.Kernel.fixed(3,3, weights3, 1, 1, false);
+ 
+var mean3 = myimg.reduceNeighborhood(ee.Reducer.mean(), kernel3);
+var variance3 = myimg.reduceNeighborhood(ee.Reducer.variance(), kernel3);
+ 
+// Use a sample of the 3x3 windows inside a 7x7 windows to determine gradients and directions
+var sample_weights = ee.List([[0,0,0,0,0,0,0], [0,1,0,1,0,1,0],[0,0,0,0,0,0,0], [0,1,0,1,0,1,0], [0,0,0,0,0,0,0], [0,1,0,1,0,1,0],[0,0,0,0,0,0,0]]);
+ 
+var sample_kernel = ee.Kernel.fixed(7,7, sample_weights, 3,3, false);
+ 
+// Calculate mean and variance for the sampled windows and store as 9 bands
+var sample_mean = mean3.neighborhoodToBands(sample_kernel);
+var sample_var = variance3.neighborhoodToBands(sample_kernel);
+ 
+// Determine the 4 gradients for the sampled windows
+var gradients = sample_mean.select(1).subtract(sample_mean.select(7)).abs();
+gradients = gradients.addBands(sample_mean.select(6).subtract(sample_mean.select(2)).abs());
+gradients = gradients.addBands(sample_mean.select(3).subtract(sample_mean.select(5)).abs());
+gradients = gradients.addBands(sample_mean.select(0).subtract(sample_mean.select(8)).abs());
+ 
+// And find the maximum gradient amongst gradient bands
+var max_gradient = gradients.reduce(ee.Reducer.max());
+ 
+// Create a mask for band pixels that are the maximum gradient
+var gradmask = gradients.eq(max_gradient);
+ 
+// duplicate gradmask bands: each gradient represents 2 directions
+gradmask = gradmask.addBands(gradmask);
+ 
+// Determine the 8 directions
+var directions = sample_mean.select(1).subtract(sample_mean.select(4)).gt(sample_mean.select(4).subtract(sample_mean.select(7))).multiply(1);
+directions = directions.addBands(sample_mean.select(6).subtract(sample_mean.select(4)).gt(sample_mean.select(4).subtract(sample_mean.select(2))).multiply(2));
+directions = directions.addBands(sample_mean.select(3).subtract(sample_mean.select(4)).gt(sample_mean.select(4).subtract(sample_mean.select(5))).multiply(3));
+directions = directions.addBands(sample_mean.select(0).subtract(sample_mean.select(4)).gt(sample_mean.select(4).subtract(sample_mean.select(8))).multiply(4));
+// The next 4 are the not() of the previous 4
+directions = directions.addBands(directions.select(0).not().multiply(5));
+directions = directions.addBands(directions.select(1).not().multiply(6));
+directions = directions.addBands(directions.select(2).not().multiply(7));
+directions = directions.addBands(directions.select(3).not().multiply(8));
+ 
+// Mask all values that are not 1-8
+directions = directions.updateMask(gradmask);
+ 
+// "collapse" the stack into a singe band image (due to masking, each pixel has just one value (1-8) in it's directional band, and is otherwise masked)
+directions = directions.reduce(ee.Reducer.sum());
+ 
+var sample_stats = sample_var.divide(sample_mean.multiply(sample_mean));
+ 
+// Calculate localNoiseVariance
+var sigmaV = sample_stats.toArray().arraySort().arraySlice(0,0,5).arrayReduce(ee.Reducer.mean(), [0]);
+ 
+// Set up the 7*7 kernels for directional statistics
+var rect_weights = ee.List.repeat(ee.List.repeat(0,7),3).cat(ee.List.repeat(ee.List.repeat(1,7),4));
+ 
+var diag_weights = ee.List([[1,0,0,0,0,0,0], [1,1,0,0,0,0,0], [1,1,1,0,0,0,0],
+[1,1,1,1,0,0,0], [1,1,1,1,1,0,0], [1,1,1,1,1,1,0], [1,1,1,1,1,1,1]]);
+ 
+var rect_kernel = ee.Kernel.fixed(7,7, rect_weights, 3, 3, false);
+var diag_kernel = ee.Kernel.fixed(7,7, diag_weights, 3, 3, false);
+ 
+// Create stacks for mean and variance using the original kernels. Mask with relevant direction.
+var dir_mean = myimg.reduceNeighborhood(ee.Reducer.mean(), rect_kernel).updateMask(directions.eq(1));
+var dir_var = myimg.reduceNeighborhood(ee.Reducer.variance(), rect_kernel).updateMask(directions.eq(1));
+ 
+dir_mean = dir_mean.addBands(myimg.reduceNeighborhood(ee.Reducer.mean(), diag_kernel).updateMask(directions.eq(2)));
+dir_var = dir_var.addBands(myimg.reduceNeighborhood(ee.Reducer.variance(), diag_kernel).updateMask(directions.eq(2)));
+ 
+// and add the bands for rotated kernels
+for (var i=1; i<4; i++) {
+dir_mean = dir_mean.addBands(myimg.reduceNeighborhood(ee.Reducer.mean(), rect_kernel.rotate(i)).updateMask(directions.eq(2*i+1)));
+dir_var = dir_var.addBands(myimg.reduceNeighborhood(ee.Reducer.variance(), rect_kernel.rotate(i)).updateMask(directions.eq(2*i+1)));
+dir_mean = dir_mean.addBands(myimg.reduceNeighborhood(ee.Reducer.mean(), diag_kernel.rotate(i)).updateMask(directions.eq(2*i+2)));
+dir_var = dir_var.addBands(myimg.reduceNeighborhood(ee.Reducer.variance(), diag_kernel.rotate(i)).updateMask(directions.eq(2*i+2)));
+}
+ 
+// "collapse" the stack into a single band image (due to masking, each pixel has just one value in it's directional band, and is otherwise masked)
+dir_mean = dir_mean.reduce(ee.Reducer.sum());
+dir_var = dir_var.reduce(ee.Reducer.sum());
+ 
+// A finally generate the filtered value
+var varX = dir_var.subtract(dir_mean.multiply(dir_mean).multiply(sigmaV)).divide(sigmaV.add(1.0));
+ 
+var b = varX.divide(dir_var);
+ 
+var result = dir_mean.add(b.multiply(myimg.subtract(dir_mean)));
+//return(result);
+return(img.addBands(ee.Image(toDB(result.arrayGet(0))).rename("filter")));
+}
+
+
+//////////////////SAR Processing/////////////////////////////
+
+//////// VH image polarisation processing analysing ///////////////
+var collectionVH = S1.select('VH').map(RefinedLee);
+
+var colVH = ee.ImageCollection(collectionVH.select("filter"));
+
+// Create timeseries for each month in the year of interest
+var S1_1VH =  colVH.filterDate('2017-09-01', '2017-09-15').mosaic();
+var S1_2VH =  colVH.filterDate('2017-10-01', '2017-10-15').mosaic();
+var S1_3VH =  colVH.filterDate('2017-11-01', '2017-11-15').mosaic();
+var S1_4VH =  colVH.filterDate('2017-12-01', '2017-12-15').mosaic();
+var S1_5VH =  colVH.filterDate('2018-01-01', '2018-01-15').mosaic();
+var S1_6VH =  colVH.filterDate('2018-02-01', '2018-02-15').mosaic();
+var S1_7VH = colVH.filterDate('2017-08-01', '2017-08-15').mosaic();
+//var S1_8VH = colVH.filterDate('2018-08-01', '2018-08-15').mosaic();
+//var S1_9VH =  colVH.filterDate('2018-09-01', '2018-09-15').mosaic();
+//var S1_10VH =  colVH.filterDate('2018-10-01', '2018-10-15').mosaic();
+//var S1_11VH =  colVH.filterDate('2018-11-01', '2018-11-15').mosaic();
+//var S1_12VH =  colVH.filterDate('2018-12-01', '2018-12-15').mosaic();
+
+//Create a one year multi-band image with the monthly composites precedently created
+var compallVH = S1_1VH
+.addBands(S1_2VH)
+.addBands(S1_3VH)
+.addBands(S1_4VH)
+.addBands(S1_5VH)
+.addBands(S1_6VH)
+.addBands(S1_7VH)
+//.addBands(S1_8VH)
+//.addBands(S1_9VH)
+//.addBands(S1_10VH)
+//.addBands(S1_11VH)
+//.addBands(S1_12VH)
+var compallVH = compallVH.clip(Maroc)
+
+
+/////////////// VV image polarisation processing analysing /////////////////////////////
+var colVV = S1.select('VV');
+
+// Create an VV polarization SAR image to enable the user to select built up places (high backscattering value, meaning double bounce)
+
+var im1VV = ee.Image(colVV.filterDate('2017-09-01', '2017-10-15').mean());
+
+var im2VV = ee.Image(colVV.filterDate('2017-10-16', '2017-11-30').mean());
+
+var im3VV = ee.Image(colVV.filterDate('2018-01-01', '2018-02-15').mean());
+var im4VV = ee.Image(colVV.filterDate('2017-08-01', '2017-08-15').mean());
+
+//Stacking those into one three bands image (compoVV)
+var compoVV = im1VV.addBands(im2VV).addBands(im3VV).addBands(im4VV).clip(Maroc)
+
+//The last image in the year can be displayed, to show the last built places
+Map.addLayer(im3VV, {min:-25, max: 0}, 'radarvv', false)
+
+///////////////////////////////////////////////////////////////////
+///////////////////////////Segmentation///////////////////////////
+///////////////////////////////////////////////////////////////////
+// To spot objects into landscape we use segmentation algorithm, on optical and SAR data. 
+
+var dataset= dataset1.addBands(dataset2)
+
+var segmentationopt = ee.Algorithms.Image.Segmentation.KMeans(dataset)
+var segmentationRSO = ee.Algorithms.Image.Segmentation.KMeans(compallVH)
+
+
+
+//Create one image with all our data (RSO, Optical, segmentations,indices..) 
+var compoVH = dataset2
+        .addBands(dataset1) 
+        .addBands(evi1)
+        .addBands(evi2)
+        .addBands(composite)
+        .addBands(compoVV)
+        .addBands(compallVH)
+        .addBands(segmentationopt)
+        .addBands(segmentationRSO)
+
+
+print(compoVH)
+
+//////////////////////////////////////////////////////////////////////
+////////////////////Supervised classification//////////////////////
+
+
+
+// Use these bands for prediction.
+var bands = compoVH.bandNames();
+
+// Classifier can't stand no-data so use unmask() method to turn it into 0s
+var input = compoVH.unmask()
+
+// make sure that data isn't wider than French Guyana footprint (save memory)
+var clipped= input.clip(Maroc)
+
+// Merge our training data
+//var newfc = bati.merge(savane).merge(agricole).merge(foret).merge(eau).merge(zone_humide).merge(prairie)
+//var newfc = ee.FeatureCollection("users/mahyouh/training_Maroc");
+
+
+//var newfc = ee.FeatureCollection("users/mahyouh/training_1200");
+
+//var newfc = ee.FeatureCollection("users/mahyouh/training_1200f");
+//var newfc = ee.FeatureCollection("users/mahyouh/training_1200");
+
+var newfc = ee.FeatureCollection("users/mahyouh/training1_2017_18");
+print(newfc.reduceColumns(ee.Reducer.frequencyHistogram(), ['class']))
+
+// Accuracy assessment
+var withRandom = newfc.randomColumn('random');
+print(withRandom)
+
+// We want to reserve some of the data for testing, to avoid overfitting the model.
+var split = 0.8;  // Roughly 70% training, 30% testing.
+var trainingPartition = withRandom.filter(ee.Filter.lt('random', split));
+var testingPartition = withRandom.filter(ee.Filter.gte('random', split));
+
+// Overlay the points on the imagery to get training using sampleregion() method at a very low scale (10m) wich can create difficulties (use a lot of memory)
+//so we compensate by using the widest tileScale parameter as possible (the same compensation is used for the testing regionsample())
+var trainingAll = input.sampleRegions({
+  collection: trainingPartition,
+  properties: ['class'], 
+  scale: 10,
+  tileScale :16
+});
+
+    
+// Train a randomForest classifier with the training data nd the bands we extrasted from the image
+var trained = ee.Classifier.randomForest(100).train(trainingAll, 'class', bands);
+//var trained_output = trainingAll.classify(trained);
+
+// // Classify the image with the same bands used for training.
+var classified = input.select(bands).classify(trained);
+// Create a palette to 'display the classes.
+
+//  palete avec couleur
+
+var palette = [
+'#2b61c5' // waterbodies
+ , '#443943'// ville
+, '#ffc82d'//Rangeland
+,'#106805'//Forest
+,'#807a83'//Rock
+,'#23eb45'//Cereals
+,'#fffa5b'//Fallow
+,'#f643e0'//Trees
+];
+
+
+var sld_intervals = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#2b61c5" quantity="1" label="Water" opacity="1"/>\
+    <ColorMapEntry color="#443943" quantity="2" label="Cities" />\
+    <ColorMapEntry color="#ffc82d" quantity="3" label="Pastures" />\
+    <ColorMapEntry color="#106805" quantity="4" label="Forest" />\
+    <ColorMapEntry color="#807a83" quantity="5" label="Rock" />\
+    <ColorMapEntry color="#23eb45" quantity="6" label="Cereals" />\
+    <ColorMapEntry color="#fffa5b" quantity="7" label="Fallow" />\
+    <ColorMapEntry color="#f643e0" quantity="8" label="Trees" />\
+   </ColorMap>\
+</RasterSymbolizer>';
+
+
+//var palette =['black','yellow','brown','green','blue', '#00008B', 'pink', '#f643e0'];
+
+// built-up is black, meadows are pink, cultivated is brown, forest is green, water is blue, wetlands are clear-green, savannas yellows
+
+// Post-processing, it limitates the minimum size of each entity of 3 connected pixels (10*3)
+var kernel = ee.Kernel.fixed({ 
+  weights: [
+    [1.5,1.5,1.5],
+    [1.5,0,1.5],
+    [1.5,1.5,1.5]
+]});
+
+var oneNeighborClass = classified.reduceNeighborhood({
+  reducer: ee.Reducer.countDistinct(), 
+  kernel: kernel
+}).eq(1);
+var neighborClass = classified.reduceNeighborhood({
+  reducer: ee.Reducer.first(), 
+  kernel: kernel
+});
+var postProcessed = classified.where({
+  test: oneNeighborClass.and(neighborClass.neq(classified)), 
+  value: neighborClass
+});
+//Avant les opérations d'export on s'assure de bien délimiter l'emprise ainsi que de faire passer la classification en image 8bit, afin de l'alléger.
+var postProcessed = postProcessed.toInt8().clip(Maroc)
+//Map.addLayer(postProcessed, {min: 0, max: 9, palette: palette}, 'Land cover 2018',false);
+
+Map.centerObject(Maroc , 5);
+
+Map.addLayer(postProcessed.sldStyle(sld_intervals), {}, 'Land cover 2018');
+
+
+
+//var names = ['cleared', 'cultivated1', 'cultivated2', 'grass', 'rock', 'rockgrass'];
+//var total = out.eq([1, 2, 3, 4, 5, 6]).rename(names);
+
+//var count = total.multiply(ee.Image.pixelArea());
+
+// The grouped reducer ignores the weights.  Unweight here for comparison.
+//var area = count.reduceRegion(ee.Reducer.sum().unweighted(), geometry, 30);
+//print(area);
+
+//var stats = ee.Image.pixelArea().addBands(out).reduceRegion({
+  //reducer: ee.Reducer.sum().group(1), 
+ // geometry: geometry, 
+// scale: 30,
+//});
+//print(stats);
+
+
+/////////////// then we test the accuracy of the classification (not necessary)//////////////////////
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+// Testing against partitioned dataset
+var testingAll = classified.sampleRegions({
+  collection: testingPartition,
+  scale: 10,
+  tileScale:16
+});
+
+
+//Calculating overall accuracy
+var matrix = testingAll.errorMatrix('class', 'classification');
+
+print('kappa:', matrix.kappa())
+
+
+
+//////////////////////Export to asset (to turn the classification into vector)/////////////////
+Export.image.toDrive({
+  //préciser le nom de la variable contenant la classif, que l'on fait passer en image 8bit
+  image:postProcessed,
+  //le nom qui lui sera donné (utile pour retrouver l'image)
+  description:'LC_2018',
+  crs: 'EPSG:4326',
+  //la résolution
+  scale: 10 ,
+  folder: 'modis_ndvi',
+  //l'emprise, qui ne peut être une géométrie importée.
+  region: Maroc,
+  //Autoriser à utiliser le nombre maximal de pixel
+  maxPixels: 1e13
+})
+
+
+/////////////////////////////////////////LEGEND////////////////////////////////////////////////////
+
+// set position of panel
+var legend = ui.Panel({
+  style: {
+    position: 'bottom-left',
+    padding: '8px 15px'
+  }
+});
+
+// Create legend title
+var legendTitle = ui.Label({
+  value: 'Land cover',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '18px',
+    margin: '0 0 4px 0',
+    padding: '0'
+    }
+});
+
+// Add the title to the panel
+legend.add(legendTitle);
+    
+// Creates and styles 1 row of the legend.
+var makeRow = function(color, name) {
+      
+      // Create the label that is actually the colored box.
+      var colorBox = ui.Label({
+        style: {
+          backgroundColor: '#' + color,
+          // Use padding to give the box height and width.
+          padding: '8px',
+          margin: '0 0 4px 0'
+        }
+      });
+      
+      // Create the label filled with the description text.
+      var description = ui.Label({
+        value: name,
+        style: {margin: '0 0 4px 6px'}
+      });
+      
+      // return the panel
+      return ui.Panel({
+        widgets: [colorBox, description],
+        layout: ui.Panel.Layout.Flow('horizontal')
+      });
+};
+
+//  Palette with the colors
+
+var palette = ["2b61c5","443943","ffc82d","106805","807a83","23eb45","fffa5b","f643e0"];
+
+// name of the legend
+var names = ['water','Cities','Pastures','Forest', 'Rock', 'Cereals', 'Fallow', 'Trees and Irrigated area' ];
+
+// Add color and and names
+for (var i = 0; i < 8; i++) {
+  legend.add(makeRow(palette[i], names[i]));
+  }  
+
+// add legend to map (alternatively you can also print the legend to the console)  
+Map.add(legend);  
+  
+  
+  
+  

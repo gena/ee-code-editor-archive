@@ -1,0 +1,115 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var fc = /* color: #d63000 */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Polygon(
+                [[[-107.42697607703093, 46.92873132254287],
+                  [-107.42697607703093, 46.834866134470765],
+                  [-107.19077002234343, 46.656069766165885],
+                  [-106.85843359656218, 46.67114917040449],
+                  [-106.66617285437468, 46.78034907250693],
+                  [-106.73483740515593, 46.90809507124234],
+                  [-107.32260595984343, 46.97747632410384]]]),
+            {
+              "system:index": "0"
+            }),
+        ee.Feature(
+            ee.Geometry.Polygon(
+                [[[-105.56204687781218, 47.11223079887245],
+                  [-105.66367041296843, 46.85553056648887],
+                  [-105.42197119421843, 46.684340198843735],
+                  [-104.94406592078093, 46.61457971608193],
+                  [-104.65018164343718, 46.72201110808467],
+                  [-104.92758642859343, 46.9662314182512],
+                  [-105.00449072546843, 47.13278831483543]]]),
+            {
+              "system:index": "1"
+            }),
+        ee.Feature(
+            ee.Geometry.Polygon(
+                [[[-109.26718603796843, 46.9662314182512],
+                  [-109.33035742468718, 46.74083670571322],
+                  [-109.06943213171843, 46.591935371575445],
+                  [-107.96255957312468, 46.69376039048263],
+                  [-108.09164892859343, 46.96060807869857],
+                  [-108.95682226843718, 47.03553734142259]]]),
+            {
+              "system:index": "2"
+            })]),
+    points = /* color: #98ff00 */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Point([-109.09689795203093, 46.866798724481725]),
+            {
+              "system:index": "0"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-109.04471289343718, 46.76341874919642]),
+            {
+              "system:index": "1"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-108.49814306921843, 46.752128910202885]),
+            {
+              "system:index": "2"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-108.44595801062468, 46.89120495396912]),
+            {
+              "system:index": "3"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-108.75632178015593, 46.94560961673968]),
+            {
+              "system:index": "4"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.08639990515593, 46.83110811097143]),
+            {
+              "system:index": "5"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-107.02048193640593, 46.73707211187435]),
+            {
+              "system:index": "6"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-105.03744970984343, 46.84801714729852]),
+            {
+              "system:index": "7"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-105.13632666296843, 47.00183217606457]),
+            {
+              "system:index": "8"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-105.07864844031218, 46.78034907250693]),
+            {
+              "system:index": "9"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-104.93857275671843, 46.69752800712239]),
+            {
+              "system:index": "10"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-105.36978613562468, 46.81983246373944]),
+            {
+              "system:index": "11"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-105.43845068640593, 46.99433924987136]),
+            {
+              "system:index": "12"
+            })]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+//Get count for number of points in multiple polygons
+
+
+var nPoints = fc.map(function(poly){
+  var pointsPoly = points.filterBounds(poly.geometry());
+  var n = pointsPoly.size();
+  return poly.set({'nPoints': n});
+});
+
+print(nPoints);

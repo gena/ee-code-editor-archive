@@ -1,0 +1,104 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-149.08277784988638, 30.715239215276142],
+          [-147.89166051468544, 32.52207673190783],
+          [-146.85257666152665, 33.311734630771575],
+          [-145.45560684255855, 32.98439243892583],
+          [-143.19434513677186, 32.66720583865624],
+          [-142.44850672692422, 30.063641904180876],
+          [-140.76403640608743, 29.635399500618394],
+          [-138.91288094003028, 29.5766754448398],
+          [-138.16739099613693, 30.45724411382249],
+          [-137.68736310179662, 32.1109988599396],
+          [-137.71596259554792, 34.002882463784424],
+          [-138.737289412589, 35.43145906583551],
+          [-141.49444643603067, 36.68730254522535],
+          [-144.73037886019682, 36.47579317541853],
+          [-147.13885322814565, 36.074473700596506],
+          [-149.46902814548105, 36.85000302403679],
+          [-150.00113469204814, 37.458259967788244],
+          [-150.36638361351947, 38.14654988936999],
+          [-150.4709187739062, 38.38440082716451],
+          [-150.4523332291244, 38.775794992340074],
+          [-150.30081229004372, 39.30410116585431],
+          [-149.68087227265823, 40.118123827077625],
+          [-148.92080086080466, 42.640779339120925],
+          [-152.1305810918937, 41.66446947204608],
+          [-153.08794910456334, 40.75456117049387],
+          [-153.54032004215674, 39.673701920721705],
+          [-153.5704562678431, 38.90001184788354],
+          [-153.33881356591212, 38.16050232787282],
+          [-153.3660524808098, 37.03856238718811],
+          [-154.38451880187665, 35.17507392649607],
+          [-152.9137482404019, 33.087850529811995],
+          [-151.49936298437774, 32.44294496310377]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+function generateThiessenPolygons(points, scale, aoi) {
+  var distance = ee.Image(0).float().paint(points, 1)
+    .fastDistanceTransform().sqrt().clip(aoi)
+
+  var concavity = distance.convolve(ee.Kernel.laplacian8())
+    .reproject(ee.Projection('EPSG:3857').atScale(scale)) // reproject, otherwise fastDistanceTransform does not match generated polygons
+  
+  var concavityTh = 0
+  
+  var edges = concavity.lt(concavityTh)
+
+  // label connected components
+  var connected = edges.not().connectedComponents(ee.Kernel.circle(1), 256)
+    .clip(aoi.buffer(-scale * 2, scale))
+    .focal_max(scale * 2, 'circle', 'meters') // close holes
+    .focal_min(scale * 2, 'circle', 'meters') 
+    .focal_mode(scale * 2, 'circle', 'meters') // smoothen
+    .reproject(ee.Projection('EPSG:3857').atScale(scale)) // reproject, otherwise fastDistanceTransform does not match generated polygons
+
+  // fixing reduceToVectors() bug, remap to smaller int
+  function fixOverflowError(i) {
+    var hist = i.reduceRegion(ee.Reducer.frequencyHistogram(), aoi, scale)
+    var uniqueLabels = ee.Dictionary(ee.Dictionary(hist).get('labels')).keys()
+      .map(function(o) { 
+        return ee.Number.parse(o) 
+      })
+    var labels = ee.List.sequence(0, uniqueLabels.size().subtract(1))
+    return i.remap(uniqueLabels, labels).rename('labels').int()
+  }
+  
+  // connected = fixOverflowError(connected)
+
+  Map.addLayer(connected.randomVisualizer(), {}, 'connected')
+
+  var polygons = connected.select('labels')
+    .reduceToVectors({
+      scale: scale,
+      geometry: aoi,
+      eightConnected: true,
+      labelProperty: 'labels',
+      geometryInNativeProjection: false
+    })
+
+  Map.addLayer(polygons.style({color: 'black', fillColor: 'lightblue'}), {}, 'polygons')
+  Map.addLayer(polygons.map(function(f) { return f.simplify(scale * 2)}).style({color: 'black', fillColor: 'lightblue'}), {}, 'polygons (smoothed)')
+}
+
+function generatePerimeterPoints(geom, n) {
+  var p = geom.perimeter(10)
+  
+  var coords = geom.coordinates().get(0) // outer ring only
+
+  var perimeter = ee.Algorithms.GeometryConstructors.LineString(coords)
+  var distances = ee.List.sequence(0, p, p.divide(n))
+    
+  var points = ee.FeatureCollection(perimeter.cutLines(distances).geometries()
+    .map(function(g) { 
+      return ee.Feature(ee.Geometry(g).centroid(1))
+    }))
+
+  return ee.FeatureCollection(points)
+}
+
+
+
+var points = generatePerimeterPoints(geometry, 50)
+
+var scale = Map.getScale()
+generateThiessenPolygons(points, scale, geometry)

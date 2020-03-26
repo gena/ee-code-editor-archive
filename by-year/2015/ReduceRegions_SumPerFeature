@@ -1,0 +1,42 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var GCEV1 = ee.Image("USGS/GFSAD1000_V1"),
+    countries = ee.FeatureCollection("ft:1tdSwUL7MVpOauSgRzqVTOwdfy17KDbw-1d9omPw");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+//Select SA countries
+var SA_countries = countries.filter(ee.Filter.or(
+  ee.Filter.eq('Country','Argentina'),
+  ee.Filter.eq('Country','Bolivia'),
+  ee.Filter.eq('Country','Brazil'),
+  ee.Filter.eq('Country','Chile'),
+  ee.Filter.eq('Country','Colombia'),
+  ee.Filter.eq('Country','Ecuador'),
+  ee.Filter.eq('Country','French Guiana'),
+  ee.Filter.eq('Country','Guyana'),
+  ee.Filter.eq('Country','Paraguay'),
+  ee.Filter.eq('Country','Peru'),
+  ee.Filter.eq('Country','Suriname'),
+  ee.Filter.eq('Country','Uruguay'),
+  ee.Filter.eq('Country','Venezuela')
+  ));
+
+print (SA_countries);
+Map.addLayer(SA_countries)
+
+
+//Binarize GCEV1 (1-4:1, 0&5:0)
+var GCEV1_1_4 = GCEV1.lt(5).and(GCEV1.gt(0));
+Map.addLayer(GCEV1_1_4)
+print(GCEV1_1_4);
+
+// Get area in km^2
+var croplandArea = GCEV1_1_4.multiply(ee.Image.pixelArea()).multiply(1e-6);
+
+var sumCroplandPerCountry = croplandArea.reduceRegions({
+  collection: SA_countries,
+  reducer: ee.Reducer.sum()
+});
+
+print (sumCroplandPerCountry);
+
+

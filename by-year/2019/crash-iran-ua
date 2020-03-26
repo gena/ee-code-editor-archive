@@ -1,0 +1,79 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var images = ee.ImageCollection("COPERNICUS/S2"),
+    geometry = 
+    /* color: #7cd62b */
+    /* shown: false */
+    ee.Geometry.Point([51.10298264386779, 35.56287480118742]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// var animation = require('users/gena/packages:animation')
+
+// var imagesNearest = images.filterBounds(geometry).filterDate('2019-12-29', '2020-01-15')
+// print(imagesNearest.toList(10).map(function(i) { return ee.Image(i).date() }))
+
+// animation.animate(imagesNearest, { label: '{{date}}', vis: { min: 500, max: 5000, bands: ['B12', 'B8', 'B3'] }, preload: false })
+
+var start = ee.Date('2019-12-29')
+var stop = ee.Date('2020-01-08')
+
+function smoothen(i) {
+  return i.resample('bicubic')
+}
+
+function sharpen(i) {
+  return i
+  
+  var s = Map.getScale()
+  var r = s * 4
+  var m = s * 2
+  i = i.subtract(i.convolve(ee.Kernel.gaussian(r, m, 'meters')).convolve(ee.Kernel.laplacian8(3))) // LoG
+  
+  return i
+}
+
+var bounds = Map.getBounds(true)
+
+function compose(images) {
+  var image = images.map(smoothen).mosaic().divide(10000)
+  
+  return image
+}
+
+var before = compose(images.filterBounds(bounds).filterDate(start, start.advance(1, 'day')))
+var after = compose(images.filterBounds(bounds).filterDate(stop, stop.advance(1, 'day')))
+
+var vis = { bands: ['B8', 'B8', 'B4'], min: 0.05, max: 0.5 }
+Map.addLayer(sharpen(before), vis, 'before 884', false)
+Map.addLayer(sharpen(after), vis, 'after 884', false)
+
+var vis = { bands: ['B12', 'B8', 'B4'], min: 0.05, max: 0.5 }
+Map.addLayer(sharpen(before), vis, 'before 1284', false)
+Map.addLayer(sharpen(after), vis, 'after 1284', false)
+
+var visChange = { bands: ['B8', 'B12', 'B4'], min: 0, max: 0.1 }
+
+var diff = before.subtract(after)
+Map.addLayer(diff, visChange, 'changes', false)
+
+// Determine the displacement by matching only the 'R' bands and smoothing the displacement
+var proj = ee.Projection('EPSG:3857').atScale(Map.getScale())
+
+var bandDisplacement = 'B12'
+var displacement = after.clip(bounds).reproject(proj)
+  .select(bandDisplacement)
+  .displacement({ referenceImage: before.clip(bounds).reproject(proj).select(bandDisplacement), maxOffset: 30.0, patchWidth: 60.0 })
+  // .convolve(ee.Kernel.gaussian(20, 10, 'meters'))
+
+after = after.displace(displacement)
+
+// after = after.register({ referenceImage: before, maxOffset: 20.0, patchWidth: 60.0 })
+
+var vis = { bands: ['B8', 'B8', 'B4'], min: 0.05, max: 0.5 }
+Map.addLayer(sharpen(after), vis, 'after 884 (registered)', false)
+
+var vis = { bands: ['B12', 'B8', 'B4'], min: 0.05, max: 0.5 }
+Map.addLayer(sharpen(after), vis, 'after 1284 (registered)', false)
+
+var diff = before.subtract(after)
+Map.addLayer(diff, visChange, 'changes (registered)', true, 0.7)
+
+Map.setOptions('HYBRID')

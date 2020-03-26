@@ -1,0 +1,14 @@
+// mask LANDSAT using BQA
+
+var collection = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+  .filterDate('2015-01-01', '2015-01-02')
+  .filterBounds(Map.getBounds(true))
+  .select(['B4','B3','B2','BQA']);
+  
+var maskBadPixels = function(img) {
+   var bad = img.select('BQA').eq([61440,59424,57344,56320,53248,52256,52224,49184,49152]).reduce('max');
+   return img.mask(bad.not());
+};
+var collection = collection.map(maskBadPixels);
+
+Map.addLayer(collection.select(['B4','B3','B2']), 'rgb');

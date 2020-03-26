@@ -1,0 +1,297 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #ef424a */ee.Geometry.LinearRing(
+        [[30.201416015625, 43.40903821777056],
+         [30.0750732421875, 43.6499881760459],
+         [29.947586121851828, 43.76443333460163],
+         [29.69923728955939, 43.69637099723679],
+         [29.74547809670628, 43.52056065013417],
+         [29.000169983982687, 43.45230624019519],
+         [28.944813222782386, 43.848321093277654],
+         [30.12725830078125, 43.84047016946789],
+         [30.34423828125, 43.939439464527474],
+         [30.67108154296875, 44.04811573082351],
+         [31.1077880859375, 44.10139306449848],
+         [31.44012451171875, 44.09547572946638],
+         [31.9317626953125, 44.04219306625442],
+         [32.2174072265625, 43.931527972968574],
+         [32.39044189453125, 43.71950494269107],
+         [32.45086669921875, 43.55451990763498],
+         [32.32452392578125, 43.39706523932025],
+         [32.14874267578125, 43.41103348412605],
+         [32.0526123046875, 43.58238046828168],
+         [31.88232421875, 43.781009658142914],
+         [31.640625, 43.866218006556394],
+         [31.31378173828125, 43.874138181474734],
+         [30.62164306640625, 43.854335770789596],
+         [30.31402587890625, 43.75522505306931],
+         [30.200832097279772, 43.5479318100461],
+         [30.987338986485497, 43.462476365383914],
+         [31.202660842527052, 43.294906914067056],
+         [30.912753673297402, 43.23123178231853],
+         [30.4925537109375, 43.35114690203121],
+         [30.49530029296875, 43.09697190802464],
+         [30.1959228515625, 43.1090040242731],
+         [30.201416015625, 43.40903821777056]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// ... not yet Delaunay, but getting close
+
+var scale = Map.getScale() * 1
+
+/***
+ * Reduces image values along the given line string geometry using given reducer.
+ * 
+ * Samples image values using image native scale, or opt_scale
+ */
+function reduceImageProfile(image, line, reducer, scale, crs, crsTransform) {
+  var length = line.length();
+  var distances = ee.List.sequence(0, length, scale)
+  var lines = line.cutLines(distances).geometries();
+  lines = lines.zip(distances).map(function(l) { 
+    l = ee.List(l)
+    
+    var geom = ee.Geometry(l.get(0))
+    var distance = ee.Geometry(l.get(1))
+    
+    geom = ee.Algorithms.GeometryConstructors.LineString(geom.coordinates())
+    
+    return ee.Feature(geom, {distance: distance})
+  })
+  lines = ee.FeatureCollection(lines)
+
+  // reduce image for every segment
+  var values = image.reduceRegions( {
+    collection: ee.FeatureCollection(lines), 
+    reducer: reducer, 
+    scale: scale, 
+    crs: crs
+  })
+  
+  return values
+}
+
+var n = 100
+
+var p = geometry.length()
+  
+var coords = geometry.coordinates()
+
+var perimeter = ee.Algorithms.GeometryConstructors.LineString(coords)
+var distances = ee.List.sequence(0, p, p.divide(n))
+
+var points = ee.FeatureCollection(perimeter.cutLines(distances).geometries()
+  .map(function(g) { 
+    return ee.Feature(ee.Geometry(g).centroid(1))
+  }))
+
+var geometryPolygon = ee.Geometry.Polygon(coords).buffer(scale * 10)
+
+
+var geometryPolygon2 = geometryPolygon.buffer(- scale * 100)
+var p2 = geometryPolygon2.perimeter()
+var coords2 = geometryPolygon2.coordinates().get(0)
+var perimeter2 = ee.Algorithms.GeometryConstructors.LineString(coords2)
+var distances2 = ee.List.sequence(0, p2, p2.divide(n))
+var points2 = ee.FeatureCollection(perimeter2.cutLines(distances2).geometries()
+  .map(function(g) { 
+    return ee.Feature(ee.Geometry(g).centroid(1))
+  }))
+
+// var points = ee.FeatureCollection(points.merge(points2))
+
+// var points = ee.Image.pixelLonLat().clip(geometryPolygon)
+//   .sample({ region: geometryPolygon, numPixels: 100, scale: scale * 5})
+//   .map(function(f) { return ee.Feature(ee.Algorithms.GeometryConstructors.Point([f.get('longitude'), f.get('latitude')]))})
+
+
+var distance = ee.Image(0).float().paint(points, 1)
+  .fastDistanceTransform().sqrt().clip(geometryPolygon)
+
+var curvature = distance.convolve(ee.Kernel.laplacian8())
+
+var curvatureNegative = curvature.lt(0)
+  .focal_max(1).focal_min(1)
+  .reproject(ee.Projection('EPSG:3857').atScale(scale * 2))
+
+Map.addLayer(distance, {min: 0, max: 150}, 'DT')
+
+var searchRadius = scale * 100
+
+var geometryNegative = geometryPolygon.bounds().difference(geometryPolygon, scale)
+
+var pixelCoords = ee.Image.pixelCoordinates(ee.Projection('EPSG:3857'))
+
+
+// use thiessen polygon centroids instead of original points
+
+var faces = ee.Image(1).clip(geometryPolygon).updateMask(curvatureNegative.not())
+  .reduceToVectors({geometry: geometryPolygon, scale: scale, eightConnected: false})
+  
+Map.addLayer(faces.reduceToImage(['count'], ee.Reducer.mean()).randomVisualizer(), {}, 'faces (random colors)', false)  
+  
+Map.addLayer(faces.style({color: 'ffff00', fillColor: 'ffff0033'}), {}, 'faces', true, 0.3)  
+  
+var centroids = faces  
+  .map(function(f) { return f.centroid(scale) })
+  
+//points = centroids  
+
+function getEdgesByNearestPoints() {
+  // join
+  var distFilter = ee.Filter.and(
+    ee.Filter.withinDistance({
+      distance: searchRadius,
+      leftField: '.geo',
+      rightField: '.geo',
+      maxError: searchRadius * 0.5
+    }),
+    
+    // exclude self
+    ee.Filter.withinDistance({
+      distance: scale * 2,
+      leftField: '.geo',
+      rightField: '.geo',
+      maxError: scale
+    }).not()
+  );
+  
+  // Define a saveAll join.
+  var distSaveAll = ee.Join.saveAll({
+    matchesKey: 'nearest',
+    measureKey: 'distance'
+  });
+  
+  // Apply the join.
+  points = distSaveAll.apply(points, points, distFilter);
+  
+  var edges = points.map(function(pt1) {
+    var g1 = pt1.geometry()
+    
+    // slow :(
+    var nearest = ee.FeatureCollection(ee.List(pt1.get('nearest')))
+    
+    var edges = nearest.map(function(pt2) {
+      var g2 = ee.Feature(pt2).geometry()
+      var geom = ee.Algorithms.GeometryConstructors.LineString([g1.coordinates(), g2.coordinates()])
+      
+      var c = pixelCoords.mask(curvatureNegative).reduceRegion({
+        reducer: ee.Reducer.minMax(), geometry: geom, scale: scale
+      })
+      
+      var m = ee.Number(c.get('x_max')).subtract(c.get('x_min')).pow(2).add(
+        ee.Number(c.get('y_max')).subtract(c.get('y_min')).pow(2)).sqrt()
+  
+      return ee.Feature(geom)
+        .set({m: m})
+    })
+  
+    return ee.FeatureCollection(edges)
+  })
+  
+  edges = ee.FeatureCollection(edges.flatten())
+    //.filter(ee.Filter.neq('outer', true))
+
+  // smaller intersection with the negative curvature
+  edges = edges
+     // .filter(ee.Filter.lt('m', scale * 30))
+    
+  return edges    
+}
+
+
+function getEdgesByNearestPolygons() {
+  // join
+  var distFilter = ee.Filter.and(
+    ee.Filter.withinDistance({
+      distance: scale * 10,
+      leftField: '.geo',
+      rightField: '.geo',
+      maxError: scale
+    }),
+    
+    // exclude self
+    ee.Filter.withinDistance({
+      distance: scale * 0.001,
+      leftField: '.geo',
+      rightField: '.geo',
+      maxError: scale
+    }).not()
+  );
+  
+  // Define a saveAll join.
+  var distSaveAll = ee.Join.saveAll({
+    matchesKey: 'nearest',
+    measureKey: 'distance'
+  });
+  
+  // Apply the join.
+  faces = distSaveAll.apply(faces, faces, distFilter);
+  
+  var edges = faces.map(function(f1) {
+    var g1 = f1.geometry().centroid(scale)
+    
+    // slow :(
+    var nearest = ee.FeatureCollection(ee.List(f1.get('nearest')))
+    
+    var edges = nearest.map(function(f2) {
+      var g2 = ee.Feature(f2).geometry().centroid(scale)
+      var geom = ee.Algorithms.GeometryConstructors.LineString([g1.coordinates(), g2.coordinates()])
+      
+      // var c = pixelCoords.mask(curvatureNegative).reduceRegion({
+      //   reducer: ee.Reducer.minMax(), geometry: geom, scale: scale
+      // })
+      
+      // var m = ee.Number(c.get('x_max')).subtract(c.get('x_min')).pow(2).add(
+      //   ee.Number(c.get('y_max')).subtract(c.get('y_min')).pow(2)).sqrt()
+  
+      return ee.Feature(geom)
+        //.set({m: m})
+    })
+  
+    return ee.FeatureCollection(edges)
+  })
+  
+  edges = ee.FeatureCollection(edges.flatten())
+    //.filter(ee.Filter.neq('outer', true))
+
+  // smaller intersection with the negative curvature
+  edges = edges
+     // .filter(ee.Filter.lt('m', scale * 30))
+    
+  return edges    
+}
+    
+// var edges = getEdgesByNearestPoints()
+var edges = getEdgesByNearestPolygons()
+
+
+
+// print(ui.Chart.feature.histogram(edges, 'm'))
+
+Map.addLayer(curvature.mask(curvatureNegative), {palette: ['ffffff']}, 'curvature < 0', true, 0.3)
+Map.addLayer(points, {color: 'lightgreen'}, 'points')
+Map.addLayer(edges.style({color:'lightblue', width: 1}), { color: 'white' }, 'edges')
+
+
+// var e = ee.Feature(edges.toList(1, 1).get(0))
+// var profile = reduceImageProfile(curvatureNegative, e.geometry(), ee.Reducer.max(), scale * 0.5)
+// print(ui.Chart.feature.byFeature(profile, 'distance').setOptions({pointSize: 2, lineWidth: 0}))
+// Map.addLayer(ee.FeatureCollection([e]).style({color: 'yellow', width: 2}), {}, 'edge')
+
+
+// var sampled = ee.Image.pixelLonLat().updateMask(curvatureNegative)
+//   .sample({ region: geometryPolygon, numPixels: 5000, scale: scale})
+//   .map(function(f) { return ee.Feature(ee.Algorithms.GeometryConstructors.Point([f.get('longitude'), f.get('latitude')]))})
+// print(sampled)
+// Map.addLayer(sampled, {color: 'red'})
+
+
+/*// remove incorrect edges
+edges = edges.map(funciton(f) {
+  // does it intersect with mask?
+  var bad = distance.reduceRegion({
+    reducer: ee.Reducer.(), geometry, scale, crs, crsTransform, bestEffort, maxPixels, tileScale)
+})*/
+
+
+
+

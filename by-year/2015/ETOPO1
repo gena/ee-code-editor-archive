@@ -1,0 +1,4 @@
+// ETOPO1
+
+var dem = ee.Image('NOAA/NGDC/ETOPO1').select('bedrock');
+addToMap(dem.mask(dem.lt(0)), {min:0, max:-10000});

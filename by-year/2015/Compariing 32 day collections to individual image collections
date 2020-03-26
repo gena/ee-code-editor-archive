@@ -1,0 +1,62 @@
+//Compariing 32 day collections to individual image collections
+///////////////////////////////////////
+//Question- what exactly goes into the 32 day collections and why are
+//they 32 day and not 16 day? 
+//Is there a better way to use them? 
+////////////////////////////////////////////
+// Compute a cloud score.  This expects the input image to have the common
+// band names: ["red", "blue", etc], so it can work across sensors.
+var cloudScore = function(img) {
+  // A helper to apply an expression and linearly rescale the output.
+  var rescale = function(img, exp, thresholds) {
+    return img.expression(exp, {img: img})
+        .subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+  };
+
+  // Compute several indicators of cloudyness and take the minimum of them.
+  var score = ee.Image(1.0);
+  // Clouds are reasonably bright in the blue band.
+  score = score.min(rescale(img, 'img.blue', [0.1, 0.3]));
+
+  // Clouds are reasonably bright in all visible bands.
+  score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]));
+
+  // Clouds are reasonably bright in all infrared bands.
+  score = score.min(
+      rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]));
+
+  // Clouds are reasonably cool in temperature.
+  score = score.min(rescale(img, 'img.temp', [300, 290]));
+
+  // However, clouds are not snow.
+  var ndsi = img.normalizedDifference(['green', 'swir1']);
+  var cs = score.min(rescale(ndsi, 'img', [0.8, 0.6])).select([0],['cloud'])
+  return img.addBands(cs);
+};
+
+////////////////////////////////////////////////////////
+var startDate = '2000-06-30';
+var endDate = '2000-08-30';
+
+//Get 32 collection median
+var c32Median = ee.ImageCollection('LANDSAT/LT5_L1T_32DAY_TOA')
+        .filterDate(startDate,endDate)
+        .select([0,1,2,3,4,5,6],['blue','green','red','nir','swir1','temp','swir2'])
+        .map(cloudScore)
+        .map(function(img){
+          var cs = img.select(['cloud'])
+          return img.mask(img.mask().and(cs.lt(0.2)))
+        }).median()
+//Get Individual collection median
+var cIndvMedian = ee.ImageCollection('LANDSAT/LT5_L1T_TOA')
+        .filterDate(startDate,endDate)
+        .select([0,1,2,3,4,5,6],['blue','green','red','nir','swir1','temp','swir2'])
+        .map(cloudScore)
+        .map(function(img){
+          var cs = img.select(['cloud'])
+          return img.mask(img.mask().and(cs.lt(0.2)))
+        }).median()
+        
+        
+addToMap(c32Median,{'bands':'swir1,nir,red','min':0.2,'max':0.4},'32_Median_Comp')
+addToMap(cIndvMedian,{'bands':'swir1,nir,red','min':0.2,'max':0.4},'Individual_Median_Comp')

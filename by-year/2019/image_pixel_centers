@@ -1,0 +1,26 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([1.9812450955907934, 27.826079198831273]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var image = ee.Image('COPERNICUS/S2/20150627T102531_20160606T223605_T31RCL')
+
+Map.centerObject(geometry, 19)
+
+Map.addLayer(image, { bands: ['B4', 'B3', 'B8' ], min: 200, max: 4500 }, 'image')
+
+// show centers
+var b8 = image.select('B8')
+var proj = b8.projection()
+var bounds = Map.getBounds(true)
+var coords = ee.Image.pixelLonLat().reproject(proj).reduceRegion({
+  reducer: ee.Reducer.toList(), 
+  geometry: bounds, 
+  scale: proj.nominalScale()
+})
+
+var centers = ee.List(coords.get('longitude')).zip(coords.get('latitude')).map(function(coord) {
+  return ee.Feature(ee.Geometry.Point(coord))
+})
+
+centers = ee.FeatureCollection(centers)
+
+Map.addLayer(centers.style({ pointSize: 2, width: 0, color: 'yellow'}))

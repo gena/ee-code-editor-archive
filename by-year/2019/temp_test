@@ -1,0 +1,13 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l81 = ee.ImageCollection("LANDSAT/LC08/C01/T1_TOA"),
+    l82 = ee.ImageCollection("LANDSAT/LC08/C01/T2_TOA"),
+    land = ee.Image("users/gena/land_polygons_image");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.addLayer(land)
+
+var image = ee.Image('LANDSAT/LC08/C01/T1_TOA/LC08_200029_20140915')
+  .updateMask(land.mask().not())
+
+
+Map.addLayer(image, {bands: ['B4', 'B3', 'B2'], min: 0.047, max: 0.05}, 'image')
+Map.addLayer(image.select('B10'), {min: 289, max: 291.5, palette: ['0000ff', 'ff0000', 'ffff00']}, 'temp')

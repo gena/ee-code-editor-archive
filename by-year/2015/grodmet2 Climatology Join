@@ -1,0 +1,45 @@
+// grodmet2 Climatology Join
+var collectionName='IDAHO_EPSCOR/GRIDMET';
+var variable='pr';
+
+// First build a collection that is 1 empty feature for each day of year (DOY) (1-365)
+// Forcing it to an EE number int to match the DOY calculation below
+// Using 366 to account for leap years
+var doy_list = ee.List.sequence(1, 366, 1);
+function set_doy_func (doy) {
+  return ee.Feature(null).set({'DOY':ee.Number(doy).int()}); }
+var doy_coll = ee.FeatureCollection(doy_list.map(set_doy_func));
+
+
+// Get the GRIDMET collection for the normal period
+var gridmet_coll = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET')
+  .select([variable]).filterDate('1981', '1991');
+
+
+// This function calculates the DOY and attaches it as a property to the image
+function gridmet_doy_func(gridmet_image) {
+  var doy = ee.Number(ee.Algorithms.Date(gridmet_image.get("system:time_start"))
+    .getRelative('day', 'year')).add(1).int();
+  return gridmet_image.select([variable], [variable]).set({
+    'DOY':doy, 'system:index':gridmet_image.get('system:index'),
+    'system:time_start':gridmet_image.get('system:time_start')});
+}
+var variable_coll = gridmet_coll.map(gridmet_doy_func);
+
+
+// Join the GRIDMET collection to the DOY collection by DOY
+// Each feature will then have ~30 images attached to it (if calculating the full climatology)
+var filter = ee.Filter.equals({'leftField': 'DOY', 'rightField': 'DOY'});
+var join_coll = ee.ImageCollection(ee.Join.saveAll('doy_match')
+  .apply(doy_coll, variable_coll, filter));
+
+
+// Calculate the mean PPT (i.e. climatology) for each DOY
+function mean_func(image) {
+  var mean_img = ee.Image(ee.ImageCollection.fromImages(image.get('doy_match')).mean());
+  return mean_img.set({'DOY':image.get('DOY')}) }
+var normal_coll = join_coll.map(mean_func);
+
+
+var palette = "FF0000,FFFF00,00FFFF,0000FF";
+Map.addLayer(ee.Image(normal_coll.first()), {'min':0, 'max':20, 'palette':palette, 'opacity':".85"}, 'DOY 330');

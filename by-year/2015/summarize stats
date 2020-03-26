@@ -1,0 +1,225 @@
+// summarize stats
+// ORS Chip work
+//Author: Ian Housman
+//Scroll to bottom to review difficulty
+/////////////////////////////////////////////////////////////////
+//Some visualization params
+var vizParamsCO1 = {'min': 0.05,'max': [.3,0.4,.4],   'bands':'swir1,nir,red'};
+var vizParams = vizParamsCO1
+var bandNames = ee.List(['blue','green','red','nir','swir1','temp','swir2']);
+
+//Which bands to select
+var sensor_band_dict =ee.Dictionary({L8 : ee.List([1,2,3,4,5,9,6]),
+                        L7 : ee.List([0,1,2,3,4,5,7]),
+                        L5 : ee.List([0,1,2,3,4,5,6]),
+                        L4 : ee.List([0,1,2,3,4,5,6])
+  });
+  
+  
+//////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+var bandNumbers = [0,1,2,3,4,5,6];
+var tcBandNumbers = [0,1,2,3,4,6];
+
+//Functions for computing tasseled cap transform
+//Author:  Ian Housman
+/////////////////////////////////////////////////////////////////////////
+//Baig 2014 coeffs - TOA refl (http://www.tandfonline.com/doi/pdf/10.1080/2150704X.2014.915434)
+var l8_tc_coeffs = [ee.Image([0.3029, 0.2786, 0.4733, 0.5599, 0.508, 0.1872]),
+                    ee.Image([-0.2941, -0.243, -0.5424, 0.7276, 0.0713, -0.1608]),
+                    ee.Image([ 0.1511, 0.1973, 0.3283, 0.3407, -0.7117, -0.4559]),
+                    ee.Image([-0.8239, 0.0849, 0.4396, -0.058, 0.2013, -0.2773]),
+                    ee.Image([-0.3294, 0.0557, 0.1056, 0.1855, -0.4349, 0.8085]),
+                    ee.Image([0.1079, -0.9023, 0.4119, 0.0575, -0.0259, 0.0252])];
+//Huang 2002 coeffs - TOA refl (http://landcover.usgs.gov/pdf/tasseled.pdf)
+var l7_tc_coeffs = [ee.Image([0.3561, 0.3972, 0.3904, 0.6966, 0.2286, 0.1596]),
+                    ee.Image([-0.3344, -0.3544, -0.4556, 0.6966, -0.0242, -0.2630]),
+                    ee.Image([0.2626, 0.2141, 0.0926, 0.0656, -0.7629, -0.5388]),
+                    ee.Image([0.0805, -0.0498, 0.1950, -0.1327, 0.5752, -0.7775]),
+                    ee.Image([-0.7252, -0.0202, 0.6683, 0.0631, -0.1494, -0.0274]),
+                    ee.Image([0.4000, -0.8172, 0.3832, 0.0602, -0.1095, 0.0985])];
+
+//Crist 1985 coeffs - TOA refl (http://www.gis.usu.edu/~doug/RS5750/assign/OLD/RSE(17)-301.pdf)
+var l5_tc_coeffs = [ee.Image([0.2043, 0.4158, 0.5524, 0.5741, 0.3124, 0.2303]),
+                    ee.Image([-0.1603, -0.2819, -0.4934, 0.7940, -0.0002, -0.1446]),
+                    ee.Image([0.0315, 0.2021, 0.3102, 0.1594, -0.6806, -0.6109]),
+                    ee.Image([-0.2117, -0.0284, 0.1302, -0.1007, 0.6529, -0.7078]),
+                    ee.Image([-0.8669, -0.1835, 0.3856, 0.0408, -0.1132, 0.2272]),
+                    ee.Image([0.3677, -0.8200, 0.4354, 0.0518, -0.0066, -0.0104])]
+/////////////////////////////////////////////////////////////////////////////////                    
+var tc_coeff_dict = {L5: l5_tc_coeffs,L7: l7_tc_coeffs, L8: l8_tc_coeffs};
+var tc_names = ['Brightness','Greenness', 'Wetness', 'TCT4','TCT5','TCT6'];
+var tc_names_a = ['Brightness','Greenness', 'Wetness', 'TCT4','TCT5','TCT6','Angle'];
+/////////////////////////////////////////////////////////////////////////////////
+//Function to compute tc transformation using the coeffs above
+var tc = function(image, sensor){
+  //Nested function to do the multiplication and addition
+  var mult_sum = function(matrix){
+    return image.multiply(matrix).reduce(ee.call("Reducer.sum"));
+    };
+  //Find the coeffs
+  var coeffs = tc_coeff_dict[sensor];
+  
+  //Compute the tc transformation and give it useful names
+  var tco = ee.Image(coeffs.map(mult_sum)).select([0,1,2,3,4,5], tc_names);
+  
+  
+  //From: http://www.fs.fed.us/rm/pubs_other/rmrs_2010_powell_s001.pdf
+  var angle = tco.select('Greenness').divide(tco.select('Brightness')).atan();
+  tco = tco.addBands(angle).select([0,1,2,3,4,5,6],tc_names_a);
+  
+  return tco;
+};
+/////////////////////////////////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////////////////////////
+var addIndices = function(in_image){
+
+  
+    // in_image = in_image.select(bandNumbers,bandNames);
+    in_image = in_image.addBands(in_image.normalizedDifference(['nir', 'red']).select([0],['ndvi']));
+    in_image = in_image.addBands(in_image.normalizedDifference(['nir', 'swir2']).select([0],['nbr']));
+    in_image = in_image.addBands(in_image.normalizedDifference(['nir', 'swir1']).select([0],['ndmi']));
+    in_image = in_image.addBands(in_image.normalizedDifference(['green', 'red']).select([0],['vig']));
+    in_image = in_image.addBands(in_image.normalizedDifference(['green', 'swir1']).select([0],['ndsi']));
+    in_image = in_image.addBands(in_image.normalizedDifference(['red', 'blue']).select([0],['ndwfi']));
+    
+    in_image = in_image.addBands(tc(in_image.select(tcBandNumbers),'L5'));
+    
+    //Algorithm from Vincent2004 to estimate phycocyanin content (PC) from a linear combination of LANDSAT bands
+    //in_image = in_image.addBands(in_image.expression("47.7-9.21*b('red')/b('blue')+29.7 * b('nir')/b('blue')-118*b('nir')/b('red')-6.81*b('swir1')/b('red')+41.9*b('swir2')/b('red')-14.7*b('swir2')/b('nir')").select([0],['PC']));
+    
+    return in_image;
+  
+};
+/////////////////////////////////////////////////////////////////////////////////
+//Analysis
+//Basic params
+var fcBandName = 'forestClass'
+var fc = ee.Image('GME/images/02373263193055454887-07374401018532437213').select([0],[fcBandName]);
+fc = fc.mask(ee.Image(1))
+var indexName = 'ndvi'
+var crs = "EPSG:5070"
+var res = 90;
+var chips = ee.FeatureCollection('ft:1EtbLqZqSeKVerITzZZ7s4RdKPiNUpRqFKZngW9Q9')
+///////////////////////////////////////////////////////////////////
+addToMap(fc,{'min':0,'max':299},'ForestClasses')
+
+
+//Get study area
+var chip = ee.Feature(chips.toList(100000).get(4))
+addToMap(chip,{},'chip')
+
+//Get current image
+var currentImage = addIndices(ee.ImageCollection('LC8_L1T_TOA')
+            .filterDate('2013-01-01','2014-12-31')
+            .filter(ee.Filter.calendarRange(200,250))
+            .filterBounds(chip.geometry())
+            
+            .map(function(img){var sc = ee.Algorithms.Landsat.simpleCloudScore(img).select(['cloud'])
+              return img.mask(img.mask().and(sc.lt(5))).clip(chip)
+            })
+            .reduce(ee.Reducer.percentile([80]))
+            .select(sensor_band_dict.get('L8'),bandNames)
+            )
+addToMap(currentImage,vizParams,'CurrentImage')
+currentImage = currentImage.select(indexName);
+//Get baseline image
+var baselineImage = addIndices(ee.ImageCollection('LT5_L1T_TOA')
+            .filterDate('2008-01-01','2011-12-31')
+            .filter(ee.Filter.calendarRange(200,250))
+            .filterBounds(chip.geometry())
+            .map(function(img){var sc = ee.Algorithms.Landsat.simpleCloudScore(img).select(['cloud'])
+              return img.mask(img.mask().and(sc.lt(5))).clip(chip)
+            })
+            .reduce(ee.Reducer.percentile([80]))
+            .select(sensor_band_dict.get('L5'),bandNames)
+            )
+addToMap(baselineImage,vizParams,'BaselineImage')
+baselineImage = baselineImage.select(indexName);
+/////////////////////////////////////////////////////////////////
+var valueList = [1,100,120,140,160,180,200,220,260,280,300,360,370,400,500,600,700,800,900,910,920,940];
+var bandNamesStack = valueList.map(function(v){return indexName + '_' + v.toString()})
+
+//Create individual images for each forest class
+var stack = ee.ImageCollection([ee.Image(1).int16().set('include','no')])
+valueList.map(function(v){
+  stack = stack.merge(ee.ImageCollection([fc.eq(v).and(fc.mask()).select([0],[fcBandName]).int16()
+  .set('include','yes').set('fcCode',v)]))})
+stack = ee.ImageCollection(stack).filter(ee.Filter.eq('include','yes'))//.select([fcBandName])
+// addToMap(stack,{},'FcStack')
+
+
+//Apply mask to baseline and current image
+var fcBaseline = stack.map(function(t){
+  return baselineImage.where(t.eq(0),-32768)
+})
+var fcCurrent = stack.map(function(t){
+  return currentImage.where(t.eq(0),-32768)
+})
+
+//Collapse to a single image
+var fcBaselineStack = fcBaseline.toArray()
+.arrayProject([0])
+.arrayFlatten([bandNamesStack]);
+
+//Reset the mask
+fcBaselineStack = fcBaselineStack.mask(fcBaselineStack.neq(-32768))
+
+//Compute stats
+function getStatParams(reducer,image){
+  return { 'geometry':chip.geometry(),
+    'reducer':reducer.forEachBand(image),
+    'scale':res,
+    'crs':crs,
+    'tileScale':2,
+    'maxPixels':1e13
+    }
+} 
+//Compute the mean by forest class
+var baselineMeans = fcBaselineStack.reduceRegion(
+  getStatParams(ee.Reducer.mean(),fcBaselineStack)
+  )
+//Compute the stdDev by forest class
+var baselineStds = fcBaselineStack.reduceRegion(
+  getStatParams(ee.Reducer.stdDev(),fcBaselineStack)
+  )
+  
+//Extract the keys and values
+var baselineMeanKeys = baselineMeans.keys();
+var baselineStdKeys = baselineStds.keys();
+baselineMeans = baselineMeans.values();
+baselineStds = baselineStds.values();
+
+//Zipp together to eventually get stats by respective forest class code
+var zipped = baselineMeans.zip(baselineStds)
+print(zipped)
+
+
+//Difficulty- how to filter null values from dictionary returned by 
+//reduceRegion, and then convert the list to an image
+//Ultimate goal is to derive a z score of the current image relative
+//to the forest class mean and stdDev 
+//Something like this is needed... after the null values are filtered out
+
+function getZscore(code){
+  var codeIndex = ee.List(valueList).indexOf(code)
+  var codeAll = ee.List(zipped.get(codeIndex))
+  
+  var fcMean = ee.Number(codeAll.get(0))
+  var fcStd = ee.Number(codeAll.get(1))
+  
+  var img = ee.Image(stack.filter(ee.Filter.eq('fcCode',code)).first())
+  // addToMap(img,{'min':0,'max':1},'ForestCode'+code)
+  
+  var meanImg = ee.Image.constant(fcMean).multiply(img)
+  var stdImg = ee.Image.constant(fcStd).multiply(img)
+  // addToMap(meanImg,{'min':0,'max':1},'meanImg')
+  // addToMap(stdImg,{'min':0,'max':0.1},'stdImg')
+  
+  var z = currentImage.subtract(stdImg).divide(meanImg)
+  addToMap(z.mask(img).clip(chip),{'min':0.5,'max':1.5,'palette':'FF0000,00FF00'},'z')
+}
+//Currently can only get a z score manually with
+//Forest codes known to exist
+getZscore(220)

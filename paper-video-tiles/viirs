@@ -1,0 +1,90 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var viirs = ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var palettes = require('users/gena/packages:palettes')
+var g = require('users/gena/packages:geometry')
+var utils = require('users/gena/packages:utils')
+var tiler = require('users/gena/packages:tiler')
+
+
+var palette = palettes.cmocean.Solar[7]
+palette = ['f03b20', 'ffff55', 'ffffb2', 'ffffee']
+
+var band = 'avg_rad'
+var visParams = {
+  palette: palette,
+  min: 0,
+  max: 15
+}
+var frames = viirs.map(function (image) {
+  image = image.select(band)
+  image = image.resample('bicubic')
+  // 0 - 5 gradual transparency
+  var mask = image.unitScale(0, 5).clamp(0, 1)
+  var image_rgb = image.visualize(visParams)
+  image_rgb = image_rgb.updateMask(mask)
+  return image_rgb
+})
+
+var dates = ee.List(viirs.aggregate_array('system:time_start')).map(
+  function(x) {
+    return ee.Date(x).format()
+    
+  }
+)
+
+function createMeta(frames, visParams) {
+  var meta = ee.Dictionary(visParams)
+  meta = meta.set('nFrames', frames.size())
+  meta = meta.set('times', dates)
+  meta = meta.set('extent', [dates.get(0), dates.get(-1)])
+}
+
+
+function exportFrames(frames, region, bucket, prefix) {
+
+  // comptue max zoom
+  var scale = frames.first().projection().nominalScale().getInfo()
+  var maxZoom = tiler.scaleToZoom(scale)
+  
+  var frameList = frames.toList(frames.size())
+  
+  var enumerate = ee.List.sequence(0, frames.size())
+
+  function exportFrame(i, frame) {
+    // Convert frame counter to 5 padded string
+    var frameId = utils.pad(i, 5)
+    var task = prefix + '-' + frameId
+    var path = prefix + '/' + frameId
+  
+    Export.map.toCloudStorage({
+      image: frame, 
+      description: task, 
+      bucket: bucket, 
+      fileFormat: 'png', 
+      path: path,
+      minZoom: 0, 
+      maxZoom: maxZoom,
+      region: region,
+      writePublicTiles: false,
+      skipEmptyTiles: true
+    })
+  }
+  
+  enumerate.evaluate(function(indices) {
+    indices.map(function(i) {
+      var image = ee.Image(frameList.get(i))
+      
+      exportFrame(i, image)
+    })
+  })
+  
+}
+
+
+var bucket = 'deltares-video-map'
+var prefix = 'test-viirs-timelapse'
+var region = g.getGlobalGeometry()
+exportFrames(frames, region, bucket, prefix)
+
+Map.addLayer(frames.first())

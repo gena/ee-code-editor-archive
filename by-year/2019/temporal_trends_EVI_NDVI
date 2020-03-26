@@ -1,0 +1,571 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var pts = /* color: #d63000 */ee.Geometry.Point([-121.47578716278076, 40.334212223383304]),
+    sa = ee.FeatureCollection("users/Shree1175/Childsmeadow_bnd2018"),
+    gw = ee.Image("users/Shree1175/idw_stack"),
+    gw_viz = {"opacity":1,"bands":["b1","b2","b3"],"min":8.215350589532154,"max":66.96624024274246,"gamma":1},
+    SMP1 = /* color: #1640d6 */ee.Feature(
+        ee.Geometry.Point([-121.48055076599121, 40.33404865521603]),
+        {
+          "label": "Upstream",
+          "system:index": "0"
+        }),
+    SMP2 = /* color: #32ffec */ee.Feature(
+        ee.Geometry.Point([-121.4763879776001, 40.33126793571064]),
+        {
+          "label": "downstream",
+          "system:index": "0"
+        }),
+    dgw = ee.FeatureCollection("users/Shree1175/gw_532018"),
+    bm = ee.FeatureCollection("users/Shree1175/bm_532018");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+//load well data for each year
+
+var water = ee.FeatureCollection(dgw).select('DTW_Sticku', 'Year')
+print('check groundwater',water)
+//var mw15 =ee.FeatureCollection(mwell_15).select('DTW_Sticku')
+//var mw16 =ee.FeatureCollection(mwell_16).select('DTW_Sticku')
+//var mw17 =ee.FeatureCollection(mwell_17).select('DTW_Sticku')
+
+//load biomass
+var biomass = ee.FeatureCollection(bm).select('Year', 'c_mg')//.buffer(10);
+print('check biomass', biomass)
+
+//var biomass2 = ee.FeatureCollection(samples)//.buffer(10);
+//var bm_15 = biomass.filter(ee.Filter.eq('Year',2015));
+//var bm_16 = biomass.filter(ee.Filter.eq('Year',2016));
+//var bm_17 = biomass.filter(ee.Filter.eq('Year',2017));
+
+
+//add year to mwell data
+//load groundwater stack
+//How do I add s year bands (2015, 2016,2017) to the stack so that the collection becomes 2 band image for each year
+var stack = ee.ImageCollection(gw)
+print('check interpolated data', stack)
+
+
+//var well_buff = mw15.buffer(5)
+Map.centerObject(sa, 15);
+Map.addLayer(sa, {color: 'red'}, 'Childsmeadow', true);
+
+
+var start_year = 2013
+var end_year = 2017
+var startJulian=213; // Aug
+var endJulian=305; // oct end
+
+
+//////////////////////////////////////////////////////////////////
+//Set up dates
+//////////////////////////////////////////////////////////////////
+if(startJulian > endJulian){endJulian = endJulian + 365}
+var startDate = ee.Date.fromYMD(start_year,1,1).advance(startJulian,'day');
+var endDate = ee.Date.fromYMD(end_year,1,1).advance(endJulian,'day');
+
+//////////////////////////////////////////////////////////////////////////
+//NDVI vizualize parameters
+//////////////////////////////////////////////////////////////////////////
+
+var vizParamsIndices = {bands:"NDVI", min:0.2,  max:0.85, palette: ['ffffff', '009F00','ffffff'], opacity: 0.77};
+var ndvi_palette ='FFFFFF, CE7E45, DF923D, F1B555, FCD163, 99B718, 74A901, 66A000, 529400,' +  
+'3E8601, 207401, 056201, 004C00, 023B01, 012E01, 011D01, 011301';
+
+/////////////////////////////////
+///// BRING MODIS data
+/////////////////////////////////
+//get all modis data
+var SRTMDEM=ee.Image('CGIAR/SRTM90_V4');
+var modisWater=ee.Image('MODIS/MOD44W/MOD44W_005_2000_02_24');
+var temp = ee.ImageCollection('MODIS/006/MOD11A2');
+var NDVI_modis = ee.ImageCollection('MODIS/006/MOD13A1');
+var elev = ee.Image("USGS/SRTMGL1_003");
+var NMDI_modis = ee.ImageCollection('MODIS/006/MOD09A1');
+
+
+/////////////////////////////////
+// FUNCTIONS
+/////////////////////////////////
+
+// calculate indices -- only NDVI
+function addNDVI(image) {
+  var ndvi = image.normalizedDifference(['B5', 'B4']);
+  return image.addBands(ndvi);
+}
+
+function addNDMI(image) {
+  var ndmi = image.normalizedDifference(['B5', 'B6']);
+  return image.addBands(ndmi);
+}
+
+// adds a band representing the image timestamp julian.
+var addTime = function(image) {
+  return image.addBands(image.metadata('system:time_start')
+    .divide(1000 * 60 * 60 * 24 * 365));
+};
+
+/////////////////////////////////////////////////////////////////////////////////////////
+// Function to get year information added as a band to the entire collection.
+//////////////////////////////////////////////////////////////////////////////////////////
+
+var addYear = function(image) {
+  var t = image.get('system:time_start');
+  var y = ee.Date(t).get('year');
+  var yimg = ee.Image(y).short().rename('year');
+  var addyimg = yimg.addBands(image)
+  return addyimg ;
+};
+
+
+//function for masking clouds
+var cloudmasking=function(img){
+  var cloudmask = img.select('cfmask').eq(0)//.not()
+  return img.updateMask(cloudmask);
+}
+
+//cloud mask using pixel_qa for SR images
+var clearMask = function(image) {
+  var clear = image.select('pixel_qa').bitwiseAnd(2).neq(0);
+  var mask = clear.eq(1);
+  image = image.updateMask(mask);
+  return image;
+};
+
+//Adding cloud correction on SR collection
+var maskClouds_pixelQA = function(image) {
+  var mask = image.select('pixel_qa');
+  var maskImage = mask.bitwiseAnd(32).neq(0).or(mask.bitwiseAnd(8).neq(0));
+  var maskWater = mask.bitwiseAnd(4).neq(0)
+  //var mask2 = image.select('sr_cloud_qa').bitwiseAnd(4).neq(0);
+  maskImage = maskImage.eq(0);
+  return image.mask(maskImage);
+}
+
+//annualize the time series 
+function annualizeSeries(series,startYear,endYear,compositingPeriod){
+var years = ee.List.sequence(startYear,endYear,compositingPeriod);
+var out =years.map(function(yr){
+    var startDateT = ee.Date.fromYMD(yr,1,1);
+    var endDateT = startDateT.advance(compositingPeriod,'year').advance(-1,'day');
+    var seriesT = series.filterDate(startDateT,endDateT);
+    seriesT = seriesT.median();
+    return seriesT.set('system:time_start',ee.Date.fromYMD(yr,7,1).millis()).clip(sa);
+    return seriesT;
+  });
+return ee.ImageCollection.fromImages(out);
+
+}
+
+
+/////////////////////////////////////////////////////////
+//Function to convert collection to a multi-band image
+//TBiwas, TNC
+////////////////////////////////////////////////////////
+function collectionToImage(collection){
+  var first = ee.Image(collection.first());
+  var theRest = collection.filter(ee.Filter.neq('system:index', first.id()));
+  return theRest.iterate(function(image, previous) {
+    return ee.Image(previous).addBands(image);
+  }, first);
+}
+
+
+//////////////////////////////////  start processing /////////////////////////
+
+print('Start and end dates for all images:',startDate,endDate);
+
+//get landsat 7 & landsat 8 data for childsmeadow
+var l5SRs = ee.ImageCollection('LANDSAT/LT5_SR')
+  .filterBounds(sa)  
+  .filterMetadata('CLOUD_COVER', 'less_than', 80)
+  .filterDate(startDate, endDate);
+ 
+var l8sr = ee.ImageCollection("LANDSAT/LC08/C01/T1_SR")
+  .filterBounds(sa)
+  .filterMetadata('CLOUD_COVER', 'less_than', 80)
+  .filterDate(startDate, endDate)
+  
+var l7sr = ee.ImageCollection("LANDSAT/LE07/C01/T1_SR")
+  .filterBounds(sa)  
+  .filterMetadata('CLOUD_COVER', 'less_than', 80)
+  .filterDate(startDate, endDate)
+
+print('check landsat 8', l8sr)
+print('check landsat 7', l7sr)
+
+//mask clouds
+//var l5srcmasked = l5sr.map(cloudmasking);
+var l7srcmasked = l7sr.map(clearMask);
+var l8srcmasked = l8sr.map(clearMask).select('B2', 'B3', 'B4', 'B5','B6', 'B7')
+
+//rename LS7 bands to be consistent with LS8
+var renameLS7=function(img){
+  var newBdnms=img.select(['B1', 'B2', 'B3','B4','B5','B6']).rename(['B2', 'B3', 'B4','B5', 'B6', 'B7'])
+  return newBdnms;
+}
+l7srcmasked=l7srcmasked.map(renameLS7);
+
+//merge LS8 and LS7 collections
+var lscomp=ee.ImageCollection(l8srcmasked.merge(l7srcmasked));
+//var lscomp2 = ee.ImageCollection(l5srcmasked.merge(l7srcmasked).merge(l8srcmasked))
+
+print('landsat Collection ', lscomp);
+var with_ndvi = lscomp.map(addNDVI);
+var with_indices = lscomp.map(addNDVI)
+with_indices = with_indices.map(addNDMI)
+
+print(with_indices)
+
+//update band name to NDVI
+var rename_bands=function(img){
+  var a =img.select(['nd']).rename(['NDVI'])
+  var b = img.select(['nd_1']).rename(['NDMI'])
+  return img.addBands(a).addBands(b);
+}
+
+with_ndvi=with_ndvi.map(addNDMI);
+with_ndvi = with_ndvi.map(rename_bands)
+with_indices = with_indices.map(rename_bands)
+print('collection with NDVI ', with_ndvi)
+print('collection with NDVI ', with_indices)
+
+//Get the dates of First and Last images
+var start_image = ee.Image(with_ndvi.sort('system:time_start',true).first());
+var end_image = ee.Image(with_ndvi.sort('system:time_start',false).first());
+var start_date = ee.Date(start_image.get('system:time_start'));
+var end_date = ee.Date(end_image.get('system:time_start'));
+print('Start Date NDVI collection ', start_date); 
+print('End Date NDVI Collection ', end_date); 
+
+
+
+//Reduce collection to annual median for each year
+var annualizeTS = annualizeSeries(with_ndvi,2014,2017,1)
+print('Annual median TimeSeries', annualizeTS)
+//annualizeTS=annualizeTS.map(rename_ndvi);
+var annualize_NDVI = annualizeTS.select('NDVI')
+print ('AnnualMedian', annualize_NDVI);
+var chartIndices = ui.Chart.image.series(annualize_NDVI, sa, ee.Reducer.median(), 1500)
+  .setOptions({title: 'Temporal Trend of NDVI',
+  vAxis: {title: 'Median Band Values'},
+  //hAxis: {title: 'Year', format: '20'+'yy', gridlines: {count: 6}},
+  legend:{title:'NDVI'} 
+  });
+print(chartIndices);
+
+
+
+//Add yearBand of data in the time series
+var annualMedianTSyear = annualize_NDVI.map(addYear);
+print('AddyearTimeSeries',annualMedianTSyear)
+
+
+//Function to median by date and add month bands
+var MW_Band = function(dates) {
+  dates = ee.List(dates)
+  // Load the Landsat 8 T1 data, filter by location and date.
+  return ee.ImageCollection(with_ndvi)
+    //.filterBounds(sa)
+    //.filterDate('2013-01-01', '2018-01-01' )
+    .filter(ee.Filter.calendarRange(dates.get(0), dates.get(1), 'day_of_year'))
+    //.filterMetadata('IMAGE_QUALITY', 'equals', 9)
+    .reduce(ee.Reducer.median())
+    // It's a 5 year mosaic, but give it a date of the right DOY in 2018.
+    .set('system:time_start', ee.Date('2018-01-01').advance(dates.get(0), 'day').millis())
+};
+
+var days = ee.List([
+              [213, 228],
+              [228, 244],
+              [244, 259],
+              [259, 274],
+              [274, 289],
+              [289, 305],
+              [305, 325]]);
+
+var medianND = ee.ImageCollection(days.map(MW_Band)) 
+//update the name of nd to ndvi
+//medianND=medianND.map(rename_ndvi);
+print('Collection Median ', medianND);
+
+var count = medianND.size();
+var list = medianND.toList(count);
+var image = ee.Image(list.get(1)).clip(sa);
+//print(count)
+//print(list)
+//print(image)
+
+///////////// PLOT CHARTS ////////////////
+
+// Chart 1 of median NDVI within Childsmeadow 
+
+var chart1 = ui.Chart.image.series({
+  imageCollection: medianND.select('nd_median'), 
+  region: sa, 
+  reducer: ee.Reducer.mean(), 
+ scale: 30})
+  .setOptions({
+              title: 'Temporal trend of NDVI within childsmeadow'});
+              
+  print(chart1);
+
+//Chart 2
+var chart2 = ui.Chart.image.series({
+  imageCollection: medianND.select('nd_median'), 
+  region: water, 
+  reducer: ee.Reducer.mean(), 
+ scale: 30})
+  .setOptions({
+              title: 'Temporal trend of NDVI around 5m from well'});
+              
+  print(chart2);
+
+//Chart 3  
+var chart3 = ui.Chart.image.series({
+  imageCollection: medianND.select('nd_median'), 
+  region: biomass, 
+  reducer: ee.Reducer.mean(), 
+ scale: 30})
+  .setOptions({
+              title: 'Temporal trend of NDVI around biomass samples'});
+              
+  print(chart3);
+  
+/*
+//// Start processing MODIS data 
+
+var modisNDVI = ee.ImageCollection('MODIS/MCD43A4_NDVI');
+// Image collections for NDVI for all years, one value per month.
+var collection05 = ee.ImageCollection(modisNDVI.filterDate('2013-01-01', '2017-12-31'));
+var collection01 = ee.ImageCollection(modisNDVI.filterDate('2016-01-01', '2017-10-31'));
+
+//Clip to Specified Region
+var clipped05 = collection05.mean().clip(sa)
+var clipped01 = collection01.mean().clip(sa)
+
+// Charts //
+//Long-Term Time Series
+var TS5 = Chart.image.seriesByRegion(collection05, sa,  ee.Reducer.mean(),'NDVI', 500, 'system:time_start').setOptions({
+          title: 'NDVI Long-Term Time Series',
+          vAxis: {title: 'NDVI'},
+          legend:{title:'NDVI'},
+});
+print(TS5);
+
+//Short-Term Time Series
+var TS1 = Chart.image.seriesByRegion(collection01, sa,  ee.Reducer.mean(),'NDVI', 500, 'system:time_start').setOptions({
+          title: 'NDVI Short-Term Time Series',
+          vAxis: {title: 'NDVI'},
+});
+print(TS1);
+
+
+//////////////////////////  MODIS TERRA AND AQUA ///////////////////////
+// comparing MODIS NDVI at sampled locations
+
+var days = ee.List.sequence(213, 305 ); // Aug to Oct
+
+//////////////////////////////////////////////////// 
+// Select MAX NDVI from the 2 MODIS images for each pixel (max NDVI daily composite)
+//////////////////////////////////////////////////
+
+//Cloud masking and bad observation by MODIS
+
+//Cloud Masking
+
+var getQABits = function(image, start, end, newName) {
+    // Compute the bits we need to extract.
+    var pattern = 0;
+    for (var i = start; i <= end; i++) {
+       pattern += Math.pow(2, i);
+    }
+    return image.select([0], [newName])
+                  .bitwise_and(pattern)
+                  .right_shift(start);
+};
+
+var filterBadObs = function(image){
+  // [bit 0-1]  cloud 0:clear 1:cloudy 2:mixed 3:not set, assumed clear
+  // [bit 2]   Cloud shadow 0: no 1: yes
+  
+   var cloudQA = getQABits(image.select('state_1km'),0,1,'cloud');
+    var cloudShadowQA = getQABits(image.select('state_1km'),2,2,'cloud_shadow');
+  return image.mask( image.mask( (cloudShadowQA.eq(0)) .and (cloudQA.eq(0).or(cloudQA.eq(3))) ) );
+};
+
+// calculate indices 
+
+var addNDVI = function(image) {
+  var ndvi = image.normalizedDifference(['sur_refl_b02', 'sur_refl_b01']).rename('NDVI');
+  return image.addBands(ndvi);
+};
+
+////////////////////////////////////////
+
+//Bring in MODIS datasets
+var MYDIS09GQ = ee.ImageCollection("MODIS/MYD09GQ");
+var MODIS09GQ = ee.ImageCollection("MODIS/MOD09GQ"),MODIS09GA = ee.ImageCollection("MODIS/MOD09GA"),MYDIS09GA = ee.ImageCollection("MODIS/MYD09GA");
+
+//  Import MODIS data, and select out the sur_refl_b02 and
+//    'state_1km' bands
+var param_refl = (['sur_refl_b02', 'sur_refl_b01']);
+var param_QA = 'state_1km';
+var terraGQ = MODIS09GQ.select(param_refl)
+   .filterDate(startDate, endDate)
+   //.aside(print);
+var terraGA = MODIS09GA.select(param_QA)
+  .filterDate(start_date, end_date)
+  //.aside(print);
+var aquaGQ = MYDIS09GQ.select(param_refl)
+   .filterDate(startDate, endDate)
+   //.aside(print);
+var aquaGA = MYDIS09GA.select(param_QA)
+  .filterDate(startDate, endDate)
+  //.aside(print);
+
+  
+var filter = ee.Filter.equals({
+  leftField: 'system:time_start',
+  rightField: 'system:time_start'
+});
+var join = ee.Join.saveFirst({
+    matchKey: 'match',
+});
+
+// get MODIS data 
+var terra = ee.ImageCollection(join.apply(terraGQ, terraGA, filter))
+  .map(function(image) {
+    return image.addBands(image.get('match'))
+  });
+  
+var aqua = ee.ImageCollection(join.apply(aquaGQ, aquaGA, filter))
+  .map(function(image) {
+    return image.addBands(image.get('match'))
+  });
+  
+//print('terra: ', terra);
+//print('aqua: ', aqua);
+	
+	
+//Calculate indices
+
+var TerraNDVI = terra.map(addNDVI);
+var AquaNDVI = aqua.map(addNDVI);
+
+/////// clean modis collection
+var TerraCloudMasked = TerraNDVI.map(filterBadObs).select('NDVI');
+var AquaCloudMasked = AquaNDVI.map(filterBadObs).select('NDVI');
+
+// combine Terra and Aqua cloudfree images
+
+var mod_myd_collection = ee.ImageCollection(TerraCloudMasked.merge(AquaCloudMasked));
+var sorted_collection = mod_myd_collection.sort("system:time_start")
+print('sorted_collection: ' ,sorted_collection);
+print('mod_myd_collection: ',mod_myd_collection);
+
+
+// Group by day, and then reduce within groups by max();
+// the result is an ImageCollection with one image for each
+// day.
+var byDay = ee.ImageCollection.fromImages(
+      days.map(function (d) {
+        return mod_myd_collection.filter(ee.Filter.calendarRange(d, d, 'day_of_year'))
+                    .select('NDVI').max()
+                    .set('day_of_year', d);
+}));
+
+print('byDay: ',byDay);
+
+//
+var LOC = new ee.FeatureCollection([SMP1, SMP2]);
+
+var single1= ui.Chart.image.series(byDay, SMP1, ee.Reducer.mean(), 250, 'day_of_year');
+print(single1)
+
+var single2= ui.Chart.image.series(byDay, SMP2, ee.Reducer.mean(), 250, 'day_of_year');
+print(single2)
+
+
+//Define a chart with different series for each region, averaged by DOY for single year.
+var series3 = ui.Chart.image.doySeriesByRegion(
+sorted_collection, 'NDVI', LOC, ee.Reducer.mean(), 250, ee.Reducer.max(), 'label');
+print(series3);
+
+
+// compute EVI manually
+var EVI2 = ee.ImageCollection('MODIS/MCD43A4')
+    .filterDate(startDate, endDate)
+    .map(function(image2) {
+      return image2.clip(sa);
+    })
+    .map(function(image2) {
+      return image2.expression('2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))', {
+        'NIR': image2.select('Nadir_Reflectance_Band2').multiply(0.0001).float(),
+        'RED': image2.select('Nadir_Reflectance_Band1').multiply(0.0001).float(),
+        'BLUE': image2.select('Nadir_Reflectance_Band3').multiply(0.0001).float()
+      }).clamp(-1, 1).set('system:time_start', image2.get('system:time_start'));
+    }); 
+      
+//print('Metadata properties: ', EVI2.propertyNames());
+//Map.addLayer(EVI2,{},'EVI')
+
+
+/////////////////////////////////////////////////////////////
+//visualize results
+/////////////////////////////////////////////////////////////
+
+//Map.addLayer(L8_collection, {bands: 'B6, B5, B4', min: 0.05, max: 3000, gamma: 1.6}, 'Landsat8scene');
+Map.addLayer(image,{bands:['B6_median','B5_median','B4_median'],min: 335, max: 3645, gamma: 1.6}, 'Median NDVI');
+var test = ee.ImageCollection(annualize_NDVI, sa, ee.Reducer.median());
+Map.addLayer(test,vizParamsIndices,'Full Time Series of NDVI for Charting',false);
+//Map.addLayer(test, {min: -0.1, max: 1.0, palette: ndvi_palette},'Full Time Series of NDVI for Charting',false);
+
+Map.addLayer(gwater, {color: 'blue'}, 'Well', true);
+Map.addLayer(biomass, {color: 'green'}, 'biomass', true);
+//Map.addLayer(mw15, {color: 'blue'}, 'Well', true);
+//Map.addLayer(biomass2, {color: 'green'}, 'biomass', true);
+//Map.addLayer(bm_15, {color: 'yellow'}, '2015', true);
+//Map.addLayer(bm_16, {color: 'pink'}, '2016', true);
+//Map.addLayer(bm_17, {color: 'brown'}, '2017', true);
+Map.addLayer(gw_stack,gw_viz,'groundwater', false)
+
+Map.addLayer (clipped01, {min: 0.0, max: 1, palette: ['FFFFFF','CC9966','CC9900', '996600', '33CC00', '009900','006600','000000']}, 'NDVI');
+Map.addLayer(collection01,{min: 0.0, max: 1, palette: ['FFFFFF','CC9966','CC9900', '996600', '33CC00', '009900','006600','000000']},'NDVIglobal',false);
+
+
+/*
+
+// Convert collection to Image to Export grid
+var annualNDVI = collectionToImage(annualize_NDVI)
+var dailymedianNDVI = collectionToImage(medianND)
+var AnnualTS = collectionToImage(annualizeTS)
+
+print(AnnualTS)
+print(annualNDVI)
+print(dailymedianNDVI)
+
+// Export tif to drive
+Export.image.toDrive({
+  image: annualNDVI,
+  description: 'NDVIseries',
+  scale: 30,
+  region: sa,
+  maxPixels: 2000000000
+});
+
+Export.image.toDrive({
+  image: dailymedianNDVI,
+  description: 'medianND',
+  scale: 30,
+  region: sa,
+  maxPixels: 2000000000
+}); 
+
+Export.image.toDrive({
+  image: AnnualTS,
+  description: 'annual_TS',
+  scale: 30,
+  region: sa,
+  maxPixels: 2000000000
+});
+
+
+*/

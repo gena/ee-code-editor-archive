@@ -1,0 +1,38 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var image = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    geometry = /* color: #98ff00 */ee.Geometry.LineString(
+        [[-7.411218179280013, 32.44515701377934],
+         [-7.4140505919997395, 32.44436024750116],
+         [-7.416368020588607, 32.44305643294348],
+         [-7.418599618488997, 32.44211477736678],
+         [-7.420573724323958, 32.440158999735694],
+         [-7.422376168781966, 32.439072438271666],
+         [-7.424865258747786, 32.438565371773144]]),
+    images = ee.ImageCollection("COPERNICUS/S2");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var occurrence = image.select('occurrence').divide(100)
+
+Map.addLayer(occurrence)
+
+var scale = Map.getScale()
+var region = ee.Geometry(Map.getBounds(true))
+print(ui.Chart.image.histogram(occurrence, region, scale, 50)
+  .setOptions({ hAxis: { viewWindow: { max:0, min:1 } } }))
+
+// f(A | Aobs) = f(Aobs | A) * f(A)
+
+print(ui.Chart.image.histogram(occurrence.clip(geometry), region, scale, 50)
+  .setOptions({ hAxis: { viewWindow: { max:0, min:1 } } }))
+
+var image = ee.Image(images.filterBounds(geometry).toList(1, 14).get(0))
+Map.addLayer(image.divide(10000), { bands: ['B12', 'B8A', 'B3'], min: 0, max: 1})
+var ndwi = image.divide(10000).normalizedDifference(['B3', 'B12'])
+Map.addLayer(ndwi.mask(ndwi), { palette: ['0000ff']})
+
+
+// P(Aw | W, x, y) ~ P ( W | Aw, x, y) * P ( W | x, y )
+//
+// Aw - ? 
+ 
+ 
+ 

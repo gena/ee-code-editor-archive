@@ -1,0 +1,42 @@
+//GRIDMET Water Year Precipitation Download
+
+// Get GRIDMET images for a water year
+var gridmet_coll = ee.ImageCollection('IDAHO_EPSCOR/GRIDMET').filterDate(
+  ee.Date.fromYMD(1999,10,1), ee.Date.fromYMD(2000,10,1));
+
+// Print out the crs, crs_transform, and dimensions for a single GRIDMET band
+var gridmet_crs = ee.Image(gridmet_coll.first()).getInfo().bands[0].crs;
+var gridmet_crs_tx = ee.Image(gridmet_coll.first()).getInfo().bands[0].crs_transform;
+var gridmet_dimen = ee.Image(gridmet_coll.first()).getInfo().bands[0].dimensions;
+print(ee.Image(gridmet_coll.first()).getInfo());
+print(gridmet_crs_tx);
+print(gridmet_dimen);
+
+// Select precipitation band from each daily GRIDMET image
+function gridmet_ppt_func (gridmet_image) {
+	return gridmet_image.select(["pr"]); }
+print(gridmet_coll.map(gridmet_ppt_func).getInfo());
+
+// Sum precipitation images for the water year
+var gridmet_ppt_sum = gridmet_coll.map(gridmet_ppt_func).sum()
+  .select([0], ['GRIDMET_PPT_WY_2000']);
+print(gridmet_ppt_sum.getInfo());
+
+// Show the GRIDMET water year PPT image
+var ET_PALETTE = ('F5F5DC, D2B48C, 40E0D0, 80FF00, 006400, 0000FF');
+addToMap(gridmet_ppt_sum, {min:0, max:3000, palette:ET_PALETTE});
+
+
+// Now try to download it
+
+var gridmet_url = gridmet_ppt_sum.getDownloadURL({
+  'crs':'EPSG:4326',
+  'crs_transform':'[0.041666001963701,0,-124.79299639209513,0,-0.041666001489718,49.41685579737572]',
+  // I'd like to do this, but it's currently broken:
+  // 'dimensions':'[1386,585]'
+  // But this workaround works:
+  'bands':'[{"id":"GRIDMET_PPT_WY_2000","dimensions":[1386,585]}]',
+});
+print(gridmet_url);
+
+centerMap(-100, 38, 4);

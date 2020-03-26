@@ -1,0 +1,121 @@
+var assets = require('users/gena/packages:assets')
+var animation = require('users/gena/packages:animation')
+var utils = require('users/gena/packages:utils')
+var colorbrewer = require('users/gena/packages:colorbrewer')
+
+var scale = Map.getScale()
+
+var seeds = utils.generateHexagonalSeeds(15)
+
+var seedsRGB = seeds.mask(seeds).visualize({palette: ['ffff00']})
+
+var dt = seeds.fastDistanceTransform().sqrt()
+Map.addLayer(dt, {min: 0, max: scale * 50}, 'distance', true, 0.3)
+
+Map.addLayer(seeds.mask(seeds), {min: 0, max: 1, palette: ['ffff00']}, 'seeds')
+
+var bounds = Map.getBounds(true)
+var images = assets.getImages(bounds, {missions: ['S2'/*, 'L8'*/], resample: true})
+
+print(images.size())
+
+images = assets.getMostlyCleanImages(images, bounds, {
+  filterMasked: true,
+  scale: scale * 10,
+  percentile: 95,
+  cloudFrequencyThresholdDelta: 0.2,
+  qualityBand: 'green'
+}).sort('system:time_start')//.limit(10)
+
+print(images.size())
+
+images = images.map(function(i) {
+  return i.set({label: i.date().format() })
+})
+
+images = images.map(function(i) {
+  var ndwi = i.normalizedDifference(['green', 'nir']).rename('ndwi')
+  var mndwi = i.normalizedDifference(['green', 'swir']).rename('mndwi')
+  var ndvi = i.normalizedDifference(['red', 'nir']).rename('ndvi')
+  
+  var image = i.addBands(ee.Image([ndwi, ndvi, mndwi]))
+
+  return image
+})
+
+function computeSnic(seeds, compactness) {
+  return function(i) {
+    var snic = ee.Algorithms.Image.Segmentation.SNIC({
+      image: i, 
+      seeds: seeds,
+      compactness: compactness,
+      connectivity: 8,
+      neighborhoodSize: 256,
+    })
+    
+    var original = i.visualize({min: 0.03, max: 0.4, bands: ['swir', 'nir', 'green']})
+    var segmented = snic.visualize({min: 0.03, max: 0.4, bands: ['swir_mean', 'nir_mean', 'green_mean']})
+    var edges = ee.Algorithms.CannyEdgeDetector(snic.select('clusters'), 0.1, 0).focal_max(0.1)
+    edges = edges.mask(edges).visualize({palette: ['ffffff'], opacity: 0.5})
+    var clusters = snic.select('clusters').mod(9).abs().visualize({palette: colorbrewer.Palettes.Set1[9], opacity: 0.15, min:0, max: 8})
+    
+    var rgb = ee.ImageCollection.fromImages([
+      original,
+      //segmented,
+      //clusters,
+      edges,
+      
+      //seedsRGB
+    ]).mosaic()
+    
+    
+    return rgb
+      .set({label: i.get('label')})
+  }
+}
+
+// compactness
+function getImagesVaryingCompactness() {
+  var image = ee.Image(images.first())
+  
+  var images = ee.List.sequence(0, 3.0, 0.3).map(function(compactness) {
+    return computeSnic(seeds, compactness)(image).set({label: ee.Number(compactness).format('%.1f') })
+  })
+
+  images = ee.ImageCollection(images)
+  
+  return images
+}
+
+// size
+function getImagesVaryingSize() {
+  var image = ee.Image(images.first())
+  
+  var images = ee.List.sequence(256 / 4, 8, -8).map(function(size) {
+    var seeds = utils.generateHexagonalSeeds(size)
+  
+    return computeSnic(seeds, compactness)(image).set({label: ee.Number(size).format('%.1f') })
+  })
+  
+  return ee.ImageCollection(images)
+}
+
+// time
+function getImagesTimeSeries() {
+  var compactness = 1.2
+  var seeds = utils.generateHexagonalSeeds(25)
+
+  return images.map(computeSnic(seeds, compactness))
+}
+
+// images = getImagesVaryingCompactness()
+//images = getImagesVaryingSize()
+images = getImagesTimeSeries()
+
+// animate
+animation.animate(images, { label: 'label' })
+
+
+// export video
+utils.exportVideo(images, {bounds: bounds, label: 'label', maxFrames: 600, name: 'animation', label: 'label' })
+

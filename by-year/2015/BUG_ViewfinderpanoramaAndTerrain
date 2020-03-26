@@ -1,0 +1,8 @@
+var images = ee.ImageCollection('users/gena/VFP_DEM').mosaic()
+Map.addLayer(ee.Terrain.slope(images), {min:0, max:0.3})
+
+var image1 = ee.Image('users/gena/ViewfinderpanoramaDEM/VFP_DEM1')
+Map.addLayer(ee.Terrain.slope(image1), {min:0, max:0.3})
+
+Map.centerObject(image1)
+

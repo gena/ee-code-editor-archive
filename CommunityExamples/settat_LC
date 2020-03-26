@@ -1,0 +1,52 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT_TOA"),
+    point = /* color: #d63000 */ee.Geometry.Point([-7.68991497799891, 33.037625388604376]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var bands = ['B1','B2','B3', 'B4', 'B5', 'B7']
+var image = ee.Image(l8
+          .filterBounds(point)
+          . sort ('CLOUD_COVER')
+          .first ())
+          .select (bands)
+          
+  //  print (image)
+    Map.addLayer(image, {bands:['B5','B4', 'B3'], max:0.3}, 'settat')
+
+var bareMean = image.reduceRegion({
+  reducer: ee.Reducer.mean(), 
+  geometry: bare,
+  scale: 30 })
+  .values()
+ //print (bareMean, 'bar');
+  
+var vegetationMean = image.reduceRegion({
+  reducer: ee.Reducer.mean(), 
+  geometry: vegetation,
+  scale: 30 })
+  .values()
+  //print (vegetationMean, 'veg');
+  
+var waterMean = image.reduceRegion({
+  reducer: ee.Reducer.mean(), 
+  geometry: water,
+  scale: 30 })
+  .values()
+//  print ('water', waterMean);
+
+var chart = ui.Chart.image.regions(image, ee.FeatureCollection ([
+  ee.Feature (bare, {label:'bare'}),
+  ee.Feature (vegetation, {label:'veg'}),
+  ee.Feature(water,{label:'water'})]),
+  ee.Reducer.mean(), 30, 'label', [0.20, 0.46, 0.65, 0.86, 1.3, 2.2]);
+  print (chart);
+  
+  var endmembers = ee.Array.cat([bareMean, vegetationMean, waterMean], 1);
+  var arrayImage = image.toArray().toArray(1);
+  var unmixed = ee.Image(endmembers).matrixSolve(arrayImage);
+  var unmixedImage = unmixed.arrayProject([0])
+                            .arrayFlatten([['bare', 'vegetation', 'water']])
+  Map.addLayer(unmixedImage, {}, 'fraction')
+  
+  
+  
+  

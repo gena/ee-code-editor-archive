@@ -1,0 +1,42 @@
+function toBackscatterIntensity(i) {
+  var ten = ee.Image(10).float()
+  return ee.Image(ten.pow(i.resample('bicubic').divide(ten)).copyProperties(i, ['system:time_start'])).rename(i.bandNames())
+}
+
+var createTimeBand = function(image) {
+  return image.addBands(image.metadata('system:time_start').divide(1e18));
+};
+
+
+var images = ee.ImageCollection('COPERNICUS/S1_GRD')
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+  //.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+  .filter(ee.Filter.eq('instrumentMode', 'IW'))
+  .select('VV')
+  .filterBounds(Map.getBounds(true))
+  //.filterDate('2017-01-01','2017-05-01')
+  
+images = images
+  .map(toBackscatterIntensity)
+
+Map.addLayer(ee.Image(1), {palette: ['000000']}, 'black', true, 0.5)
+  
+Map.addLayer(images.count(), {min: 0, max: 30, palette: ['ff0000', 'ffffff', '00ff00']}, 'count', false)
+
+var median = images.reduce(ee.Reducer.percentile([35]))
+Map.addLayer(median, {min: 0, max: 1}, 'I, 35%', false)
+Map.addLayer(median.mask(median.lt(0.01)), {min: 0, max: 0.01, palette: ['efedf5', 'bcbddc', '756bb1']}, 'I, 35% (< 0.01)')
+
+var sigma = images.reduce(ee.Reducer.stdDev())
+Map.addLayer(sigma.mask(sigma.multiply(5)), {min: 0, max: 1, palette: ['ffeda0', 'feb24c', 'f03b20']}, 'I stddev', false)
+Map.addLayer(sigma.mask(sigma.lt(0.02)), {min: 0, max: 0.02, palette: ['ffeda0', 'feb24c', 'f03b20']}, 'I stddev (<0.02)', false)
+
+
+
+// linear trend
+images = images.map(createTimeBand);
+var linearFit = images.select(['system:time_start', 'VV']).reduce(ee.Reducer.linearFit());
+Map.addLayer(linearFit, {min: 0, max: [-0.9, 8e-5, 1], bands: ['scale', 'offset', 'scale']}, 'fit', false);
+
+    
+

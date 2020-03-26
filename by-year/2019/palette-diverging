@@ -1,0 +1,22 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var images = ee.ImageCollection("COPERNICUS/S2");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var palettes = require('users/gena/packages:colorbrewer').Palettes
+
+var scale = Map.getScale()
+var aoi = ee.Geometry(Map.getBounds(true))
+images = images
+  .filterBounds(aoi)
+  .sort('CLOUDY_PIXEL_PERCENTAGE')
+  
+
+var image = ee.Image(images.first()).resample('bicubic')
+
+Map.addLayer(image, {min: 500, max: [3500, 3500, 4000], bands: ['B4', 'B3', 'B2']})
+
+
+var ndwi = image.normalizedDifference(['B3', 'B11'])
+
+var palette = palettes.Greys[9].slice(4).reverse().concat(palettes.Blues[5])
+Map.addLayer(ndwi, {min:-0.5, max: 0.5, palette: palette}, 'NDWI', true, 0.5)
+

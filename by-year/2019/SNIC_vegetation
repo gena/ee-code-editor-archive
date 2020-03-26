@@ -1,0 +1,62 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #98ff00 */ee.Geometry.Polygon(
+        [[[6.317996978759766, 53.17908662176165],
+          [6.464424133300781, 53.179806771382395],
+          [6.463050842285156, 53.24056438248143],
+          [6.319370269775391, 53.24097530800698]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Create some segmentation, I don't care how well it is for this script (as long as not TOO bad)
+
+Map.centerObject(geometry,14)
+
+var img = ee.Image(ee.ImageCollection('COPERNICUS/S2').
+  filterBounds(geometry).
+  filterDate('2017-02-01', '2017-09-30').
+  filterMetadata('CLOUDY_PIXEL_PERCENTAGE', 'less_than', 10.0).
+  filterMetadata('MGRS_TILE', 'equals', '31UGV'). 
+  sort('CLOUDY_PIXEL_PERCENTAGE', true)
+  .map(function(f) { return f.resample('bilinear')})
+  .select(['B8','B8A', 'B4','B3','B2']).first()).aside(print).divide(10000);
+
+Map.addLayer(img, {min:0.07, max: 0.14, bands: ['B4','B3','B2'], gamma: 0.8}, "S2", false)
+
+// Run SNIC on the regular square grid.
+var snic = ee.Algorithms.Image.Segmentation.SNIC({
+  image: img, 
+  size: 20,
+  compactness: 0.01,
+  connectivity: 8,
+  neighborhoodSize:256,
+}).select(["B4_mean", "B3_mean", "B2_mean", "clusters"],["B4", "B3", "B2", "clusters"])
+//.reproject(img.projection())
+
+Map.addLayer(snic, {min:0.07, max: 0.14, bands: ['B4','B3','B2'], gamma: 0.8}, "snic", false)
+
+var clusters = snic.select("clusters")
+
+
+
+// Now add the known parcel polygons into the map
+var parcels = ee.FeatureCollection("users/gglemoine62/BRP_gewaspercelen_2017_concept")
+  .filterBounds(geometry)
+var parcelsImage = parcels.randomColumn('rnd')
+  .reduceToImage(['rnd'],'mean').unmask(-1).rename('parcel') 
+
+//parcelsImage = clusters.translate(60,-10,'meters')
+
+Map.addLayer(clusters.randomVisualizer(), {}, "clusters")
+Map.addLayer(parcelsImage.randomVisualizer(), {}, 'field parcels (image)');
+
+var hist = parcelsImage.multiply(10000).toInt().addBands(clusters)
+             .reduceConnectedComponents(ee.Reducer.autoHistogram(), 'parcel', 256)
+             .arraySlice(1, 1, 2).arrayProject([0]),
+    totalN = hist.arrayReduce('sum',[0]).arrayRepeat(0,hist.arrayLength(0)),
+    P = hist.divide(totalN),
+    logP = P.log(),
+    PlogP = P.multiply(logP).arraySort(P.multiply(-1)),
+    numNotNull = logP.arrayReduce(ee.Reducer.count(),[0]).arrayGet([0]),
+    PlogP_nn = PlogP.arraySlice(0,0,numNotNull),
+    entropy = PlogP_nn.arrayReduce(ee.Reducer.sum(),[0])
+
+Map.addLayer(PlogP_nn)
+throw('stop')

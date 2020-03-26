@@ -1,0 +1,36 @@
+// sun, earth distance, image properties (bias, gain)
+
+var image = ee.Image(ee.ImageCollection('LC8_L1T_TOA').first());
+
+Map.centerObject(image, 10);
+
+var rgb = image.select([3,2,1]);
+Map.addLayer(rgb, {}, 'original')
+
+var hsv = rgb.rgbtohsv();
+var image_pan = ee.Image.cat(hsv.select(['hue', 'saturation']), image.select('B8')).hsvtorgb();
+Map.addLayer(image_pan, {}, 'sharpened');
+
+// The earth-sun distance is given by esun=1+e*cos(theta), 
+// where e=0.0167 is the eccentricity of the Earth's orbit and theta 
+// is the angular position of the Earth within its orbit.  
+// Here theta=0 corresponds to aphelion, which happens on about July 4th.  
+// Thus we have theta=2*pi*(doy-184)/365, where doy is the day of year
+// counting from zero.  Putting it all together in the EE API, we get:
+
+// Extract the image's acquisition date.
+var date = ee.Date(image.get('system:time_start'));
+// Compute the date as a day-of-year number.
+var doy = date.getRelative('day','year');
+// Compute the angular position of the Earth in its orbit.
+var theta = doy.subtract(184).multiply(2*Math.PI/365);
+// Compute the earth-sun distance, in AUs.
+var esun = theta.cos().multiply(0.0167).add(1);
+
+var b4_bias = ee.Number(img.get('RADIANCE_ADD_BAND_4'));
+var b4_gain = ee.Number(img.get('RADIANCE_MULT_BAND_4'));
+  
+print(date)
+print(doy)
+print(theta)
+print(esun)

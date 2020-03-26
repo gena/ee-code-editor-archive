@@ -1,0 +1,38 @@
+// Filter to only include images within the colorado and utah boundaries.
+//var polygon = ee.Geometry.Polygon([[
+//[-17.945606, 24.710126], [-17.775489, 24.703800], [-17.765995, 25.178440],   // Chobe Square
+//[-17.944780, 25.201167], [-17.945606, 24.710126]]]);
+
+
+// Select the Landsat 7 collection.
+var collection = ee.ImageCollection('LT5_L1T')
+  .filterDate('1990-06-01', '1990-09-01');      // Dry season May-End of August, Wet Sept to Next Cal. Year March //
+
+
+// Call SimpleLandsatComposite and define its arguments.
+var composite = 
+  ee.Algorithms.SimpleLandsatComposite(collection, 75, 3)
+  //.filterBounds(polygon);
+
+addToMap(composite, {'bands': ['B3', 'B2', 'B1'], 'gain':'3.0'}, 
+  'SLC Dry 1990');
+centerMap(24.9478,-17.8756, 11);
+
+/////////////////
+var collection = ee.ImageCollection('LT5_L1T')
+  .filterDate('1990-01-01', '1990-05-31')
+  .filter(ee.Filter.gt('google:registration_count', 1000))
+  .filter(ee.Filter.gt('google:registration_offset_x', -100))
+  .filter(ee.Filter.lt('google:registration_offset_x', 100))
+  .filter(ee.Filter.lt('google:registration_offset_y', 100))
+  .filter(ee.Filter.gt('google:registration_offset_y', -100))
+
+// Call SimpleLandsatComposite and define its arguments.
+var composite = 
+  ee.Algorithms.SimpleLandsatComposite(collection, 75, 3)
+  //.filterBounds(polygon);
+
+addToMap(composite, {'bands': ['B3', 'B2', 'B1'], 'gain':'3.0'}, 
+  'SLC Wet 1990');
+centerMap(24.9478,-17.8756, 11);
+

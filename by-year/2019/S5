@@ -1,0 +1,156 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var no2 = ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_NO2"),
+    aerosol = ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_AER_AI"),
+    co = ee.ImageCollection("COPERNICUS/S5P/OFFL/L3_CO"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([6.7201660156249545, 51.246985536595254]),
+    geometry2 = /* color: #98ff00 */ee.Geometry.Point([4.3196533203124545, 52.04795538779261]),
+    so2 = ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_SO2"),
+    o3 = ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_O3"),
+    ncho = ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_HCHO"),
+    aer = ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_AER_AI");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var palettes = require('users/gena/packages:palettes')
+var animation = require('users/gena/packages:animation')
+
+var columns = [
+  'tropospheric_NO2_column_number_density',
+  'stratospheric_NO2_column_number_density',
+  'absorbing_aerosol_index',
+  'NO2_slant_column_number_density',
+  'NO2_column_number_density',
+  'cloud_fraction'
+]
+
+function resample(images) {
+  return images.map(function(i) { return i.resample('bicubic') })
+}
+
+var vis = {
+  no2: {
+    min: 0.00006, max: 0.00024,
+    palette: palettes.cmocean.Matter[7].slice(0).reverse()
+  },
+  so2: {
+    min: 0.2, max: 0.92,
+    palette: palettes.cmocean.Matter[7].slice(0).reverse()
+  },
+  ncho: {
+    min: 0.84, max: 2.38,
+    palette: palettes.cmocean.Matter[7].slice(0).reverse()
+  },
+  o3: {
+    min: 3, max:4,
+    palette: palettes.cmocean.Matter[7].slice(0).reverse()
+  }
+  
+}
+
+// visualize chart for POI
+var start = ee.Date('2018-01-01')
+
+print(ui.Chart.image.series({
+  imageCollection: no2.select(['cloud_fraction', 'absorbing_aerosol_index']), 
+  region: geometry, 
+  reducer: ee.Reducer.first(), 
+  scale: 1000, 
+  xProperty: 'system:time_start'
+}))
+
+print(ui.Chart.image.series({
+  imageCollection: no2.select(['tropospheric_NO2_column_number_density', 'stratospheric_NO2_column_number_density', 'NO2_slant_column_number_density', 'NO2_column_number_density']), 
+  region: geometry, 
+  reducer: ee.Reducer.first(), 
+  scale: 1000, 
+  xProperty: 'system:time_start'
+}))
+zqa
+
+print(ui.Chart.image.seriesByRegion({
+  imageCollection: no2, 
+  regions: ee.FeatureCollection([geometry, geometry2]), 
+  reducer: ee.Reducer.max(), 
+  band: 'tropospheric_NO2_column_number_density',
+  scale: 1000, 
+  xProperty: 'system:time_start'
+}))
+
+// visualize all
+var start = ee.Date('2018-11-01')
+Map.addLayer(ncho.select('tropospheric_HCHO_column_number_density_amf').mean(), vis.ncho, 'mean (ncho)', true, 0.9)
+Map.addLayer(so2.select('SO2_column_number_density_amf').mean(), vis.so2, 'mean (so2)', true, 0.9)
+Map.addLayer(o3.select('O3_column_number_density_amf').mean(), vis.o3, 'mean (o3)', true, 0.9)
+Map.addLayer(no2.select('tropospheric_NO2_column_number_density').mean(), vis.no2, 'mean (no2)', true, 0.9)
+// Map.addLayer(no2.select('tropospheric_NO2_column_number_density').reduce(ee.Reducer.percentile([25])), vis.no2, '25%', true, 0.9)
+// Map.addLayer(no2.select('tropospheric_NO2_column_number_density').reduce(ee.Reducer.percentile([50])), vis.no2, '50%', true, 0.9)
+// Map.addLayer(no2.select('tropospheric_NO2_column_number_density').reduce(ee.Reducer.percentile([75])), vis.no2, '75%', true, 0.9)
+
+function animateTimeComposites() {
+  var dates = ee.List.sequence(0, 30, 1).map(function(offset) {
+    return start.advance(offset, 'day')
+  })
+  
+  print(dates)
+  
+  no2 = no2.filterBounds(Map.getBounds(true))
+  
+  var images = dates.map(function(t) {
+    t = ee.Date(t)
+    var i = resample(no2.select('tropospheric_NO2_column_number_density').filterDate(t, t.advance(5, 'day'))).mean()
+
+    // var mask = i.unitScale(0.00006, 0.00009)
+    // i = i.mask(mask)
+  
+    return i
+      .set({ label: t.format() })
+  })
+  
+  animation.animate(images, { 
+    vis: vis.no2, 
+    label: 'label',
+    maxFrames: images.size().min(100),
+    opacity: 0.9
+  })
+}
+
+function animateImages() {
+  var scale = Map.getScale() * 100
+  
+  // var aoi = ee.Geometry(Map.getCenter()).buffer(scale)
+  var aoi = ee.Geometry(Map.getBounds(true)).buffer(-scale)
+
+  var images = no2
+    .select('tropospheric_NO2_column_number_density')
+    .filterDate(start, start.advance(1, 'year'))
+    .filterBounds(aoi)
+    
+  images = images.map(function(i) {
+    var pixelCount = i.mask().reduceRegion({
+      reducer: ee.Reducer.sum(), 
+      geometry: aoi, 
+      scale: scale
+    }).values().get(0)
+    
+    return i.set({
+      pixelCount: pixelCount
+    })
+  })
+  
+  images = images
+    .filter(ee.Filter.gt('pixelCount', 0))
+    .map(function(i) {
+      return i.set({ label: i.date().format() })
+    })
+
+  print('Number of images: ', images.size())
+
+  animation.animate(images, { 
+    vis: vis.no2, label: 'label',
+    maxFrames: images.size().min(100),
+    opacity: 0.9
+  })
+}
+
+
+// animateImages()
+
+// animateTimeComposites()

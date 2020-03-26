@@ -1,0 +1,100 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var lineString1 = /* color: d63000 */ee.Geometry.LineString(
+        [[-122.607421875, 44.87144275016589],
+         [-119.3994140625, 44.18220395771566],
+         [-117.7734375, 46.437856895024225],
+         [-112.2802734375, 44.33956524809718],
+         [-110.21484375, 48.07807894349862]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// split LineString (EE)
+
+/**
+ * Simple 2D Euclidean distance
+ */
+var getDistance = function(pt1, pt2) {
+  var dx = ee.Number(pt2.get(0)).subtract(pt1.get(0));
+  var dy = ee.Number(pt2.get(1)).subtract(pt1.get(1));
+  
+  return dx.multiply(dx).subtract(dy.multiply(dy)).sqrt();
+}
+
+/** 
+ * Splits LineString into a set of segments.
+ */
+var explodeLineString = function(lineString, segmentLength, srs) {
+  var length = lineString.length(1e-5, srs)
+  var coords = lineString.coordinates()
+
+  // current point
+  var pt1 = ee.List(coords.get(0));
+  var ipt2 = ee.Number(1);
+  
+  // current length
+  var currentLength = ee.Number(0); 
+  
+  var segments = [];
+  var segmentId = 0;
+  while(currentLength.lt(length).and(ipt2.lt(coords.length())))
+  {
+    var segmentPoints = [];
+    segmentPoints.push(pt1);
+    
+    var currentSegmentLength = ee.Number(0);
+    while(currentSegmentLength.lt(segmentLength)) 
+    {
+      if(ipt2.eq(coords.length())) {
+        break;
+      }
+
+      var pt2 = ee.List(coords.get(ipt2));
+      var distance = getDistance(pt1, pt2);
+      
+      if(currentSegmentLength.add(distance).gt(segmentLength)) {  // split
+        // hypotenuse lengths
+        var h1 = segmentLength.subtract(currentSegmentLength); 
+        var h2 = distance;
+        
+        // cathetus2
+        var dx2 = ee.Number(pt2.get(0)).subtract(pt1.get(0));
+        var dy2 = ee.Number(pt2.get(1)).subtract(pt1.get(1));
+
+        // cathetus1
+        var ratio = h1.divide(h2);
+        var x1 = ee.Number(pt1.get(0)).add(dx2.multiply(ratio));
+        var y1 = ee.Number(pt1.get(1)).add(dy2.multiply(ratio));
+
+        currentSegmentLength = currentSegmentLength.add(h1);
+        
+        segmentPoints.push([x1, y1]);
+      } else { // next
+        currentSegmentLength = currentSegmentLength.add(distance);
+        ipt2 = ipt2.add(ee.Number(1));
+  
+        segmentPoints.push(pt2);
+      }
+    }
+    
+    return ee.Feature(ee.Algorithms.GeometryConstructors.LineString(segmentPoints))
+  }
+};
+
+var srs = ee.Projection('EPSG:4326'); // WGS84
+var step = 0.2; // [degrees]
+
+var step = ee.Number(10000).divide(lineString1.projection().nominalScale())
+
+var lines = ee.List([lineString1])
+var segments = lines.map(function(f) { return explodeLineString(lineString1, step, srs) })
+
+print(segments)
+
+var fc = ee.FeatureCollection(segments);
+
+Map.addLayer(fc, {}, 'segments');
+
+//var segmentsImage = fc.reduceToImage(['id'], ee.Reducer.mean()).focal_max(5);
+
+//var colors = ['a6cee3', '1f78b4', 'b2df8a', '33a02c', 'fb9a99', 'e31a1c', 'fdbf6f', 'ff7f00', 'cab2d6', '6a3d9a', 'ffff99'];
+//Map.addLayer(segmentsImage.select('mean'), {min:0, max:fc.aggregate_count('id').getInfo(), palette:colors}, 'segments as raster');
+
+//Map.centerObject(lineString1, 6)

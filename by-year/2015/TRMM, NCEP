@@ -1,0 +1,22 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var ncep = ee.ImageCollection("NOAA/CFSV2/FOR6H"),
+    trmm = ee.ImageCollection("TRMM/3B42");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// TRMM, NCEP
+
+var palette = ['f7fbff', 'deebf7', 'c6dbef', '9ecae1', '6baed6', '4292c6', '2171b5', '08519c', '08306b'];
+
+// NCEP
+var c = ncep
+  .filterDate("2014-01-01", "2014-10-01")
+  .select(['Precipitation_rate_surface_6_Hour_Average']);
+Map.addLayer(c.sum(), {min:0, max:0.03, palette: palette}, 'P, NCEP, sum()');
+Map.addLayer(c, {}, 'P, NCEP', false)
+
+// TRMM
+var c = trmm
+  .filterDate("2014-01-01", "2014-10-01")
+  .select(['precipitation']);
+Map.addLayer(c.sum(), {min:0, max:250, palette: palette}, 'P, TRMM, sum()');
+Map.addLayer(c, {}, 'P, TRMM', false)
+

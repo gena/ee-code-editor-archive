@@ -1,0 +1,52 @@
+// DATASET - HydroSHEDS
+//
+// WWF/USGS HydroSHEDS datasets demo
+// http://hydrosheds.cr.usgs.gov
+// =================================
+
+// WWF HydroSHEDS flow accumulation, 15 arc-seconds
+// https://earthengine.google.org/#detail/WWF%2FHydroSHEDS%2F15ACC
+var wwf_15acc = ee.Image('WWF/HydroSHEDS/15ACC');
+
+// WWF HydroSHEDS Drainage Direction 15 arc-second
+// https://earthengine.google.org/#detail/WWF%2FHydroSHEDS%2F15DIR
+var wwf_15dir = ee.Image('WWF/HydroSHEDS/15DIR');
+
+// WWF HydroSHEDS Hydrologically Conditioned DEM, 15 arc-second
+// https://earthengine.google.org/#detail/WWF%2FHydroSHEDS%2F15CONDEM
+//   NOTE: conditioned DEM is for flow analysis only, not applicable for other terrain analysis.
+//         For more info, see: http://hydrosheds.cr.usgs.gov/datasets.php#4
+var conddem = ee.Image('WWF/HydroSHEDS/15CONDEM');
+
+// Flow Accumulation (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=15accb )
+var flowacc = ee.Image('WWF/HydroSHEDS/15ACC');
+
+// Style Map for Flow Accumulation                                
+var style_flowacc = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#0000ff" quantity="0" label="none" opacity="0"/>\
+    <ColorMapEntry color="#00ff00" quantity="100" label="1-100" />\
+    <ColorMapEntry color="#00BB66" quantity="10000" label="100-10k" />\
+    <ColorMapEntry color="#0000ff" quantity="100000" label="10k-100k" />\
+    <ColorMapEntry color="#ff00ff" quantity="1000000" label="100k-1M" />\
+    <ColorMapEntry color="#ff0000" quantity="28000000" label="1M-28M" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+// Radians Function
+function radians(img) {
+  return img.toFloat().multiply(3.1415927).divide(180);
+}
+
+var terrain = ee.call('Terrain', ee.Image(conddem));
+var slope = radians(terrain.select(['slope']));
+
+// Add Flow Accumulation to the map - styled and raw data (for pixel interrogation)
+addToMap(wwf_15acc, {'min': 1, 'max': 28000000}, 'WWF/HydroSHEDS/15ACC', false);
+addToMap(flowacc.sldStyle(style_flowacc), {}, 'Flow Accumulation Styled', true);
+
+// Calculate TWI
+var TWI = wwf_15acc.divide(slope.tan()).log();
+addToMap(wwf_15acc, {'min': 1, 'max': 1000}, 'TWI');
+

@@ -1,0 +1,37 @@
+// download as stack
+
+var LC8_BANDS = ['B1',    'B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B9', 'B10', 'B11', 'BQA'];
+var LC7_BANDS = ['B1',    'B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B7', 'B7', 'B7', 'B7'];
+var STD_NAMES = ['blue2', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'cirrus', 'temp1', 'temp2', 'BQA'];
+
+var images = ee.ImageCollection('LANDSAT/LC8_L1T_TOA').filterBounds(Map.getBounds(true)).select(LC8_BANDS, STD_NAMES).toList(200);
+
+var bounds = Map.getBounds();
+var region = '[['+bounds[0]+', '+bounds[1]+'], ['+bounds[2]+', '+bounds[1]+'], ['+bounds[2]+', '+bounds[3]+'], ['+bounds[0]+', ' + bounds[3] + ']]';
+
+var timeCount = 57; // images.length().getInfo();
+var bandCount = 12; // ee.List(ee.Image(images.get(0)).getInfo().bands).length().getInfo();
+
+print(timeCount)
+print(bandCount)
+
+for(var band = 0; band < 1; band++) {
+  var bandImages = [];
+  
+  var bandName = ee.List(ee.Image(ee.Image(images.get(0))).select([band]).getInfo().bands).get(0).getInfo().id;
+  
+  for(var time = 0; time < timeCount; time++) {
+    var image = ee.Image(ee.Image(images.get(time)));
+    var date = image.getInfo().properties['DATE_ACQUIRED'];
+    bandImages.push(image.select([band], [bandName + '_' +date]));
+  }
+  var bandImage = ee.Image(bandImages);
+  
+  var resolution = ee.List(bandImages[0].getInfo().bands).get(0).getInfo().crs_transform[0];
+  
+  print(bandImage.getDownloadURL({name: bandName, 
+    format: 'tif', 
+    scale: resolution,
+    region: region
+  }));
+}

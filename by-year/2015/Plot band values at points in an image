@@ -1,0 +1,93 @@
+// Plot band values at points in an image.
+var applyCloudScore = function(image) {
+  var t = ee.Algorithms.Landsat.simpleCloudScore(image);
+  var quality = t.select('cloud').lte(5);
+  var maskedImage = image.mask().reduce('min').and(quality);
+  return image.mask(maskedImage);
+};
+
+var collection = ee.ImageCollection('LANDSAT/LE7_L1T_TOA')
+    .filterDate('2009-01-01','2012-12-31')
+    .map(applyCloudScore);
+print(collection.first());
+    
+var masked_image = collection.select(['B1','B2','B3','B4','B5','B7'])
+                   .median()
+                   .multiply(255)
+                   .toUint8();
+Map.addLayer(masked_image, {bands: ['B3', 'B2', 'B1'], min:0, max:80}, 'masked_image');
+Map.addLayer(collection.count(), {min:0, max:10}, 'pixel count');
+Map.setCenter(5.7833, 7.0327, 12);
+
+var COLOR = {
+  Water: '22e5ef',
+  Urban: 'ff4217',
+  Cropland: '4de41c',
+  Forest:'2b783b',
+  Oil_Palm:"fbff13"
+};
+
+// Three known locations.
+var Water = ee.Feature(
+    ee.Geometry.Point(7.075642, 4.174913), {'label': "Water"});
+var Urban = ee.Feature(
+    ee.Geometry.Point(5.79819800, 7.03809100), {'label': "Urban"});
+var Cropland = ee.Feature(
+    ee.Geometry.Point(5.76943000, 7.02565500), {'label': "Cropland"});
+var Forest = ee.Feature(
+    ee.Geometry.Point(9.307568, 6.411237), {'label': "Forest"});
+var Oil_Palm = ee.Feature(
+    ee.Geometry.Point(5.45830800, 6.82898400), {'label': "Oil_Palm"});
+
+var points = ee.FeatureCollection([Water, Urban, Cropland, Forest, Oil_Palm]);
+Map.addLayer(points, {}, 'points');
+
+var bandChart = Chart.image.regions(
+    masked_image, points, null, 30, 'label');
+bandChart = bandChart.setChartType('LineChart');
+bandChart = bandChart.setOptions({
+  title: 'Landsat 7 TOA band values',
+  hAxis: {
+    title: 'Band'
+  },
+  vAxis: {
+    title: 'Reflectance'
+  },
+  lineWidth: 1,
+  pointSize: 4,
+  series: {
+    0: {color: COLOR.WATER},
+    1: {color: COLOR.URBAN},
+    2: {color: COLOR.CROPLAND},
+    3: {color: COLOR.FOREST},
+    4: {color: COLOR.OIL_PALM}
+  }
+});
+
+// From: http://landsat.usgs.gov/band_designations_landsat_satellites.php
+var wavelengths = [.48, .56, .65, .86, 1.61, 2.2];
+
+var spectraChart = Chart.image.regions(
+    masked_image, points, null, 30, 'label', wavelengths);
+spectraChart = spectraChart.setChartType('LineChart');
+spectraChart = spectraChart.setOptions({
+  title: 'Landsat 7 TOA spectra',
+  hAxis: {
+    title: 'Wavelength (micrometers)'
+  },
+  vAxis: {
+    title: 'Reflectance'
+  },
+  lineWidth: 1,
+  pointSize: 4,
+  series: {
+    0: {color: COLOR.WATER},
+    1: {color: COLOR.URBAN},
+    2: {color: COLOR.CROPLAND},
+    3: {color: COLOR.FOREST},
+    4: {color: COLOR.OIL_PALM}
+  }
+});
+
+print(bandChart);
+print(spectraChart);

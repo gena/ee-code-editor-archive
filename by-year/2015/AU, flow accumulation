@@ -1,0 +1,5 @@
+// AU, flow accumulation
+
+var flowaccu = new ee.Image('GME/images/05889347502198831302-14427924602502221744');
+Map.centerObject(flowaccu);
+Map.addLayer(flowaccu.mask(flowaccu.gt(10)), {min:10, max:10000000, palette:'0000FF'}, 'flow accumulation')

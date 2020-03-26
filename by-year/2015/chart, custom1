@@ -1,0 +1,56 @@
+// chart, custom1
+
+// Plot a histogram of elevation in Colorado *without* using
+// the chart helper function.
+var elevation = ee.Image('srtm90_v4');
+var colorado = ee.Geometry.Rectangle(-109.05, 41, -102.05, 37);
+
+// Manually compute a histogram.
+var hist = ee.Reducer.histogram({minBucketWidth: 300});
+var dict = elevation.reduceRegion(hist, colorado, 200);
+
+// Use the custom helper function below to get a data table.
+var dt = getDataTable(dict.get('elevation').getInfo());
+
+// Fancy options.
+var options = {
+  title: 'Histogram of elevation',
+  vAxis: {
+    title: 'Frequency'
+  },
+  bar: {  
+    groupWidth: '100%'  // Eliminate horizontal space between bars.
+  },
+  legend: {
+    position: 'none'
+  },
+  hAxis: {
+    ticks: getTicks(dt.rows),
+    baselineColor: 'transparent'  // Hide off-zero vertical axes.
+  }
+};
+print(Chart(dt, 'ColumnChart', options));
+
+function getTicks(rows) {
+  // Infer min from difference between first two entries.
+  var bucketWidth = rows[1].c[0].v - rows[0].c[0].v;
+  return rows.map(function(row) {
+    var min = parseInt(row.c[0].v);
+    // Use bucket mins as tick values and position to the
+    // left of each bucket column.
+    return {'v': min - bucketWidth / 2, 'f': min}; 
+  });
+}
+
+// Generates a Vizualization API data table from histogram output.
+function getDataTable(histDict) {
+  var rows = histDict.histogram.map(function(v, i) {
+    var min = histDict.bucketMin + histDict.bucketWidth * i;
+    return {c: [{v: min}, {v: v}]}
+  });
+  var cols = [
+      {id: 'bucketMin', label: 'Bucket Min', type: 'number'},
+      {id: 'count', label: 'Count', type: 'number'}
+  ];
+  return {cols: cols, rows: rows};
+}

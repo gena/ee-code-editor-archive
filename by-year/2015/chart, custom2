@@ -1,0 +1,30 @@
+// chart, custom2
+
+// Plot a histogram of elevation in Colorado *without* using
+// the chart helper function.
+var elevation = ee.Image('srtm90_v4');
+var colorado = ee.Geometry.Rectangle(-109.05, 41, -102.05, 37);
+
+// Manually compute a histogram.
+var hist = ee.Reducer.histogram({minBucketWidth: 300});
+var dict = elevation.reduceRegion(hist, colorado, 200);
+// print(dict);
+
+// Use the custom helper function below to get a data table.
+var dt = getDataTable(dict.get('elevation').getInfo());
+// print(dt);
+
+print(Chart(dt, 'LineChart'));
+
+// Generates a Vizualization API data table from histogram output.
+function getDataTable(histDict) {
+  var rows = histDict.histogram.map(function(v, i) {
+    var min = histDict.bucketMin + histDict.bucketWidth * i;
+    return {c: [{v: min}, {v: v}]}
+  });
+  var cols = [
+      {id: 'bucketMin', label: 'Bucket Min', type: 'number'},
+      {id: 'count', label: 'Count', type: 'number'}
+  ];
+  return {cols: cols, rows: rows};
+}

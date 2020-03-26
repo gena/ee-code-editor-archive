@@ -1,0 +1,12 @@
+
+
+var image = ee.Image ("USGS/SRTMGL1_003")
+Map.addLayer( image, {min:1000, max: 0,  palette_:["blue", "green", "yellow", "red"]})
+Map.addLayer ( image.lt (200), {pallete :["red", "blue"]})
+var zones = image.where (image.lt(200),0)
+.where (image.gt(200),200)
+.where (image.gt(400),400)
+.where (image.gt(600),600)
+
+
+Map.addLayer(zones, {palette: ["blue", "green", "yellow", " red"], min: 0, max: 600})

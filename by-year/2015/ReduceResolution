@@ -1,0 +1,37 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: d63000 */ee.Geometry.Polygon(
+        [[[-122.76955604553223, 39.71392151213216],
+          [-122.73827308572027, 39.72009920432945],
+          [-122.70252227783203, 39.723494439436394],
+          [-122.77015686035156, 39.71742073619116]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// show mask in original (finest) resolution
+var mask = ee.Image(0).toByte().paint(geometry, 1)
+Map.addLayer(mask.mask(mask), {}, 'original')
+
+// reproject mask to 5m resolution
+mask = mask.reproject('EPSG:4326', null, 5)
+Map.addLayer(mask.mask(mask).reproject(mask.projection().scale(5, 5)), {}, 'crappy resample')
+
+// resample using reduce resolution
+var maskReduced = mask.reduceResolution(ee.Reducer.max(), true)
+Map.addLayer(maskReduced.mask(maskReduced).reproject(mask.projection().scale(5, 5)), {opacity:0.5}, 'better resample (reduce resolution)')
+
+// buffer
+maskReduced = maskReduced
+      .focal_max(3)
+      .reproject(mask.projection().scale(5, 5))  
+
+// compute distance
+var d = maskReduced.not().distance(ee.Kernel.euclidean(500, 'meters')).reproject(mask.projection().scale(5, 5))
+Map.addLayer(d.mask(maskReduced), {min: 0, max:300}, 'distance in coarser grid')
+
+// gaussian distance
+var sigma = 0.2
+var c = 1/(sigma*Math.sqrt(2*Math.PI))
+var d = ee.Image(c).multiply(ee.Image(Math.E).pow(ee.Image(-1/(2*c*c)).multiply(d.pow(2))))
+Map.addLayer(d.mask(maskReduced), {min: 0, max:1}, 'distance in coarser grid')
+
+
+print(Map.getCenter())
+Map.setCenter(-122.72, 39.72, 15)

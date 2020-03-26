@@ -1,0 +1,69 @@
+// Murray & Darling, catchments
+
+var addToMapAsRaster = function(shapes, name, palette, width, opacity, filled, visible) {
+  var outline = width;
+  var img; 
+  
+  if (filled) {
+    img = ee.Image().toByte();
+    img = img.paint(shapes, 1); // paint fill
+    img = img.paint(shapes, 0, outline + 1); // paint outline
+  } else {
+    img = ee.Image(0).mask(0);
+    img = img.paint(shapes, 0, width);
+  }
+
+  var options = {
+    palette: palette,
+    max: 1,
+    opacity: opacity
+  };
+
+  Map.addLayer(img, options, name, visible);
+
+  return img;
+}
+
+var au = [
+  null, // 0
+  null, // 1
+  ee.FeatureCollection('ft:1Dq_Q2JvvYkYO-kFX7L4E4Nzycwc50j9hfhSsBQJW'), // 2
+  ee.FeatureCollection('ft:1778IyIZLZKSKVgko9X3aIV94E7jcm28uniyD6ycp'), // 3
+  ee.FeatureCollection('ft:1WZ4Utbbatdl3vFVK7kTmAyHDyRjhMVfXeJeJTnBa'), // 4
+  ee.FeatureCollection('ft:1rrk-yEOb8ILSolV_kSVD1qGxszHcy0cSL9UnUxIh'), // 5
+  ee.FeatureCollection('ft:1-aMEhsi4usdxVUSSjKkJGC8pir3duCi_5oItnxtT'), // 6
+  ee.FeatureCollection('ft:1YDeXF2LN8gDeJAOJTX0Kwp9QwV_-ZFI2llKilTGu') // 7
+];
+
+var aoi_features = au[5];
+
+var filter = ee.Filter.or(
+  ee.Filter.eq('HYBAS_ID', 5050597410), 
+  ee.Filter.eq('HYBAS_ID', 5050593410), 
+  ee.Filter.eq('HYBAS_ID', 5050595630), 
+  ee.Filter.eq('HYBAS_ID', 5050595260), 
+  ee.Filter.eq('HYBAS_ID', 5050591050)
+  );
+
+var aoi = aoi_features.filter(filter);
+var not_aoi = aoi_features.filter(filter.not());
+
+// Map.centerObject(aoi)
+Map.addLayer(not_aoi)
+
+addToMapAsRaster(au[6], 'au6', '101010,000000', 2, 0.8, false, true);
+
+// OSM
+var rivers_lines_osm = ee.FeatureCollection('ft:1nlWWjT4VkGjkp-kXKroFuyUuKDUSTqce_DDtmOt1');
+var rivers_polygons_osm = ee.FeatureCollection('ft:1gUbHjPLpeC4Vzi59vE5JSFfLRDtcrngyWfSn8mQC');
+
+var rivers_lines_osm_image = ee.Image(0).mask(0).toByte().paint(rivers_lines_osm, 0, 1.0).clip(aoi);
+Map.addLayer(rivers_lines_osm_image, {palette:'43a2ca'}, 'rivers_lines', true);
+
+var river_polygons_osm_image = ee.Image(0).mask(0).toByte().paint(rivers_polygons_osm, 'fill').paint(rivers_polygons_osm, 1, 1).clip(aoi);
+Map.addLayer(river_polygons_osm_image, {palette: '43a2ca', 'opacity': 1.0}, 'rivers_polygons');
+
+
+// var lakeVictoria = ee.Geometry.Rectangle(31.00, 0.50, 34.78, -2.81);
+// var lakeVictoriaF = ee.Feature(lakeVictoria, {'type': 'lake'});
+// Map.addLayer(lakeVictoriaF)

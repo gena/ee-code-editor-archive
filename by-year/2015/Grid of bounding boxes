@@ -1,0 +1,15 @@
+// Grid of bounding boxes.
+var polys = [];
+var edge = 0.5
+for (var lon = -120; lon < -90; lon += edge) {
+  var x1 = lon - edge/2;
+  var x2 = lon + edge/2;
+  for (var lat = 35; lat < 45; lat += edge) {
+    var y1 = lat - edge/2;
+    var y2 = lat + edge/2;
+    polys.push(ee.Feature.Rectangle(x1, y1, x2, y2));
+  }
+}
+var fc=ee.FeatureCollection(polys);
+addToMap(fc, {}, 'gridded boxes');
+centerMap(-106, 40, 5);

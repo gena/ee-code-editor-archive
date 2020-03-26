@@ -1,0 +1,43 @@
+// MODIS clouds and shadows (QA bits)
+
+var product = 'MOD09GA';
+var date = '2011-04-01';
+var qaBand = 'state_1km';
+var bands = ['sur_refl_b01', 'sur_refl_b04', 'sur_refl_b03'];
+
+/*
+var product = 'MODIS/MOD09A1';
+var date = '2015-01-01';
+var qaBand = 'StateQA';
+var bands = ['sur_refl_b01', 'sur_refl_b04', 'sur_refl_b03'];
+*/
+
+var testBits = function(image, bits){
+    var pattern = 0;
+    for (var i = 0; i < bits.length; i++){
+       pattern += Math.pow(2, bits[i])
+    }
+    
+    return image.bitwiseAnd(pattern).gt(0);
+};
+
+var maskCloudsAndShadows = function(image) {
+    var qa = image.select(qaBand);
+    return image.mask(testBits(qa, [2, 10]).not()); 
+};
+
+var images = ee.ImageCollection(product).filterDate(date);
+var masked = images.map(maskCloudsAndShadows);
+
+// add map layers
+Map.addLayer(images.mosaic(), {min:0, max:3000, bands: bands}, 'original', false);
+
+Map.addLayer(masked, {min:0, max:3000, bands: bands}, 'masked');
+
+var qa = images.mosaic().select(qaBand);
+
+var clouds = qa.mask(testBits(qa, [10])); 
+Map.addLayer(clouds, {min:0, max:1, palette:'00ffff'}, 'clouds');
+
+var shadows = qa.mask(testBits(qa, [2])); 
+Map.addLayer(shadows, {min:0, max:1, palette:'0000ff'}, 'shadows');

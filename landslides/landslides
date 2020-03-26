@@ -1,0 +1,158 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var demALOS = ee.Image("JAXA/ALOS/AW3D30_V1_1"),
+    demNED = ee.Image("USGS/NED"),
+    demSRTM30 = ee.Image("USGS/SRTMGL1_003");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+ /*
+ 
+  [ ] Download landslide database from https://data.nasa.gov/Earth-Science/Global-Landslide-Catalog-Export/rthp-tcrg
+  [ ] Methods to implement in EE
+  [ ] Explore
+  [ ] Analyse precipitation and DEM
+  [ ] Extract features (train TF)
+ 
+ */ 
+
+function showDEM(dem, name) {
+ var hs = ee.Terrain.hillshade(dem.resample('bilinear'), 315, 45)
+ Map.addLayer(hs, {min: 50, max: 200}, name, false)
+}
+
+showDEM(demALOS.select('MED'), 'alos')
+showDEM(demNED, 'ned')
+showDEM(demSRTM30, 'srtm')
+
+var diff = demSRTM30.resample('bicubic').subtract(demALOS.select('MED').resample('bicubic'))
+Map.addLayer(diff.mask(diff.abs().unitScale(0, 10)), {min: -10, max: 10, palette: ['ff0000', 'ffffff', '00ff00']}, 'SRTM - ALOS', false)
+
+var events = ee.FeatureCollection('ft:1v0aybnT-87aRDuNuFfACAQpEC4zCdf1U5dO3ezQ0', 'latitude')
+
+print(events.distinct('landslide_size').aggregate_array('landslide_size'))
+
+// add readable date/time
+events = events
+  .map(function(f) {
+    return f
+      .set({t: ee.Date(f.get('event_date'))})
+      .set({event_date: ee.Number(f.get('event_date'))})
+  })
+
+events = events.filter(ee.Filter.inList('landslide_size', ['very_large', 'catastrophic', 'large']))
+events = events.filter(ee.Filter.gt('event_date', ee.Date('2015-01-01').millis()))
+
+Map.addLayer(events, {color: 'yellow'}, 'landslide point')
+
+
+// var area = events.map(function(f) {
+//   return f.buffer(Map.getScale() * 100)
+// })
+
+// Map.addLayer(area, {color: 'yellow'}, 'landslide area (potential)')
+
+
+function computeSignal(location) {
+ var demDIFF = diff.reduceRegion({
+   reducer: ee.Reducer.mean(), 
+   geometry: location.geometry().buffer(1000), 
+   scale: 30
+ }).values().get(0)
+ 
+ return location
+  .set({demDIFF: demDIFF})
+}
+
+events = events.map(computeSignal)
+
+print(events.first())
+
+print(events.limit(100).aggregate_array('demDIFF'))
+
+Map.addLayer(ee.Image().paint(events, 1).focal_max(1), {}, 'diff per location')
+
+
+
+
+// show images
+
+var animation = require('users/gena/packages:animation')
+var assets = require('users/gena/packages:assets')
+var palettes = require('users/gena/packages:colorbrewer').Palettes
+
+var bounds = ee.Geometry(Map.getBounds(true))//.centroid(1)
+
+// var bounds = geometry
+
+
+// get images from one or multiple missions
+var images = assets.getImages(bounds, {
+//filter: ee.Filter.date("1985-01-01", "1995-01-01"),
+//filter: ee.Filter.date("2018-07-22", "2020-01-01"),
+filter: ee.Filter.date("2016-05-01", "2016-10-01"),
+resample: true,
+//filterMasked: true,
+missions: [
+  'S2', 
+  //'L8', 
+  //'L7', 
+  //'L5',
+  //'L4'
+]
+}).sort('system:time_start')
+
+print(images.map(function(i) { return i.set({t: i.date().format() })}).aggregate_array('t'))
+
+// images = images.map(function(i) { 
+//   return i.visualize({bands:['swir','nir','red'], gamma: 2, min: 0.07})
+//     .set({ label: i.date().format('YYYY-MM-dd') })
+// })
+//animation.animate(images, {label: 'label', maxFrames: 300})  
+
+// filter out noisy images
+// images = assets.getMostlyCleanImages(images, bounds, {
+//     scale: Map.getScale() * 10, 
+  
+//     // how much should we deviate from cloud frequency when filtering images, use negative value to allow more (cloudy) images
+//     //cloudFrequencyThresholdDelta: 0.15,
+
+//     // percentile and band used for cloudness, usually enough to choose one like green    
+//     scorePercentile: 95,
+//     qualityBand: 'green',
+//   })
+//   .sort('system:time_start')
+//   //.sort('quality')
+
+print('Count: ', images.size())
+
+images = images
+.map(function(i) {
+  var image = i
+  //var image = images.filterDate(i.date(), i.date().advance(-1, 'month')).mosaic()
+
+  // false-color index
+  // var ndwi = image.normalizedDifference(['green', 'nir']).unitScale(-0.1, 0.15)
+  // var mndwi = image.normalizedDifference(['green', 'swir']).unitScale(-0.1, 0.4)
+  // var ndvi = image.normalizedDifference(['red', 'nir']).unitScale(-0.1, 0.15)
+  
+  // return ee.Image([ndvi, ndvi, mndwi]).visualize({})
+
+  //return image.visualize({bands:['red','green','blue'], gamma: 1.4, min:0.05, max:[0.5, 0.5, 0.55]})
+  //return image.normalizedDifference(['green', 'nir']).visualize({palette:palettes.Blues[9], min: -0.1, max: 0.3})    
+  return image.visualize({bands:['swir','nir','red'], gamma: 2, min: 0.05, max: 0.6})
+    .set({ label: i.date().format('YYYY-MM-dd').cat(' ').cat(i.get('MISSION')) })
+})
+
+// animate
+animation.animate(images, {label: 'label', maxFrames: 100})  
+
+// export video
+// var utils = require('users/gena/packages:utils')
+// utils.exportVideo(images, {
+//   bounds: bounds, 
+//   label: 'label', 
+//   maxFrames: 600, 
+//   name: 'animation', 
+//   label: 'label', 
+//   framesPerSecond: 10 
+// })
+
+

@@ -1,0 +1,29 @@
+// BUG: download image generates black lines
+
+// grab some image: winter, lake, long shadows in Iceland
+Map.setCenter(-18.943005,64.082499,12);
+
+var image = ee.Image("LANDSAT/LC8_L1T/LC82190152013324LGN00")
+      .select(['B4', 'B3', 'B2'], ['red', 'green', 'blue']);
+
+// get bounds as a geometry
+var bounds = Map.getBounds(true);
+
+// add map layer
+var visuals = { min: 8500, max: 15000 };
+Map.addLayer(image, visuals, image.getInfo().id)
+
+// download
+var boundsJson = JSON.stringify(bounds);
+var options = { name: 'L8', format: 'png', scale: 10, region: boundsJson };
+var url = image.visualize(visuals).getDownloadURL(options);
+print(url);
+
+// show histogram (use negative buffer for speed-up)
+var histogram_bounds = ee.Geometry(bounds).centroid(1).buffer(2000);
+print(Chart.image.histogram(image, histogram_bounds));
+
+// show bounds used for histogram
+histogram_bounds = ee.Image(0).mask(0).byte().paint(histogram_bounds, 255, 2);
+Map.addLayer(histogram_bounds, {min:0, max:255, opacity:0.5}, 'histogram bounds');
+

@@ -1,0 +1,11 @@
+var coords = ee.Image.pixelLonLat().divide(10).floor().int().reduce(ee.Reducer.sum()).bitwiseAnd(1)
+  .changeProj('EPSG:3031', 'EPSG:3857')
+  
+Map.addLayer(coords, {min:0, max:1})
+
+var dem = ee.Image('NOAA/NGDC/ETOPO1').select('ice_surface')
+  .changeProj('EPSG:3031', 'EPSG:3857')
+  
+Map.addLayer(dem.selfMask(), {min:-4000, max:4000, palette: ['1A2659','455285','7784B7','AAB7E8','D3E0FA','3C5600','7A711F','B79A5E','F1CEA4','FDFDE6']})
+
+Map.setCenter(0, 0, 3)

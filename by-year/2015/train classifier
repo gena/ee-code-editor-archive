@@ -1,0 +1,19 @@
+// train classifier
+// see also Workspace: https://earthengine.google.org/#workspace/EIUBUuSjgwE
+
+var input = ee.Image("LE7_TOA_1YEAR/2001")
+var region = ee.Geometry.Rectangle([2.34802, 10.30052, 12.56531, 1.22672])
+var features = ee.FeatureCollection("ft:1wp3BTRf4VvN5RlG92E3doir7UzkvebRDStQc2kmY")
+var classifier = input.trainClassifier({
+  training_features: features,
+  training_property: "class",
+  classifier_name: "VotingSvm"
+});
+var result = input.classify(classifier)
+
+var palette = ["22e5ef","ff4217","4de41c","2b783b","fbff13"];
+Map.addLayer(result, {palette: palette, min:1, max:5, format:"png"});
+Map.addLayer(ee.Image().paint(region, 1, 1));
+Export.image(result, "Classification", {
+  region: JSON.stringify(region.toGeoJSON().coordinates),'maxPixels': 10e9,
+  scale: 10})

@@ -1,0 +1,6 @@
+// find image by path/row/date
+
+print(ee.ImageCollection("LE7_L1T")
+   .filter(ee.Filter.eq("WRS_PATH", 42))
+   .filter(ee.Filter.eq("WRS_ROW", 34))
+   .filterDate('2006-01-01', '2006-12-31'))

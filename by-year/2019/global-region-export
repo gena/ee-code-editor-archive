@@ -1,0 +1,15 @@
+var image = ee.Image.pixelArea()
+
+var crs = 'EPSG:4326'
+var step = 0.1
+var crsTransform = [step, 0, -180, 0, -step, 90]
+var region = ee.Geometry.Polygon([-180, 88, 0, 88, 180, 88, 180, -88, 0, -88, -180, -88], null, false)
+
+print(image.reduceRegion({
+  reducer: ee.Reducer.sum(), 
+  geometry: region,
+  crs: crs, 
+  crsTransform: crsTransform,
+  maxPixels: 1e13,
+  tileScale: 8
+}))

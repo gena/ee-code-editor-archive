@@ -1,0 +1,27 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var imagesLandsat1 = ee.ImageCollection("LANDSAT/LM01/C01/T1"),
+    imagesLandsat8 = ee.ImageCollection("LANDSAT/LC08/C01/T1");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+
+var images = imagesLandsat8
+
+images = images.filterDate('2013-01-01', '2014-01-01')
+
+print(images.size())
+
+images = images  
+  .sort('system:time_start')
+
+print(images.size())
+
+images = images.map(function(i) {
+  return i.visualize({ bands: ['B6', 'B5', 'B4'], min: 0, max: 65535 })
+     .set({ label: i.date().format() })
+})
+
+animation.animate(images, {
+  compact: true,
+  maxFrames: 100,
+  label: 'label'
+})

@@ -1,0 +1,658 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var loc1 = /* color: d63000 */ee.Geometry.Polygon(
+        [[[39.280006885528564, -6.82127310282852],
+          [39.27844046428595, -6.816969300723082],
+          [39.270780086517334, -6.819632554688664],
+          [39.270527959381525, -6.8197710429662335],
+          [39.26963210139297, -6.82020781242384],
+          [39.26959991455078, -6.820783069557039],
+          [39.270029067993164, -6.821912275907481],
+          [39.27185297012329, -6.821230491259609],
+          [39.272700547992144, -6.823978946527501],
+          [39.27361787379493, -6.823861768532918]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// ***** some plot functionality ******
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+var azimuth = 90;
+var zenith = 60;
+
+// visualization settings (elevation)
+
+// function to visualize the specific DEM
+var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff'];
+var dem_min = -5;
+var dem_max = 100;
+
+var addDem = function(dem, name, visible) {
+  var im = dem.visualize({palette:colors_dem, min:dem_min, max:dem_max, opacity: 1.0});
+  var hillshade_im = hillshadeit(im, dem, 2.0, 2.0);
+  Map.addLayer(hillshade_im, {}, name, visible);
+  return hillshade_im;
+};
+
+
+// ***** GENERAL filter and set default functions *****
+
+// --------------------------------------------
+// SPLIT & FILTER
+// --------------------------------------------
+/*
+filters feateres from fc that have a value for key string<category> (e.g. building)
+*/
+var filter_category = function(fc, category) {
+  return ee.FeatureCollection(fc).filter(ee.Filter.inList(category, ee.List(['','None','-1'])).not());
+};
+
+/*
+function to split a fc based on values (e.g. residential) of key (e.g. building) 
+within a geometry (e.g. boundaries of a neighborhood)
+the filter is defined as list< list<"values">, geometry<"bounds"> >
+if geometry is null the geographical filter is applied
+TODO: allow for null in values to filter all features in catogry within bounds
+*/
+var split_wfilter = function(fc_in, key, filters){ 
+  // function to loop over filters
+  var split = function(i, list_in){
+    var fc =  ee.FeatureCollection(ee.List(list_in).get(-1));
+    var fc_list = ee.List(list_in).slice(0, -1);
+    var filter = ee.List(ee.List(filters).get(i));
+    var values = filter.get(0);
+    var bounds = ee.Geometry(filter.get(1));
+    return ee.Algorithms.If(bounds,
+      fc_list.add(
+        fc.filter(ee.Filter.and(ee.Filter.inList(key, values),ee.Filter.bounds(bounds)))
+        ).add(
+        fc.filter(ee.Filter.and(ee.Filter.inList(key, values),ee.Filter.bounds(bounds)).not())
+        ),
+      fc_list.add(
+        fc.filter(ee.Filter.inList(key, values))
+        ).add(
+        fc.filter(ee.Filter.inList(key, values).not())
+        )
+    );
+  };
+  
+  // make index
+  var index = ee.List.sequence(0,null,1, ee.List(filters).length());
+  return ee.List(index.iterate(split, ee.List([fc_in])));
+};
+
+
+/*
+function to filter a fc based on values (e.g. residential) of key (e.g. building) 
+within a geometry (e.g. boundaries of a neighborhood)
+the filter is defined as list< list<"values">, geometry<"bounds"> >
+if geometry is null the geographical filter is applied
+*/
+var filter_fc = function(fc, key, values, bounds){ 
+  fc =  ee.FeatureCollection(fc);
+  return ee.FeatureCollection(ee.Algorithms.If(bounds,
+    fc.filter(ee.Filter.and(ee.Filter.inList(key, values),ee.Filter.bounds(bounds))),
+    fc.filter(ee.Filter.inList(key, values))
+  ));
+};
+
+// --------------------------------------------
+// update fc 
+// --------------------------------------------
+
+// ***** BUILDINGS *****
+var update_buildings = function(fc, buidingLevels, levelHeight, thresholdHeight, color){
+  return fc.map(function(f){
+    // set missing values <building_levels> with 'buidingLevels' value
+    f =  f.set('building_levels',
+      ee.Algorithms.If(
+        ee.Algorithms.IsEqual(f.get('building_levels_isempty'),1), 
+        buidingLevels, 
+        f.get('building_levels')
+      )
+    );
+    
+    // fill <burn_height> property with either <height> property if available or <building_levels> * 'levelHeight'
+    return f.set('burn_height', 
+      // TODO: height_isempty wordt niet aangemaakt in osm pre-processing script
+      // ee.Algorithms.If(
+        // ee.Algorithms.IsEqual(f.get('height_isempty'),1),
+        ee.Number(f.get('building_levels')).multiply(levelHeight) //,
+        // f.get('height')
+      // )
+    // fill <burn_height_min> property with 'thresholdHeight'
+    ).set('burn_height_min', thresholdHeight
+    // set index to <color> property to identify color code in paint function
+    ).set('color', color);
+  });
+};
+
+// ***** ROADS *****
+var update_roads = function(fc, width, driveFrac, layer, layerHeight, roadOffset, sidewalkOffset, color){
+  return fc.map(function(f){
+    // set <width> missing values with 'width' value
+    f = f.set('width',
+      ee.Algorithms.If(
+        ee.Algorithms.IsEqual(f.get('width_isempty'),1), 
+        width, 
+        f.get('width')
+      )
+    // set <layer> missing values with 'layer' value
+    ).set('layer',
+      ee.Algorithms.If(
+        ee.Algorithms.IsEqual(f.get('layer_isempty'),1), 
+        layer, 
+        f.get('layer')
+      )
+    );
+    
+    // set <drive_width> property with mutliply of <width> and 'driveFrac'
+    f = f.set('drive_width',
+        ee.Number(f.get('width')).multiply(ee.Number(driveFrac))
+    // set <burn_height> property with mutliply of <layer> and 'layerHeight' and add offset
+    ).set('burn_height',
+        ee.Number(ee.Number(f.get('layer')).multiply(layerHeight)).add(roadOffset)
+    );
+    
+    // set <burn_height> property with mutliply of <layer> and 'layerHeight' and add offset
+    return f.set('burn_height_min',
+        f.get('burn_height')
+    // set <burn_height_sidewalks> property with offset from <burn_height>
+    ).set('burn_height_sidewalks',
+        ee.Number(f.get('burn_height')).add(sidewalkOffset)
+    // set property <has_sidewalk> to filter roads with sidewalk
+    ).set('has_sidewalk',
+        ee.Number(1).subtract(ee.Number(driveFrac).eq(1))
+    // set index to <color> property to identify color code in paint function
+    ).set('color', color);
+  });
+};
+
+// ***** WATERWAYS *****
+var update_waterway = function(fc, width, depth, color) {
+  return fc.map(function(f){
+    // set <width> missing values with 'width' value
+    f = f.set('width',
+      ee.Algorithms.If(
+        ee.Algorithms.IsEqual(f.get('width_isempty'),1), 
+        width, 
+        f.get('width')
+      )
+    // set <depth> missing values with 'depth' value
+    ).set('depth',
+      ee.Algorithms.If(
+        ee.Algorithms.IsEqual(f.get('depth_isempty'),1), 
+        ee.Number(depth).multiply(-1), 
+        ee.Number(f.get('depth')).multiply(-1)
+      )
+    );
+    // set burn_height properties for 
+    return f.set('burn_height', f.get('depth')
+      ).set('burn_height_min', f.get('depth')
+      // set index to <color> property to identify color code in paint function
+      ).set('color', color
+    );
+  });
+};
+
+
+// --------------------------------------------
+// apply split and update of fc 
+// --------------------------------------------
+// ***** BUILDINGS *****
+var update_AllBuildings = function(fc, filters, 
+                                  buidingLevels_list, levelHeight_list, thresholdHeight_list) {
+  // nested function get lists from mother function
+  var update_buildings_list = function(i, fc_in){
+    // input is an index value
+    // get the inputs for build_buildings with index
+    var fc = ee.FeatureCollection(ee.List(fc_list).get(i));
+    var buidingLevels = ee.List(buidingLevels_list).get(i);
+    var levelHeight = ee.List(levelHeight_list).get(i);
+    var thresholdHeight = ee.List(thresholdHeight_list).get(i);
+    var color = i;
+    
+    fc = update_buildings(fc, buidingLevels, levelHeight, thresholdHeight, color);
+    
+    // return list with updated properties
+    // return ee.List(list_in).add(fc);
+    return ee.FeatureCollection(fc_in).merge(fc);
+  };
+  
+  
+  // split fc
+  var fc_list = split_wfilter(fc, 'building', filters);
+  
+  // iterate over list and return enriched merged fc; start with empty fc
+  var index = ee.List.sequence(0,null,1, ee.List(buidingLevels_list).length());
+  return ee.FeatureCollection(index.iterate(update_buildings_list, ee.FeatureCollection([])));
+};
+
+
+// ***** ROADS *****
+var update_AllRoads = function(fc, filters,
+                                width_list, driveFrac_list,
+                                layer_list, layerHeight_list, 
+                                roadOffset_list, sidewalkOffset_list) {
+ 
+  var update_roads_list = function(i, fc_in){
+    var fc = ee.FeatureCollection(ee.List(fc_list).get(i));
+    var width = ee.List(width_list).get(i);  // default width of roads (in case prop_width=NULL)
+    var driveFrac = ee.List(driveFrac_list).get(i);  // fraction of street width containing driveway
+    var layer = ee.List(layer_list).get(i);   // default vertical layer (in case prop_layer=NULL)
+    var layerHeight = ee.List(layerHeight_list).get(i);  // multiplier to convert layer to height (relative to ground)
+    var roadOffset = ee.List(roadOffset_list).get(i); 
+    var sidewalkOffset = ee.List(sidewalkOffset_list).get(i);   
+    
+    // update road lines and get polygon back
+    fc = update_roads(fc, width, driveFrac, layer, layerHeight, roadOffset, sidewalkOffset, i);
+
+
+    // return fc with updated properties
+    return ee.FeatureCollection(fc_in).merge(fc);
+  };
+  
+  // split fc
+  var fc_list = split_wfilter(fc, 'highway', filters); // , boundaries)
+  
+  // iterate over list and return enriched merged fc; start with empty fc
+  var index = ee.List.sequence(0,null,1, ee.List(width_list).length());
+  return ee.FeatureCollection(index.iterate(update_roads_list, ee.FeatureCollection([])));
+};
+
+
+// ***** WATERWAYS *****
+var update_AllWaterways = function(fc, filters, 
+                                depth_list, width_list) {
+ 
+  var update_waterways_list = function(i, fc_in){
+    var fc = ee.FeatureCollection(ee.List(fc_list).get(i));
+    var width = ee.Number(ee.List(width_list).get(i));  
+    var depth = ee.Number(ee.List(depth_list).get(i));    
+    
+    // update road lines and get polygon back
+    fc = update_waterway(fc, width, depth, i);
+
+    // return fc with updated properties
+    return ee.FeatureCollection(fc_in).merge(fc);
+  };
+  
+  // split fc
+  var fc_list = split_wfilter(fc, 'waterway', filters); // , boundaries)
+  
+  // iterate over list and return enriched merged fc; start with empty fc
+  var index = ee.List.sequence(0,null,1, ee.List(width_list).length());
+  return ee.FeatureCollection(index.iterate(update_waterways_list, ee.FeatureCollection([])));
+};
+
+// --------------------------------------------
+// line2polygons for ROADS and WATERWAYS
+// --------------------------------------------
+var line2poly_fc = function(fc, property, errorMargin) {
+
+  var line2poly = function(f) {
+    return f.buffer(ee.Number(f.get(property)), errorMargin);
+  };
+  
+  return fc.map(line2poly);
+};
+
+
+var sidewalks_fc = function(fc, errorMargin) {
+
+  var get_sidewalk = function(f) {
+    // extend the line a little bit on both sides (make sure extension is much longer than width of a typical road)
+    var long_f = extend_ft(f, 0.002);
+    
+    // get a polygon (with total width) from the street
+    var f_buf = f.buffer(ee.Number(f.get('width')), errorMargin);
+    
+    // get a polygon (with driveway width) from the street
+    var driveway = long_f.buffer(ee.Number(f.get('drive_width')));
+    
+    // find the difference (=sidewalk) and return
+    return f_buf.difference(driveway.geometry()
+    // set burn_height properties
+    ).set('burn_height', f.get('burn_height_sidewalks')
+    ).set('burn_height_min', f.get('burn_height_sidewalks')
+    );
+  };
+
+  return fc.filterMetadata('has_sidewalk','equals',1).map(get_sidewalk);
+};
+
+/***
+ * extend line elements based on local direction on both sides
+ */
+var extend_ft = function(ft, extend){
+  var coords = ft.geometry().coordinates();
+  var coord_end_1 = ee.List(coords.get(-1));
+  var coord_end_2 = ee.List(coords.get(-2));
+  var coord_end_0 = extend_coord(coord_end_1, coord_end_2, extend);
+  
+  var coord_start_1 = ee.List(coords.get(0));
+  var coord_start_2 = ee.List(coords.get(1));
+  var coord_start_0 = extend_coord(coord_start_1, coord_start_2, extend);
+  
+  var newCoords = coords
+    .insert(0, coord_start_0)
+    .insert(-1, coord_end_0)
+    .swap(-1, -2);
+  
+  return ee.Feature(
+    ee.Geometry.MultiLineString([newCoords]));
+};
+
+
+/***
+ * function creates a new coordinate that is an extention of a straight line
+ * consisting of coord1 and coord2. The new coordinate can be used to extend
+ * for instance a line feature
+ */
+var extend_coord = function(coord1, coord2, extend){
+  // TODO: perform on a projected grid, instead of lat lon
+  var x1 = ee.Number(coord1.get(0));
+  var y1 = ee.Number(coord1.get(1));
+  var x2 = ee.Number(coord2.get(0));
+  var y2 = ee.Number(coord2.get(1));
+  var len_x = x1.subtract(x2).pow(2);
+  var len_y = y1.subtract(y2).pow(2);
+  var len = len_x.add(len_y).pow(0.5);
+  var sin = x2.subtract(x1).divide(len);
+  var cos = y2.subtract(y1).divide(len);
+  var len_scale = len.add(extend).divide(len);
+  var x0 = x2.add(x1.subtract(x2).multiply(len_scale));
+  var y0 = y2.add(y1.subtract(y2).multiply(len_scale));
+  return ee.List([x0, y0]);
+};
+
+
+// --------------------------------------------
+// pre-process SRTM
+// --------------------------------------------
+/***
+ * Perona malik filter
+ * I(n+1, i, j) = I(n, i, j) + lambda * (cN * dN(I) + cS * dS(I) + cE * dE(I), cW * dW(I))
+ */
+var peronaMalikFilter = function(I, iter, K, method) {
+    var dxW = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 1, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dxE = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  1],
+                            [ 0,  0,  0]]);
+  
+  var dyN = ee.Kernel.fixed(3, 3,
+                           [[ 0,  1,  0],
+                            [ 0, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dyS = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  0],
+                            [ 0,  1,  0]]);
+
+  var lambda = 0.2;
+
+  var k1 = ee.Image(-1.0/K);
+  var k2 = ee.Image(K).multiply(ee.Image(K));
+
+  for(var i = 0; i < iter; i++) {
+    var dI_W = I.convolve(dxW)
+    var dI_E = I.convolve(dxE)
+    var dI_N = I.convolve(dyN)
+    var dI_S = I.convolve(dyS)
+
+    switch(method) {
+      case 1:
+        var cW = dI_W.multiply(dI_W).multiply(k1).exp();
+        var cE = dI_E.multiply(dI_E).multiply(k1).exp();
+        var cN = dI_N.multiply(dI_N).multiply(k1).exp();
+        var cS = dI_S.multiply(dI_S).multiply(k1).exp();
+    
+        I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))))
+        break;
+      case 2:
+        var cW = ee.Image(1.0).divide(ee.Image(1.0).add(dI_W.multiply(dI_W).divide(k2)));
+        var cE = ee.Image(1.0).divide(ee.Image(1.0).add(dI_E.multiply(dI_E).divide(k2)));
+        var cN = ee.Image(1.0).divide(ee.Image(1.0).add(dI_N.multiply(dI_N).divide(k2)));
+        var cS = ee.Image(1.0).divide(ee.Image(1.0).add(dI_S.multiply(dI_S).divide(k2)));
+    
+        I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))));
+        break;
+    }
+  }
+
+  return I;
+};
+
+/***
+ * function makes dem straight (horizontal in perpendical direction
+ * for all lines (features in fc)
+*/
+var straighten_dem = function(dem, fc ) {
+  var info = dem.getInfo().bands[0];
+  
+  // function creates dem clip image with straight elev for one line
+  // and adds to image collection
+  var straighten_single_road = function(f, ic) {
+    var width = ee.Number(f.get('width'));
+    var roadBuffer = ee.Feature(f).buffer(width, res);
+    var roadImage = 
+      dem.clip(roadBuffer)
+        .reduceNeighborhood(ee.Reducer.mean(), ee.Kernel.circle(ee.Number(width).multiply(2),'meters'));
+    
+    // weird bug in GEE requires axtra mask statemant, as otherwise the edge of the kernel is not written correctly
+    return ee.ImageCollection(ic).merge(ee.ImageCollection(roadImage.mask(roadImage)
+              .reproject(info.crs, info.crs_transform)));
+  };
+  
+  // get image collection with clips for for roads and reduce to single image
+  var roads_elev = ee.ImageCollection(fc.iterate(straighten_single_road,ee.ImageCollection([])))
+                      .reduce(ee.Reducer.min());
+  
+  // fill missings with original dem
+  return roads_elev.unmask(ee.Image(dem), false)
+              .reproject(info.crs, info.crs_transform);
+};
+
+// --------------------------------------------
+// rasterize
+// --------------------------------------------
+/***
+ * burn property value of feature collection to map
+ * fill value is zero; if multiple features take the max property value
+ * 
+ * inputs: feature collection with buildings, burn property, resolution
+ */
+var burn_map_max = function(fc, prop, resolution, fill_val) {
+  // reduce fc to image using max 
+  var fc_burn = fc.reduceToImage([prop], ee.Reducer.max());
+  return fc_burn.unmask(fill_val).reproject('EPSG:4326', null, resolution);
+};
+var burn_map_min = function(fc, prop, resolution, fill_val) {
+  var fc_burn = fc.reduceToImage([prop], ee.Reducer.min());
+  return fc_burn.unmask(fill_val).reproject('EPSG:4326', null, resolution);
+};
+
+// ********* ALL INPUTS START HERE! *********************************
+// set main variables
+var res = 0.5; // resolution in meters
+
+// get elevation data
+var srtm_30 = ee.Image("USGS/SRTMGL1_003");
+var info = srtm_30.getInfo().bands[0];
+var srtm_preprocessed = ee.Image("users/dirkeilander/dar_es_salaam_case/DTM_wRoads_0_5m_WGS84");
+
+// bounding box in utm coordinates and export info
+var xmin = 526352;
+var xmax = 531393;
+var ymin = 9245444;
+var ymax = 9249492;
+var region = ee.List([[xmin,ymin],[xmax,ymin],[xmax,ymax],[xmin, ymax], [xmin, ymin]]);
+var bbox = ee.Geometry.Polygon(region, 'EPSG:32737', null, null, false);
+var w = (xmax-xmin)/res;
+var h = (ymax-ymin)/res;
+var dim_str = w + 'x' + h;
+var crs_transform = JSON.stringify([res, 0, xmin, 0, -res, ymax]);
+var bboxWGS84 = bbox.transform(info.crs); // reproject to filter latlon fc from OSM
+var exportInfoUTM = {'crs': 'EPSG:32737', 'crs_transform': crs_transform, 'dimensions': dim_str, 'driveFolder': 'EarthEngineTemp'};
+
+// get OSM data within bbox
+var osm_lines =     ee.FeatureCollection('ft:1lrYlfLqnV-dT_f6xBXP6qWWE_IJXxpJDcC1C9hKJ')
+                                .filterBounds(bbox); // version 05-07-2016
+var osm_polys =     ee.FeatureCollection('ft:1By1AvgR4sw12OlqNf3-EuYEgVSOEqbYbE6WbaUfI')
+                                .filterBounds(bbox); // version 05-07-2016
+                                
+// STEP 1: filter OSM features into categories
+var osm_buildings = filter_category(osm_polys, 'building');
+var osm_roads = filter_category(osm_lines, 'highway');
+var osm_waterways = filter_category(osm_lines, 'waterway');
+
+// STEP 2: split according to filters and update properties
+//**BUILDINGS
+// the filter is defined as list< list<"values">, geometry<"bounds"> >
+// if geometry is null the geographical filter is applied
+var buildingFilters = [ [['commercial','industrial','commercial;residential'], loc1],
+                        [['residential','house'], null], 
+                        [['commercial','industrial','commercial;residential'], null],
+                        [['school','church','college','public'], null],
+                        [['apartments'], null]];
+// properties should have lenght of filters +1 ("other")
+var buidingLevels_list = [2, 1, 3, 2, 6, 1];
+var levelHeight_list = [4, 3, 4, 4, 4, 3];
+var thresholdHeight_list = [1, 0, 0.4, 0.4, 0.4, 0.2];
+var color_list_buildings = ['98ff00', 'BB4400', '22DDFF', 'DDFF22', 'FFA500', 'FFA500'];
+var buildings = update_AllBuildings(osm_buildings, buildingFilters,
+                                    buidingLevels_list, levelHeight_list, thresholdHeight_list);
+                                    
+// test one filter for visualization
+/*
+function to filter a fc based on values (e.g. residential) of key (e.g. building) 
+within a geometry (e.g. boundaries of a neighborhood)
+the filter is defined as list< list<"values">, geometry<"bounds"> >
+if geometry is null the geographical filter is applied
+*/
+var filter_fc = function(fc, key, values, bounds){ 
+  fc =  ee.FeatureCollection(fc);
+  return ee.FeatureCollection(ee.Algorithms.If(bounds,
+    fc.filter(ee.Filter.and(ee.Filter.inList(key, values),ee.Filter.bounds(bounds))),
+    fc.filter(ee.Filter.inList(key, values))
+  ));
+};
+// input: FeatureCollection<>, string<key>, list<values>, geometry<boundary> or null (=bbox) 
+var building_res = filter_fc(osm_buildings, 'building', ['residential','house'], loc1);
+
+//**ROADS
+var roadFilters = [ [['primary'], null],
+                    [['secondary','tertiary'], null],
+                    [['residential','unclassified'], null]];
+var width_list = [8, 5, 4, 2];
+var driveFrac_list = [0.75, 0.75, 1, 1];               
+var layer_list = [0, 0, 0, 0];
+var layerHeight_list = [5, 5, 4, 4];
+var roadOffset_list = [0.2, 0.2, 0, 0];
+var sidewalkOffset_list = [0.4, 0.4, 0, 0];
+var color_list_roads = ['E5E500', 'FFFFB2', 'B7B799', 'A9A9A9'];
+var roads = update_AllRoads(osm_roads, roadFilters,
+                            width_list, driveFrac_list,
+                            layer_list, layerHeight_list, 
+                            roadOffset_list, sidewalkOffset_list);
+
+//**WATERWAYS
+var waterwayFilters = [ [['ditch','stream'], null],
+                        [['canal','river'], null]];
+var depth_list = [1, 2, 1];
+var width_list = [1, 5, 2];
+var color_list_waterways = ['b2b2ff', '0000FF', 'D3D3D3'];
+var waterways = update_AllWaterways(osm_waterways, waterwayFilters, 
+                                    depth_list, width_list);
+
+
+// STEP 3: polygonize lines
+//**ROADS
+var roads_poly = line2poly_fc(roads, 'drive_width', res);
+var sidewalks = sidewalks_fc(roads, res);
+//**WATERWAYS
+var waterways_poly = line2poly_fc(waterways, 'width', res);
+
+// STEP 4: preprocess DEM
+// smooth SRTM
+var srtm_pre1 = peronaMalikFilter(srtm_30.convolve(ee.Kernel.gaussian(30, 15, 'meters')), 5, 5, 2)
+                          .resample('bicubic').reproject(info.crs,null,res);
+// filter primary & secondary roads from updated dataset
+var roads_preprocess = filter_fc(roads, 'highway', ['primary','secondary','tertiary'], null);
+var srtm_pre2 = straighten_dem(srtm_pre1, roads_preprocess);
+
+// STEP 5: rasterize
+var osm_all = buildings.merge(roads_poly).merge(sidewalks).merge(waterways_poly); 
+var osm_minheight = burn_map_min(osm_all, 'burn_height_min', res, 0);
+var dtm = srtm_pre2.add(osm_minheight); 
+var osm_maxheight = burn_map_max(osm_all, 'burn_height', res, 0);
+var dsm = srtm_pre2.add(osm_maxheight);
+Export.image(dsm, 'DSM_0_5m_UTM37S_v2', exportInfoUTM);
+Export.image(dtm, 'DTM_0_5m_UTM37S_v2', exportInfoUTM);
+
+
+
+
+// PLOT
+Map.centerObject(loc1, 15);
+
+// plot rasters
+addDem(srtm_30, 'srtm_30', false);
+addDem(srtm_pre1.clip(bbox), 'srtm smooth', true);
+addDem(srtm_pre2.clip(bbox), 'srtm smooth +roads', true);
+addDem(dsm.clip(bbox), 'DSM', false);
+addDem(dtm.clip(bbox), 'DTM', true);
+addDem(osm_maxheight.clip(bbox), 'max osm heights', false);
+addDem(osm_minheight.clip(bbox), 'min osm heights', false);
+
+// plot categories as featurecollection
+Map.addLayer(waterways, {color: '000000'}, 'waterways', false); 
+Map.addLayer(roads, {color: '000000'}, 'roads', false); 
+Map.addLayer(buildings, {color: '000000'}, 'buildings', false); 
+
+// plot road and waterway polygons
+Map.addLayer(waterways_poly, {color: '0000FF'}, 'waterways polygon', false); 
+Map.addLayer(roads_poly, {color: 'A9A9A9'}, 'roads polygon', false); 
+Map.addLayer(sidewalks, {color: '000000'}, 'sidewalks polygon', false); 
+
+
+// plot single filter
+Map.addLayer(building_res, {color: 'BB4400'}, 'residential buildings (filter 1)', true); 
+
+
+// paint lines based on width & color property
+Map.addLayer(ee.Image().toByte().paint(waterways, 'color', 'width'), 
+            {palette:color_list_waterways, min:0, max:ee.List(color_list_waterways).length().getInfo()}, 
+            'waterways updated', true);
+Map.addLayer(ee.Image().toByte().paint(roads, 'color', 'width'), 
+            {palette:color_list_roads, min:0, max:ee.List(color_list_roads).length().getInfo()}, 
+            'roads updated', true);
+// paint polygons based on color property only
+Map.addLayer(ee.Image().toByte().paint(buildings, 'color', null), 
+            {palette:color_list_buildings, min:0, max:ee.List(color_list_buildings).length().getInfo()}, 
+            'buildings updated', true);
+

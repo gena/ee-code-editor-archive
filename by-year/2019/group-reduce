@@ -1,0 +1,37 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var terra = ee.ImageCollection("MODIS/006/MOD09GQ"),
+    aqua = ee.ImageCollection("MODIS/006/MYD09GQ");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/***
+ * Returns image collection grouped by property and reduced using a given reducer
+ */
+function groupReduceByProperty(images, property, reducer) {
+  // group
+  var distinct = images.distinct([property])
+  var filter = ee.Filter.equals({ leftField: property, rightField: property });
+  var join = ee.Join.saveAll('matches')
+  var results = join.apply(distinct, images, filter)
+
+  // reduce
+  results = results.map(function(i) {
+    var image = ee.ImageCollection.fromImages(i.get('matches'))
+      .reduce(reducer)
+    
+    return image
+      .copyProperties(i)
+      .copyProperties(i, ['system:time_start'])
+  })
+  
+  return ee.ImageCollection(results)
+}
+
+// merge collections
+var images = terra.merge(aqua)
+print('Number of images: ', images.size())
+
+var imagesGroupReduced = groupReduceByProperty(images, 'system:time_start', ee.Reducer.mean())
+
+print('Number of images (group reduced): ', imagesGroupReduced.size())
+
+
+

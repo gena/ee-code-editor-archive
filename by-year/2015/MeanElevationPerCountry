@@ -1,0 +1,20 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var dem = ee.Image("NOAA/NGDC/ETOPO1"),
+    countries = ee.FeatureCollection("ft:1tdSwUL7MVpOauSgRzqVTOwdfy17KDbw-1d9omPw");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+dem = dem.select('ice_surface')
+
+var meanElevationPerCountry = dem.reduceRegions({
+  collection: countries,
+  reducer: ee.Reducer.mean(),
+  scale: 100000, // 100km
+});
+
+var palette = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+
+Map.addLayer(dem.mask(dem.gt(-20)), {min:0, max:1000, palette: palette}, 'dem')
+
+print(meanElevationPerCountry.first())
+
+var img = ee.Image(0).float().paint(meanElevationPerCountry, 'mean');
+Map.addLayer(img.mask(dem.gt(-20)), {min:0, max:1000, palette: palette}, 'dem per country')

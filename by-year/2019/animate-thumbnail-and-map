@@ -1,0 +1,79 @@
+// Create a box around an area in the Brazilian Amazon.
+var box = ee.Geometry.Polygon([[
+  [-62.9564, 2.5596], [-62.9550, 2.4313],
+  [-62.8294, 2.4327], [-62.8294, 2.5596]
+]]);
+
+var N = 30
+
+// Visualize the image in RGB.
+var images = ee.ImageCollection('LANDSAT/LE07/C01/T1_SR')
+  .filterBounds(box.centroid(1))
+  .filter(ee.Filter.lt('CLOUD_COVER', 20))
+  .sort('system:time_start')
+  .limit(N)
+  .map(function(i) {
+    return i.visualize({
+      bands: ['B3', 'B2', 'B1'],
+      min: 0,
+      max: 1200,
+      gamma: [1.3, 1.3, 1]
+    })
+  })
+
+var thumbnail = ui.Thumbnail({
+  image: images,
+  params: {
+    dimensions: '256x256',
+    region: box,
+  },
+  style: {height: '300px', width: '300px'}
+})
+
+var panel = ui.Panel([thumbnail])
+
+Map.add(panel)
+
+
+// animate using map layers
+var map = new ui.Map()
+map.setControlVisibility({ 
+  all: false, 
+  // layerList:true 
+})
+map.setCenter(-62.89, 2.50, 12)
+map.centerObject(box, 12)
+map.style().set({height: '300px', width: '300px'})
+var panel2 = ui.Panel([map])
+Map.add(panel2)
+map.setLocked(true)
+
+
+var slider = ui.Slider(1, N, 1, 1)
+slider.style().set({width: '90%', position: 'bottom-center'})
+map.add(slider)
+
+// animate map layers
+var list = images.toList(N)
+var layers = []
+for(var i=0; i<N; i++) {
+  var image = ee.Image(list.get(i))
+  var layer = ui.Map.Layer({ eeObject: image, opacity: 0 })
+  map.layers().add(layer)
+  layers.push(layer)
+}
+
+// animation loop
+var delay = 200
+var currentFrame = 0
+function nextFrame() {
+  layers[currentFrame].setOpacity(0)
+  currentFrame++
+  if(currentFrame === N) {
+    currentFrame = 0
+  }
+  layers[currentFrame].setOpacity(1)
+  slider.setValue(currentFrame+1)
+}
+ui.util.setInterval(nextFrame, delay)
+

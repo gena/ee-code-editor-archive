@@ -1,0 +1,628 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var SC = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-54.052734375, -27.254629577800063],
+          [-49.9658203125, -29.897805610155864],
+          [-47.96630859375, -28.632746799225853],
+          [-47.9443359375, -25.582085278700696],
+          [-54.11865234375, -26.11598592533351]]]),
+    geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-50.6085205078125, -27.235094607795478],
+          [-50.5426025390625, -27.29246881871626],
+          [-50.258331298828125, -27.28880751983312],
+          [-50.129241943359375, -27.17280401607545],
+          [-50.25421142578125, -27.011419925555597],
+          [-50.61676025390625, -27.049341619870347]]]),
+    table = ee.FeatureCollection("users/evadevanos/limite_padn_seplan_2016");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+//GEOMETRY INPUT. STUDY AREA. Ponte Alta do Norte
+var PonteAlta = ee.FeatureCollection('users/evadevanos/limite_padn_seplan_2016');
+//Map.addLayer(PonteAlta, {color: 'FF0000'}, 'PonteAlta_asset');
+print (PonteAlta);
+//Create an empty image into which to paint the features, cast to byte.
+var empty = ee.Image().byte();
+// Paint all the polygon edges with the same number and width, display.
+var outline = empty.paint({
+  featureCollection: PonteAlta,
+  color: 1,
+  width: 3
+});
+Map.centerObject(geometry, 9);
+//Map.addLayer(outline, {palette: '#800080'}, 'PonteAltadoNorte_polygon'); 
+
+/*
+// Paint both the fill and the edges.
+var filledOutlines = empty.paint(PonteAlta, 'PonteAlta_fill').paint(PonteAlta, 0, 2);
+Map.addLayer(filledOutlines, {palette: ['#800080'].concat(palette)}, 'edges and fills');
+*/
+
+//GROUND TRUTH
+//Reforestation points (MUNICIPIO): Ponte Alta do Norte (evadevanos)
+//var reforest_points_Adilson_396ptos = ee.FeatureCollection('ft:1VMrfhKJJwg06DxB-YZtJzlwafL1GV8iJaJYqk99K'); 
+
+//Reforestation points (MUNICIPIO): Ponte Alta do Norte (shared) -red-
+var reforest_points_Adilson_396ptos = ee.FeatureCollection('ft:1H_jOyEL3esEfOINj5JTyYsmsL9tCha83djQI5DVd');
+//Map.addLayer(reforest_points_Adilson_396ptos, {color: 'FF0000'}, 'reforest_points_Adilson_396ptos');
+print (reforest_points_Adilson_396ptos);
+
+//training sample (80%) -green-
+var reforest_train80 = ee.FeatureCollection('ft:1CjLXoWLeNi90cyBX82xIDMgwDGTEwbnlGjE3AomA');
+//var reforest_train80 = ee.FeatureCollection('ft:18Y26gTeRrP8nI-tkY8LqHlO1IH8XGkMaSX-BSrUr'); -evadevanos-
+//Map.addLayer(reforest_train80, {color: '32CD32'}, 'reforest_train80');
+print (reforest_train80);
+
+//test sample (20%) -yellow-
+var reforest_test20 = ee.FeatureCollection('ft:1RZu4wMnOvav8jJNudtZlBp9HprBPnli0myr6B0nB');
+//var reforest_test20 = ee.FeatureCollection('ft:1H55hd3igsBlW5nQ3gvphp57qbmYbvKAVqhLFEl35'); -evadevanos-
+print(reforest_test20,'reforest_test20');
+Map.centerObject(reforest_test20, 20); 
+//Map.addLayer (reforest_test20, {color: 'EEE8AA'}, 'reforest_test20');
+
+//Create a dictionary explaining the class meanings 
+var classes = [
+  {'cod_uso':1, 'description':'agriculture'},
+  {'cod_uso':2,'description':'banhado'},
+  {'cod_uso':3,'description':'damaged_forest'},
+  {'cod_uso':4,'description':'forest'},
+  {'cod_uso':5,'description':'pasture'},
+  {'cod_uso':6,'description':'reforestation'},
+  {'cod_uso':7,'description':'urban'},
+  {'cod_uso':8,'description':'water'}
+];
+print('Class Descriptions', classes);
+
+// Paint both the fill and the edges. (revise this bit 2DO: https://developers.google.com/earth-engine/feature_collections_visualizing)
+var palette =['FFFF00','00BFFF', '32CD32','006400','EEE8AA','FF0000','808080','00008B'];
+//Map.addLayer(reforest_points_Adilson_396ptos,{min: 0, max: 8, palette: palette},'reforest_points_Adilson_396ptos');
+var empty = ee.Image().byte();
+var filledOutlines = empty.paint(reforest_points_Adilson_396ptos, 'cod_uso').paint(reforest_points_Adilson_396ptos, 1, 1);
+Map.addLayer(filledOutlines, {palette: ['000000'].concat(palette)}, 'edges and fills');
+
+
+// Create a palette to display the classes
+//colours from: https://es.wikipedia.org/wiki/Colores_web
+/* colors
+agriculture, yellow
+banhado, deepblue turquish 00BFFF
+damaged_forest, lime green
+forest, darkgreeen forest
+pasture, pale brown
+reforestation, red
+urban, 808080 grey
+water, darkblue
+*/
+
+//REMOTE SENSING INPUTS FOR REFORESTATION
+//2014-2016 Collection 
+var L8SR_2014_2016 = ee.ImageCollection('LANDSAT/LC808/C01/T1_SR')
+.filterDate('2014-01-01','2016-12-31')
+.filterMetadata('wrs_path','not_greater_than',223)
+.filterMetadata('wrs_path','not_less_than',220)
+.filterMetadata('wrs_row','not_greater_than',80)
+.filterMetadata('wrs_row','not_less_than',78)
+.filterBounds(geometry);
+print(L8SR_2014_2016,'L8SR_2014_2016');
+
+//cloud mask
+var cloudmask_fc = function(image){
+  var quality = image.select("cfmask").unmask();
+  var cloud01 = quality.neq(0);
+  var cloudmask = image.mask().and(cloud01.not());
+  return image.updateMask(cloudmask);
+};
+var L8SR_20142016_cloudfree_collection = L8SR_2014_2016.map(cloudmask_fc);
+//var L8SR_2014_2016_coll = ee.ImageCollection(L8SR_2014_2016_cloudmask);
+var False_Color = {bands:['B5','B4','B3'], min: 100, max: 4000, gamma:[0.95,1,1]};
+Map.centerObject(SC, 9);
+//Map.addLayer(L8SR_2014_2016_cloudfree_collection,False_Color,'L8SR_2014_2016_cloudfree_collection');
+
+
+//Seasonal filtering the collection
+//summer
+var L8SR_2014_summer = ee.ImageCollection('LANDSAT/LC808/C01/T1_SR')
+.filterDate('2013-12-20','2014-03-20')
+.filterBounds(geometry);
+print(L8SR_2014_summer,'L8SR_2014_summer');
+
+var L8SR_2015_summer = ee.ImageCollection('LANDSAT/LC808/C01/T1_SR')
+.filterDate('2014-12-20','2015-03-20')
+.filterBounds(geometry);
+print(L8SR_2015_summer,'L8SR_2015_summer');
+
+var L8SR_2016_summer = ee.ImageCollection('LANDSAT/LC808/C01/T1_SR')
+.filterDate('2015-12-20','2016-03-20')
+.filterBounds(geometry);
+print(L8SR_2016_summer,'L8SR_2016_summer');
+
+var L8SR_20142016_summer = L8SR_2014_summer.merge(L8SR_2015_summer).merge(L8SR_2016_summer);
+print(L8SR_20142016_summer);
+
+//seasonal cloudfree collections yearly L8SR_summers 
+var L8SR_2014_summer_cloudfree_collection = L8SR_2014_summer.map(cloudmask_fc);
+var L8SR_2015_summer_cloudfree_collection = L8SR_2015_summer.map(cloudmask_fc);
+var L8SR_2016_summer_cloudfree_collection = L8SR_2016_summer.map(cloudmask_fc);
+
+//select bands
+var selecbands_function = function(image){
+  var band_selec = image.select('B2','B3', 'B4', 'B5', 'B6', 'B7');
+  return band_selec;
+};
+var L8SR_20142016_coll = L8SR_20142016_cloudfree_collection.map(selecbands_function);
+//select band over seasonal collections
+var L8SR_2014_summer_coll = L8SR_2014_summer_cloudfree_collection.map(selecbands_function);
+var L8SR_2015_summer_coll = L8SR_2015_summer_cloudfree_collection.map(selecbands_function);
+var L8SR_2016_summer_coll = L8SR_2016_summer_cloudfree_collection.map(selecbands_function);
+
+//SPECTRAL VEGETATION INDEX AND WATER INDEX (2DO)			
+//add NDVI band to LandsatCollection
+//NDVI function
+function addNdvi(image) {
+   var ndvi = image.normalizedDifference(['B5', 'B4']).rename('NDVI');
+   return image.addBands(ndvi);
+}
+
+var L8SR_NDVI_20142016_coll = ee.ImageCollection(L8SR_20142016_coll)
+  .filterBounds(geometry) 
+  .map(addNdvi); 
+print(L8SR_NDVI_20142016_coll,'L8SR_NDVI_20142016_coll');
+
+//palette ndvi Map.addLayer(image, {bands: ['NDVI'], min: -0.3, max: 0.7, palette: palettes.ndvi}, 'ndvi', true, 0.5);
+var palettes = { ndvi: ['000000', 'a52a2a', 'ffff00', '00ff00'] };
+
+//calculate the NDWI. rename the band to B. result 1 image single-banded named B
+function addNDWI(image) {
+   var ndwi = image.normalizedDifference(['B3', 'B5']).rename('NDWI');
+   return image.addBands(ndwi);
+}
+
+var L8SR_NDVI_NDWI_20142016_coll = ee.ImageCollection(L8SR_20142016_coll)
+  .filterBounds(geometry) 
+  .map(addNDWI); 
+print(L8SR_NDVI_NDWI_20142016_coll,'L8SR_NDVI_NDWI_20142016_coll');
+
+//yearly summer collections
+var L8SR_NDVINDWI_2014_summer_coll = ee.ImageCollection(L8SR_2014_summer_coll).map(addNdvi).map(addNDWI); 
+var L8SR_NDVINDWI_2015_summer_coll = ee.ImageCollection(L8SR_2015_summer_coll).map(addNdvi).map(addNDWI); 
+var L8SR_NDVINDWI_2016_summer_coll = ee.ImageCollection(L8SR_2016_summer_coll).map(addNdvi).map(addNDWI); 
+print (L8SR_NDVINDWI_2014_summer_coll,'L8SR_NDVINDWI_2014_summer_coll');
+
+//merge collections 
+var summer_NDVINDWI_merge = L8SR_NDVINDWI_2014_summer_coll.merge(L8SR_NDVINDWI_2015_summer_coll.merge(L8SR_NDVINDWI_2016_summer_coll));
+var summer_NDVINDWI_coll = ee.ImageCollection(summer_NDVINDWI_merge);
+//from collection to images
+//yearly summer medians
+var median_2014_summer = L8SR_NDVINDWI_2014_summer_coll.median(); 
+var median_2015_summer = L8SR_NDVINDWI_2015_summer_coll.median(); 
+var median_2016_summer = L8SR_NDVINDWI_2016_summer_coll.median(); 
+var median_20142016_summer = summer_NDVINDWI_coll.median(); 
+print(median_2014_summer, 'median_2014_summer');
+
+//TOPOGRAPHY
+//DEM filter for the whole area. rename the band to B. result 1 image single-banded named B
+var DEM30m = ee.Image('USGS/SRTMGL1_003');
+var dem_PonteAltapoly = DEM30m.clip(geometry);
+var dem_B = dem_PonteAltapoly.rename('B');
+//slope derivation from DEM. rename the band to B. result 1 image single-banded named slope
+var slope = ee.Terrain.slope(dem_PonteAltapoly);
+var slope_B = slope.rename('slope');
+
+//TEXTURE GLCM
+ //integer-ization //Input must be integer
+//int32 images
+var summer_2014_int32 = median_2014_summer.int32();
+print (summer_2014_int32, 'summer_2014_int32');
+var summer_2015_int32 = median_2015_summer.int32();
+print (summer_2015_int32, 'summer_2015_int32');
+var summer_2016_int32 = median_2016_summer.int32();
+print (summer_2016_int32, 'summer_2016_int32');
+var summer_20142016_int32 = median_20142016_summer.int32();
+print (summer_20142016_int32, 'summer_20142016_int32');
+
+//GLCM CALCULATIONS
+//interesting glcm variables for reforestation: entropy and variance (check others)
+//2DO check glcm (explanations for 1/0 bands outputs)
+var summer_2014_glcm = summer_2014_int32.glcmTexture(3);
+var summer_2015_glcm = summer_2015_int32.glcmTexture(3);
+var summer_2016_glcm = summer_2016_int32.glcmTexture(3);
+var summer_20142016_glcm = summer_20142016_int32.glcmTexture(3);
+
+//select glcm bands (entropy, variance, contrast, homogeneity)
+var summer_2014_cont_ent_var_idm = summer_2014_glcm.select('B2_contrast','B2_ent','B2_var','B2_idm','B3_contrast','B3_ent','B3_var','B3_idm','B4_contrast','B4_ent','B4_var','B4_idm','B5_contrast','B5_ent','B5_var','B5_idm','B6_contrast','B6_ent','B6_var','B6_idm','B7_contrast','B7_ent','B7_var','B7_idm','NDVI_contrast','NDVI_ent','NDVI_var','NDVI_idm');
+var summer_2015_cont_ent_var_idm = summer_2015_glcm.select('B2_contrast','B2_ent','B2_var','B2_idm','B3_contrast','B3_ent','B3_var','B3_idm','B4_contrast','B4_ent','B4_var','B4_idm','B5_contrast','B5_ent','B5_var','B5_idm','B6_contrast','B6_ent','B6_var','B6_idm','B7_contrast','B7_ent','B7_var','B7_idm','NDVI_contrast','NDVI_ent','NDVI_var','NDVI_idm');
+var summer_2016_cont_ent_var_idm = summer_2016_glcm.select('B2_contrast','B2_ent','B2_var','B2_idm','B3_contrast','B3_ent','B3_var','B3_idm','B4_contrast','B4_ent','B4_var','B4_idm','B5_contrast','B5_ent','B5_var','B5_idm','B6_contrast','B6_ent','B6_var','B6_idm','B7_contrast','B7_ent','B7_var','B7_idm','NDVI_contrast','NDVI_ent','NDVI_var','NDVI_idm');
+var summer_20142016_cont_ent_var_idm = summer_20142016_glcm.select('B2_contrast','B2_ent','B2_var','B2_idm','B3_contrast','B3_ent','B3_var','B3_idm','B4_contrast','B4_ent','B4_var','B4_idm','B5_contrast','B5_ent','B5_var','B5_idm','B6_contrast','B6_ent','B6_var','B6_idm','B7_contrast','B7_ent','B7_var','B7_idm','NDVI_contrast','NDVI_ent','NDVI_var','NDVI_idm');
+
+//multiband image 
+var CompositeImage_2014 = ee.Image.cat([median_2014_summer, summer_2014_cont_ent_var_idm,slope,dem_PonteAltapoly]);
+print(CompositeImage_2014, 'composite_2014');
+var CompositeImage_2015 = ee.Image.cat([median_2015_summer, summer_2015_cont_ent_var_idm,slope,dem_PonteAltapoly]);
+print(CompositeImage_2015, 'composite_2015');
+var CompositeImage_2016 = ee.Image.cat([median_2016_summer, summer_2016_cont_ent_var_idm,slope,dem_PonteAltapoly]);
+print(CompositeImage_2016, 'composite_2016');
+var CompositeImage_20142016 = ee.Image.cat([median_20142016_summer, summer_20142016_cont_ent_var_idm,slope,dem_PonteAltapoly]);
+print(CompositeImage_20142016, 'composite_20142016');
+
+// Function to change data types to floating points
+var summer_2014_float = CompositeImage_2014.float();
+print (summer_2014_float,'summer_2014_float');
+var summer_2015_float = CompositeImage_2015.float();
+print (summer_2015_float,'summer_2015_float');
+var summer_2016_float = CompositeImage_2016.float();
+print (summer_2016_float,'summer_2016_float');
+var summer_20142016_float = CompositeImage_20142016.float();
+print (summer_20142016_float,'summer_20142016_float');
+
+//EXTRACT VALUES (TABLES)
+// Get values for all pixels in each point in the training
+//2014
+var training_2014 = summer_2014_float.sampleRegions({
+  // Get the sample from the points FeatureCollection
+ collection: reforest_train80,
+  // Keep this list of properties from the points (consider changing to plot)
+  properties: ['cod_uso'],
+  // Set the scale to get Landsat pixels in the polygons
+  scale: 30
+});
+//export table: extract values
+var trainingtable_2014 = Export.table(training_2014,'reforest_train80_2014');
+//extraction
+var summer_2014_396points = summer_2014_float.sampleRegions({
+  collection: reforest_points_Adilson_396ptos,
+  properties: ['plot'],
+  scale: 30
+});
+Export.table.toDrive({
+  collection:summer_2014_396points,
+  description:'reforest_summer_2014_396ptos',
+  fileNamePrefix:'reforest_summer_2014_396ptos',
+  fileFormat:'CSV'
+});
+//2015
+var training_2015 = summer_2015_float.sampleRegions({
+  collection: reforest_train80,
+  properties: ['cod_uso'],
+  scale: 30
+});
+//export table: extract values
+var trainingtable_2015 = Export.table.toDrive(training_2015,'reforest_train80_2015');
+//extraction
+var summer_2015_396points = summer_2015_float.sampleRegions({
+  collection: reforest_points_Adilson_396ptos,
+  properties: ['plot'],
+  scale: 30
+});
+Export.table.toDrive({
+  collection:summer_2015_396points,
+  description:'reforest_summer_2015_396ptos',
+  fileNamePrefix:'reforest_summer_2015_396ptos',
+  fileFormat:'CSV'
+});
+//2016
+var training_2016 = summer_2016_float.sampleRegions({
+  collection: reforest_train80,
+  properties: ['cod_uso'],
+  scale: 30
+});
+//export table: extract values
+var trainingtable_2016 = Export.table.toDrive(training_2016,'reforest_train80_2016');
+//extraction
+var summer_2016_396points = summer_2016_float.sampleRegions({
+  collection: reforest_points_Adilson_396ptos,
+  properties: ['plot'],
+  scale: 30
+});
+Export.table.toDrive({
+  collection:summer_2016_396points,
+  description:'reforest_summer_2016_396ptos',
+  fileNamePrefix:'reforest_summer_2016_396ptos',
+  fileFormat:'CSV'
+});
+//20142016
+var training_20142016 = summer_20142016_float.sampleRegions({
+  collection: reforest_train80,
+  properties: ['cod_uso'],
+  scale: 30
+});
+//export table: extract values
+var trainingtable_20142016 = Export.table.toDrive(training_20142016,'reforest_train80_20142016');
+//extraction
+var summer_20142016_396points = summer_20142016_float.sampleRegions({
+  collection: reforest_points_Adilson_396ptos,
+  properties: ['plot'],
+  scale: 30
+});
+Export.table.toDrive({
+  collection:summer_20142016_396points,
+  description:'reforest_summer_20142016_396ptos',
+  fileNamePrefix:'reforest_summer_20142016_396ptos',
+  fileFormat:'CSV'
+});
+
+//NORMALIZATION
+//2014
+var names = summer_2014_float.bandNames();
+var means = summer_2014_float.reduceRegion({
+    reducer: ee.Reducer.mean(), 
+    scale: 30, 
+    geometry: geometry,
+    maxPixels: 1e5,
+    bestEffort: true}).toImage(names);
+var stddev = summer_2014_float.reduceRegion({
+    reducer: ee.Reducer.stdDev(), 
+    geometry: geometry,
+    scale: 30, 
+    maxPixels: 1e5,
+    bestEffort: true}).toImage(names);
+var standard_summer_2014 = summer_2014_float.subtract(means).divide(stddev).float();
+//Map.addLayer(standard_summer_2014, {min:0, max:1},'standard_summer_2014');
+print (standard_summer_2014,'standard_summer_2014');
+
+//2015
+var names = summer_2015_float.bandNames();
+var means = summer_2015_float.reduceRegion({
+    reducer: ee.Reducer.mean(), 
+    scale: 30, 
+    geometry: geometry,
+    maxPixels: 1e5,
+    bestEffort: true}).toImage(names);
+var stddev = summer_2015_float.reduceRegion({
+    reducer: ee.Reducer.stdDev(), 
+    geometry: geometry,
+    scale: 30, 
+    maxPixels: 1e5,
+    bestEffort: true}).toImage(names);
+var standard_summer_2015 = summer_2015_float.subtract(means).divide(stddev).float();
+
+//2016
+var names = summer_2016_float.bandNames();
+var means = summer_2016_float.reduceRegion({
+    reducer: ee.Reducer.mean(), 
+    scale: 30, 
+    geometry: geometry,
+    maxPixels: 1e5,
+    bestEffort: true}).toImage(names);
+var stddev = summer_2016_float.reduceRegion({
+    reducer: ee.Reducer.stdDev(), 
+    geometry: geometry,
+    scale: 30, 
+    maxPixels: 1e5,
+    bestEffort: true}).toImage(names);
+var standard_summer_2016 = summer_2016_float.subtract(means).divide(stddev).float();
+
+//20142016
+var names = summer_20142016_float.bandNames();
+var means = summer_20142016_float.reduceRegion({
+    reducer: ee.Reducer.mean(), 
+    scale: 30, 
+    geometry: geometry,
+    maxPixels: 1e5,
+    bestEffort: true}).toImage(names);
+var stddev = summer_20142016_float.reduceRegion({
+    reducer: ee.Reducer.stdDev(), 
+    geometry: geometry,
+    scale: 30, 
+    maxPixels: 1e5,
+    bestEffort: true}).toImage(names);
+var standard_summer_20142016 = summer_20142016_float.subtract(means).divide(stddev).float();
+
+//EXPORT MULTBAND (COMPOSITES) FOR LOCAL TESTING
+//2014
+Export.image.toDrive({
+  image: summer_2014_float,
+  description: 'summer_2014_float',
+  scale: 20,
+});
+//2015
+Export.image.toDrive({
+  image: summer_2015_float,
+  description: 'summer_2015_float',
+  scale: 20,
+});
+//2016
+Export.image.toDrive({
+  image: summer_2016_float,
+  description: 'summer_2016_float',
+  scale: 20,
+});
+//20142016
+Export.image.toDrive({
+  image: summer_20142016_float,
+  description: 'summer_20142016_float',
+  scale: 20,
+});
+
+//standardized composites exports for local tests
+//2014
+Export.image.toDrive({
+  image: standard_summer_2014,
+  description: 'standard_summer_2014',
+  scale: 20,
+});
+//2015
+Export.image.toDrive({
+  image: standard_summer_2015,
+  description: 'standard_summer_2015',
+  scale: 20,
+});
+//2016
+Export.image.toDrive({
+  image: standard_summer_2016,
+  description: 'standard_summer_2016',
+  scale: 20,
+});
+//20142016
+Export.image.toDrive({
+  image: standard_summer_20142016,
+  description: 'standard_summer_20142016',
+  scale: 20,
+});
+
+//CLASSIFICATIONS 
+//classifications for composites (float multibands), without standardization (2do: with standardized composites)
+//Create an SVM classifier with custom parameters
+var classifier = ee.Classifier.svm({
+  kernelType: 'RBF',
+  gamma: 0.5,
+  cost: 10
+});
+// Train the classifier
+//2014
+var trained_2014 = classifier.train(training_2014, 'cod_uso');
+// Classify the image
+var classifiedSVM_2014 = summer_2014_float.classify(trained_2014);
+print(classifiedSVM_2014,'classified SVM_2014');
+//2015
+var trained_2015 = classifier.train(training_2015, 'cod_uso');
+var classifiedSVM_2015 = summer_2015_float.classify(trained_2015);
+print(classifiedSVM_2015,'classified SVM_2015');
+//2016
+var trained_2016 = classifier.train(training_2016, 'cod_uso');
+var classifiedSVM_2016 = summer_2016_float.classify(trained_2016);
+print(classifiedSVM_2016,'classified SVM_2016');
+//20142016
+var trained_20142016 = classifier.train(training_20142016, 'cod_uso');
+var classifiedSVM_20142016 = summer_20142016_float.classify(trained_20142016);
+print(classifiedSVM_20142016,'classified SVM_20142016');
+
+//CART classification
+//2014
+var trainedCART_2014 = ee.Classifier.cart().train(training_2014, 'cod_uso');
+var classifiedCART_2014 = summer_2014_float.classify(trainedCART_2014);
+print(classifiedCART_2014,'classified CART_2014');
+//2015
+var trainedCART_2015 = ee.Classifier.cart().train(training_2015, 'cod_uso');
+var classifiedCART_2015 = summer_2015_float.classify(trainedCART_2015);
+print(classifiedCART_2015,'classified CART_2015');
+//2016
+var trainedCART_2016 = ee.Classifier.cart().train(training_2016, 'cod_uso');
+var classifiedCART_2016 = summer_2016_float.classify(trainedCART_2016);
+print(classifiedCART_2016,'classified CART_2016');
+//20142016
+var trainedCART_20142016 = ee.Classifier.cart().train(training_20142016, 'cod_uso');
+var classifiedCART_20142016 = summer_20142016_float.classify(trainedCART_20142016);
+print(classifiedCART_20142016,'classified CART_20142016');
+
+//RANDOM FOREST classification with CONFUSION MATRIX
+//SPLIT GROUND TRUTH SAMPLE (training/test) 
+//add a random number column to geometry imports, use seed (1, 2, and 3)
+var random_training = reforest_points_Adilson_396ptos.randomColumn('random', 2);
+var random_training_export = Export.table.toDrive(random_training,'training_396points_random');
+//define your classification samples
+//2014
+var samples_2014 = summer_2014_float.sampleRegions({
+  collection: random_training,   
+  properties: ['cod_uso', 'random'], 
+  scale: 30 });
+var samples_export_2014 = Export.table.toDrive(samples_2014,'samples_2014');
+//split training points (90% and 10%): this is not needed because we already have training (reforest_train80) and testing samples (reforest_test20) but it is useful for other cases. We split here 90% training and 10% testing  
+var training90_2014 = samples_2014.filterMetadata('random', 'less_than', 0.9);
+var testing10_2014 = samples_2014.filterMetadata('random', 'not_less_than', 0.9);
+var training_export_2014 = Export.table.toDrive(training90_2014,'training90_2014');
+//only use the 90% for classification
+var trained90_2014 = ee.Classifier.randomForest(50).train({
+ features: training90_2014, 
+ classProperty: 'cod_uso'});
+//apply classifier
+var classified_RF_2014 = summer_2014_float.classify(trained90_2014);
+
+//2015
+var samples_2015 = summer_2015_float.sampleRegions({
+  collection: random_training,   
+  properties: ['cod_uso', 'random'], 
+  scale: 30 });
+var samples_export_2015 = Export.table.toDrive(samples_2015,'samples_2015');
+var training90_2015 = samples_2015.filterMetadata('random', 'less_than', 0.9);
+var testing10_2015 = samples_2015.filterMetadata('random', 'not_less_than', 0.9);
+var training_export_2015 = Export.table.toDrive(training90_2015,'training90_2015');
+//only use the 90% for classification
+var trained90_2015 = ee.Classifier.randomForest(50).train({
+ features: training90_2015, 
+ classProperty: 'cod_uso'});
+var classified_RF_2015 = summer_2015_float.classify(trained90_2015);
+
+//2016
+var samples_2016 = summer_2016_float.sampleRegions({
+  collection: random_training,   
+  properties: ['cod_uso', 'random'], 
+  scale: 30 });
+var samples_export_2016 = Export.table.toDrive(samples_2016,'samples_2016');
+var training90_2016 = samples_2016.filterMetadata('random', 'less_than', 0.9);
+var testing10_2016 = samples_2016.filterMetadata('random', 'not_less_than', 0.9);
+var training_export_2016 = Export.table.toDrive(training90_2016,'training90_2016');
+//only use the 90% for classification
+var trained90_2016 = ee.Classifier.randomForest(50).train({
+ features: training90_2016, 
+ classProperty: 'cod_uso'});
+var classified_RF_2016 = summer_2016_float.classify(trained90_2016);
+
+//20142016
+var samples_20142016 = summer_20142016_float.sampleRegions({
+  collection: random_training,   
+  properties: ['cod_uso', 'random'], 
+  scale: 30 });
+var samples_export_20142016 = Export.table.toDrive(samples_20142016,'samples_20142016');
+var training90_20142016 = samples_20142016.filterMetadata('random', 'less_than', 0.9);
+var testing10_20142016 = samples_20142016.filterMetadata('random', 'not_less_than', 0.9);
+var training_export_20142016 = Export.table.toDrive(training90_20142016,'training90_20142016');
+//only use the 90% for classification
+var trained90_20142016 = ee.Classifier.randomForest(50).train({
+ features: training90_20142016, 
+ classProperty: 'cod_uso'});
+var classified_RF_20142016 = summer_20142016_float.classify(trained90_20142016);
+
+/*
+//VALIDATION: ERROR MATRIX (REVIEW THIS BIT 2DO)
+//errorMatrix is a function on FeatureCollections 
+//extract values using sample() or sampleRegions(), like for training a classifier.  
+//put predicted (classified) and actual image (validation: test groundtruth) together 
+//sample both at the same time into two columns in a FeatureCollection
+//to validate compare 10% testing points to the classification product in errorMatrix (REVIEW: IT ALWAYS TIMES OUT AND 0 OVERALL ACCURACY AND KAPPA COEFFICIENT)
+var validation10_2014_RF = testing10.classify(trained90_RF);  //it is NOT TRAINED90RF WHAT HAS TO BE CLASSIFIED!)                                   
+var errorMatrix2014_RF = validation10_2014_RF.errorMatrix('cod_uso', 'classification_RF_2014');           
+print('Error Matrix_2014_RF:', errorMatrix2014_RF);
+print('Overall Accuracy_2014_RF:', errorMatrix2014_RF.accuracy());
+print('Kappa Coefficient 2014_RF: ', errorMatrix2014_RF.kappa());
+
+// Get a confusion matrix representing resubstitution accuracy.
+var trainAccuracyCART = trainedCART.confusionMatrix();
+print('CART2 Error Matrix:', trainAccuracyCART);
+print('CART2 Total accuracy:', trainAccuracyCART.accuracy());
+print('CART2 Consumer\'s accuracy (rows):', trainAccuracyCART.consumersAccuracy());
+print('CART2 Producer\'s accuracy (columns):', trainAccuracyCART.producersAccuracy());
+var trained=ee.Classifier.cart().train(training,'class',bands);
+
+//different approaches
+//1. Create an CART classifier with custom parameters.
+var classifierCART = ee.Classifier.cart();
+// Train a CART classifier with default parameters.
+var trainedCART = classifierCART.train(training2,'zone');
+// Classify the image with the same bands used for training.
+var classifiedCART = CompositeImageR.classify(trainedCART);
+//2./// i am not sure if I am doing right I keep getting error.
+// Classify the validation data.
+var validation = classifiedCART.rename("predicted")
+    .addBands(Loudon2015ClassValidation_8B.rename("actual"))
+    .sample(Loudon2015ClassValidation_8B.geometry(), 20)
+// Get a confusion matrix representing expected accuracy.
+var testAccuracy = validation.errorMatrix('actual', 'predicted');
+print('Validation error matrix: ', testAccuracy);
+print('Validation overall accuracy: ', testAccuracy.accuracy());
+
+// Get a confusion matrix representing resubstitution accuracy.
+var trainAccuracyCART = trainedCART.confusionMatrix();
+print('CART2 Error Matrix:', trainAccuracyCART);
+print('CART2 Total accuracy:', trainAccuracyCART.accuracy());
+print('CART2 Consumer\'s accuracy (rows):', trainAccuracyCART.consumersAccuracy());
+print('CART2 Producer\'s accuracy (columns):', trainAccuracyCART.producersAccuracy());
+*/
+
+/*
+//VISUALIZATION
+//some issue in display (maybe sensitive to zoom/region area?)
+// Display the classification result and the input image.
+Map.centerObject(geometry, 20);
+//error: Map.addLayer(classifiedSVM_2014, {min: 0, max: 10, palette: palette}, 'summer_2014_SVM');
+//other colors for palettes '00008B', 'FF8C00', 'ADFF2F', '808080' min: 0, max: 10, palette: palette
+Map.addLayer(classifiedCART_2014, {min: 0, max: 10, palette: palette}, 'summer_2014_CART');
+//Map.addLayer(classified_RF_2014, {min: 0, max: 10, palette: palette}, 'summer_2014_RF');
+*/
+

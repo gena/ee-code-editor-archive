@@ -1,0 +1,113 @@
+
+var boudnib = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["boudnib"]));
+  
+ var errachidia = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["errachidia"])); 
+  
+ var zouala = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["zouala"])); 
+  
+  var erfoud = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["erfoud"]));
+  
+var figuig = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["figuig"]));
+  
+ var zagora = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["zagora"]));
+  
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////-----------Definicion de datos de precipitacion---------/////////////////
+
+var chirps = ee.ImageCollection('UCSB-CHG/CHIRPS/PENTAD');
+//print(chirps)
+//-----------defines period of interest-.-------------
+var startyear = 1981; 
+var endyear = 2020; 
+var startmonth = 1;
+var endmonth = 12;
+var startdate = ee.Date.fromYMD(startyear, startmonth, 1);
+var enddate = ee.Date.fromYMD(endyear , endmonth, 1);
+var years = ee.List.sequence(startyear, endyear);
+
+//----------select data for the period of interest and places----------
+var precip_zona1 = chirps.filterDate(startdate, enddate)
+  //.sort('system:time_start', false)
+  //.filterBounds(palmier);
+ 
+var precip_zona1 = precip_zona1.map(function(img) {return img.clip(palmier);});
+
+//function for calculating the annual precipitation
+var annualPrecip_zona1 = ee.ImageCollection.fromImages(
+  years.map(function (year) {
+    var annual_zona1 = precip_zona1
+        .filter(ee.Filter.calendarRange(year, year, 'year'))
+        .mean();
+    return annual_zona1
+        .set('year', year)
+        .set('system:time_start', ee.Date.fromYMD(year, 1, 1));
+}));
+//set up visualiztion parameter for the image and bar chart
+
+var title = {
+  title: 'Annual precipitation',
+  hAxis: {title: 'Time'},
+  vAxis: {title: 'Precipitation (mm)'},
+};
+
+//crate a chart for yearly precipitation data ,using the geometry, and a reducer for 
+//calculating sum precipitation area
+//print(annualPrecip_zona1,'precip_anual_1')
+var chart_zona1 = ui.Chart.image.seriesByRegion({
+  imageCollection: annualPrecip_zona1, 
+  regions: palmier,
+  reducer: ee.Reducer.sum(),
+  band: 'precipitation',
+  scale: 250,
+  xProperty: 'system:time_start',
+  seriesProperty: 'SITE' //esto no se que significa
+}).setOptions(title)
+  .setChartType('ColumnChart');
+
+//print(chart_zona1);
+var annualsum_zona1 = annualPrecip_zona1.sum().clip(palmier);
+//Map.addLayer(annualsum_zona1, {}, 'annualsum_zona1');
+//-----------------------------------------------------------------------------///////////
+//___________________________calculating monthly precipitation for the region__________________________________
+
+var months_zona1 = ee.List.sequence(1, 12);
+var monthlyPrecip_zona1 =  ee.ImageCollection.fromImages(
+  years.map(function (y) {
+    return months_zona1.map(function(m) {
+    // var n=m+1;
+     ////print(m)
+      var w_1 = precip_zona1.filter(ee.Filter.calendarRange(y, y, 'year'))
+                    .filter(ee.Filter.calendarRange(m, m, 'month'))
+                    .sum();
+      return w_1.set('year', y)
+              .set('month', m)
+              .set('system:time_start', ee.Date.fromYMD(y, m, 1));
+    });
+  }).flatten()
+);
+
+print(ui.Chart.image.series(monthlyPrecip_zona1 , palmier, ee.Reducer.mean(), 250)
+.setOptions({
+  title: "Precipitation mean by month of the year (z1) ",
+  hAxis: {title: 'Time'},
+  vAxis: {title: 'Precipitation (mm)'},
+  colors: ['#EF851C'],
+  pointSize: 2}));
+  
+
+
+
+
+
+
+
+
+
+
+

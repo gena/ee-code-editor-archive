@@ -1,0 +1,140 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var LS8_SR = ee.ImageCollection("LANDSAT/LC08/C01/T1_SR"),
+    roi = /* color: #ff0000 */ee.Geometry.Polygon(
+        [[[-107.97992708984373, 38.77230794677748],
+          [-107.45807650390623, 38.98185112552009],
+          [-107.50751498046873, 39.18226053472779],
+          [-108.08429720703123, 39.23333762587341],
+          [-108.45233919921873, 39.05867092800153]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// import Landsat 8 OLI SR data
+var LS8_SR1 = ee.ImageCollection(LS8_SR)
+  .filterDate('2015-08-01', '2015-11-01') //new date
+  .filter(ee.Filter.eq('WRS_PATH', 35))
+  .filter(ee.Filter.eq('WRS_ROW', 33))
+  .filterMetadata('CLOUD_COVER', 'less_than', 20);
+
+// create a true color visualization parameter 
+var visTrueColor = {
+bands: ["B4","B3","B2"],
+gamma:1,
+//Surface reflectance is a unitless ratio scaled to the range 0-10000
+max:2741.954698935917, 
+min:0, 
+Opacity:1
+};
+
+Map.addLayer(LS8_SR1, visTrueColor,'LS8_SR1',true)
+// print and view the list of images that are available based on our filters
+print(LS8_SR1,'LS8_SR1')
+
+
+// LS8_SR cloud mask function
+// The "pixel_qa" band have various flags encoded in different bits.  
+// pixel_qa Bit 3: Cloud shadow indicator
+// pixel_qa Bit 5: Cloud indicator
+// so this will mask out clouds and shadows pixels, caveat: may mask dark areas too that are not necessarily shadows...
+var maskClouds = function(image){
+  var clear = image.select('pixel_qa').bitwiseAnd(2).neq(0);    
+  return image.updateMask(clear);   
+};
+
+
+// apply cloud mask function to the previous filtered image collection and get the median
+var LS8_SR2 = LS8_SR1
+  .map(maskClouds)
+  .median();
+
+Map.addLayer(LS8_SR2, visTrueColor,'LS8_SR2 - masked',false)
+print(LS8_SR2,visTrueColor, 'LS8_SR2 - masked')
+
+
+// define indices
+// first define individual bands as variables
+var red = LS8_SR2.select('B4').rename("red")
+var green= LS8_SR2.select('B3').rename("green")
+var blue = LS8_SR2.select('B2').rename("blue")
+var nir = LS8_SR2.select('B5').rename("nir")
+var swir1 = LS8_SR2.select('B6').rename("swir1")
+var swir2 = LS8_SR2.select('B7').rename("swir2")
+print(red,'red')
+Map.addLayer(red,{},'red',false)
+print(green, 'green')
+Map.addLayer(green,{},'green',false)
+
+// calculate NDVI index
+var ndvi = nir.subtract(red).divide(nir.add(red)).rename('ndvi');
+Map.addLayer(ndvi, {},'NDVI',false);
+
+// calculate NDWI index
+var ndwi = green.subtract(nir).divide(green.add(nir)).rename('ndwi');
+Map.addLayer(ndwi, {},'NDWI',false);
+
+// calculate TCB
+var TCB = LS8_SR2.expression(
+  "0.3037 * B2 + 0.2793 * B3 + 0.4743 * B4 + 0.5585 * B5 + 0.5082 * B6 + 0.1863 * B7" , {
+  'B2': blue,
+  'B3': green,
+  'B4': red,
+  'B5': nir,
+  'B6': swir1,
+  'B7': swir2
+  }).rename("TCB");
+
+Map.addLayer(TCB, {},'TCB',false);
+
+// add Presence-Absence data
+var PA = ee.FeatureCollection('ft:1F4daSPf6KFxX8fM-mWi_ahqsd9Pgsw3FmCryDGID')
+Map.addLayer(PA, {}, 'Merged_Presence_Absence');
+print(PA, 'Merged_Presence_Absence');
+
+
+var predictors = nir
+                            .addBands(blue)
+                            .addBands(green)
+                            .addBands(red)
+                            .addBands(swir1)
+                            .addBands(swir2)
+                            .addBands(ndvi)
+                            .addBands(TCB)
+                            .addBands(ndwi)
+                      
+
+
+print('predictors: ', predictors);
+
+// extract the points by our list of predictors
+var samples = predictors.sampleRegions({
+  collection: PA,
+  properties: ['presence'],
+  scale: 30 });
+print(samples,'samples')
+
+// train our model using random forest
+var trainingclassifier = ee.Classifier.randomForest({
+                  numberOfTrees: 10,
+                  variablesPerSplit: 0,
+                  minLeafPopulation: 1 ,
+                  bagFraction: 0.5 ,
+                  outOfBagMode: false ,
+                  seed:7 }).train({
+features: samples,
+classProperty: 'presence'});
+
+//// create roi
+
+// apply model to imagery using the classifiers 
+var classified = predictors.classify(trainingclassifier).clip(roi);
+
+print(classified, 'classified')
+
+// view modeled result
+Map.addLayer(classified, {min:0, max:1, palette:['white', 'blue']}, 'classified', false)
+
+// export output as a CSV
+Export.table.toDrive({
+  collection: samples,
+  description:'PredictorPoints',
+  fileNamePrefix: 'Predictor_Points',
+  fileFormat: 'CSV'
+});

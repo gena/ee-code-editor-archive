@@ -1,0 +1,64 @@
+// reduce to vector 
+
+// filtertreecover_wtshds_final
+
+//get forest data
+var data = ee.Image('UMD/hansen/global_forest_change_2014');
+var loss = data.select(['loss']);
+var gain = data.select(['gain'])
+var treecover = data.select(['datamask'])
+
+//add central america data to clip
+var fc= ee.FeatureCollection('ft:15rpjCdr4ZFqMRno3OVnQ1EP1jxa2IX3rCm64IaFv');
+
+//var CA= fc.filterMetadata('Country', 'equals',  )
+var list= ["Guatemala", "El Salvador", "Honduras"];
+var CA = fc.filter(ee.Filter.stringContains('Country', "Honduras"));
+
+addToMap(CA, "Honduras");
+//create forest % mask - ** CHANGE % AS NEEDED
+var lowMask = treecover.eq(1);
+
+//set to LOSS or GAIN - as needed - i.e. gain.mask(lowmask)
+var lossImage = loss.mask(lowMask).clip(CA);
+
+//addToMap(lowMask.clip(CA), {'palette': '00FF00'}, 'forest mask');
+//addToMap(lowMask.mask(lossImage).clip(CA), {'palette': 'FF0000'}, 'loss-gain');
+
+//focal mode on loss image
+var kernal= ee.Kernel.square(1, 'pixels');
+var forestclean = lossImage.focal_mode(1, "square", "pixels");
+var SCALE= 30
+var cleanscale = forestclean.reproject('EPSG:4326', null, SCALE);
+var PALETTE = [
+    'aec3d4', // water
+    '152106'
+].join(',');
+
+var vis_params = {min: 0, max: 1, palette: PALETTE};
+addToMap(cleanscale,vis_params, "clean" )
+
+//count connected pixel patch
+//var regiong= cleanscale.connectedComponents(kernal, 256)
+//addToMap(regiong);
+
+
+//Convert image to feature collection
+var fragfeatures = ee.Algorithms.ReduceToVectors(cleanscale.mask(cleanscale), null, CA, 30, 'polygon', false, 'label', 'EPSG:4326', null, true, 9e12, 16, false);
+
+//Label Raster
+var compasskern = ee.Kernel.square(1);
+var fraglabels = cleanscale.connectedComponents(kernal, 256);
+var viz = fraglabels.randomVisualizer()
+  .select(['viz-red', 'viz-green', 'viz-blue']);
+
+print(fragfeatures)
+centerMap(-86,15, 13);
+
+//addToMap(fragfeatures);
+addToMap(fraglabels);
+addToMap(viz.mask(viz), "deforest frags");
+
+
+var b3= data.select(['first_b30']) ;
+var b4= data.select(['first_b40']) ;

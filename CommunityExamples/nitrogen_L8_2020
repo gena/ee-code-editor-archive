@@ -1,0 +1,179 @@
+
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D1_site");
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D1_site_Buffer");
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D2_site");
+var cereal = ee.FeatureCollection("users/mahyouh/N_D2_site_Buffer");
+
+
+//var cereal = ee.FeatureCollection("users/mahyouh/nitrog_mars");
+//var cereal = ee.FeatureCollection("users/mahyouh/Nitrogen_mars_B25");
+
+
+//var cereal = ee.FeatureCollection("users/mahyouh/N_BUF_25");
+
+// Définir le Maroc dans la liste des pays du Monde
+
+var Maroc = ee.FeatureCollection("users/mahyouh/MAROC_COV_AMS");
+
+//Map.addLayer(Maroc)
+
+Map.centerObject(Maroc, 5);
+
+ 
+ 
+  // Définir une table de couleurs (du rouge au vert)
+ 
+var color =  ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850'];
+
+var vis = {"opacity":1,"bands":["B5","B4","B3"],"min":5896,"max":19374,"gamma":1};
+
+
+var L8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT")
+.filterDate('2020-02-08','2020-02-20')
+//.filterDate('2020-02-20','2020-02-28')
+//.filterDate('2020-01-28','2020-02-05')
+.filterBounds(Maroc)
+.filter(ee.Filter.lte('CLOUD_COVER', 20))
+.median();
+
+
+var B = L8.select ('B2');
+var G= L8.select ('B3');
+var R = L8.select ('B4');
+var NIR = L8.select ('B5');
+var SWIR1 = L8.select ('B6');
+var SWIR2 = L8.select ('B7');
+
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Calculate SIPI (Structure intensive pigment index)= (B5 - B2)/(B5 - B4)
+
+var SIPI = L8.expression(
+ '(B5-B2)/(B5-B4)',{
+ 'B2': B,
+ 'B4':R,
+ 'B5': NIR
+ });
+
+ 
+// calcul de Modified Chlorophyll Absorption Ratio Index (MCARI1) 
+ 
+var MCARI = L8.expression(
+ '1.2 *(2.5*(B5-B4))-(1.3* (B5-B3))',{
+ 'B3': G,  
+ 'B4': R,
+ 'B5': NIR
+ 
+ });
+
+// calcul de Transformed chlorophyll absorption reflectance Index TCARI 3*{(R700-R670) - 0.2 (R700-R550) R700/R670}
+
+//Soil-adjusted vegetation index (SAVI)((RNIR - RR ) *(1+L)) / ((RNIR +RR +L))
+
+var SAVI = L8.expression(
+ '((B5 - B4)/(B5 + B4 + 0.5)) * (1.5)',{
+  'B4': R,
+ 'B5': NIR,
+ });
+
+
+//Normalized Difference Nitrogen Index NDNI Log(1/R1510)-log(1/R1680))/((log(1/R1510)+log(1/R1680)
+
+
+// Green NDVI (GNDVI)
+
+
+
+//Blue green pigment index (BGI ) 
+
+
+// enhanced vegetation index (EVI)
+
+var EVI = L8.expression(
+ '2.5 * ((B5 - B4) / (B5 + 6 * B4 - 7.5 * B2 + 1))',{
+  'B2': B, 
+ 'B4': R,
+ 'B5': NIR,
+ });
+
+ //calcul Normalized Pigment Chlorophyll Ratio Index (NPCI) = (B4 - B1)/(B4 + B1) (R680 - R430) / (R680 - R430)
+
+var NPCI = L8.expression(
+ '(B4-B2)/(B4+B2)',{
+   
+ 'B4': R,
+ 'B2': B,
+ });
+
+
+// Calculate NDVI = (B5 - B4)/(B5+ B4)
+//var NDVI= année_courante.normalizedDifference(['B8','B4']);
+var NDVI = L8.expression(
+ '(B5-B4)/(B5+ B4)',{
+   
+ 'B4': R,
+ 'B5': NIR,
+ });
+
+//cartographie de MTCI Année_courante, année de référence, LTA
+
+Map.addLayer(L8.clip(Maroc), vis, 'optique'); 
+Map.addLayer(SAVI.clip(Maroc) ,{min: -0.2, max: 0.8, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'savi', false);
+Map.addLayer(NDVI.clip(Maroc),{min: -0.2, max: 0.8, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'ndvi', false);
+Map.addLayer(MCARI.clip(Maroc) ,{min: -1, max: 0.002, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'mcari', false);
+Map.addLayer(EVI.clip(Maroc),{min: -0.2, max: 0.8, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'evi', false);
+Map.addLayer(SIPI.clip(Maroc) ,{min: -0.2, max: 10, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'sipi', false);
+Map.addLayer(NPCI.clip(Maroc),{min: 0, max: 0.3, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'npci', false);
+
+
+
+
+
+Map.addLayer(cereal);
+
+
+
+//Map.addLayer(cereal_p, {color: 'FF0000'}, 'cereal');
+
+// création d'une image multibande
+  
+  var N_stack = SAVI.addBands(NDVI).addBands(MCARI).addBands(EVI)
+  .addBands(SIPI).addBands(NPCI);
+  
+ 
+// Renommer les noms des bandes
+var N_indices = N_stack.select(N_stack.bandNames(), ['SAVI', 'NDVI', 'MCARI', 'EVI', 'SIPI',
+'NPCI']);
+
+
+print(N_indices)
+  
+ //Province
+
+var N_cereal = N_indices.reduceRegions({collection: cereal, reducer: ee.Reducer.median(),  scale: 20}); 
+
+// Export ---------------------------------------------------------------------
+// NDVIp_2003
+Export.table.toDrive({
+  collection: N_cereal,
+  description: 'L8N_D2_site_BU',
+  folder: 'modis_ndvi',
+  fileFormat: 'CSV'
+});        
+
+
+// Export the FeatureCollection to a KML file.
+//Export.table.toDrive({
+//  collection: site_poly,
+//  description:'site_poly',
+//  fileFormat: 'SHP'});
+
+
+
+
+
+
+
+

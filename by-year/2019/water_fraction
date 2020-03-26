@@ -1,0 +1,23 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    water = ee.Image("users/gena/GEBCO_2014_2D");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var Palettes = {
+    water: ['f7fbff', 'deebf7', 'c6dbef', '9ecae1', '6baed6', '4292c6', '2171b5', '08519c', '08306b']
+};
+
+var occurrence = jrc.select('occurrence').divide(100).gt(0.1).unmask(water.lt(-10))
+occurrence = occurrence.mask(occurrence)
+Map.addLayer(occurrence, {palette: Palettes.water}, 'occurrence')
+
+var sourceScale = 0.0002777777777777778
+var targetScale = 0.02
+var maxPixels = 35000
+
+var upscaled = occurrence
+  .reproject(ee.Projection('EPSG:4326').scale(sourceScale, sourceScale))
+  .reduceResolution(ee.Reducer.mean(), false, maxPixels)
+  .reproject(ee.Projection('EPSG:4326').scale(targetScale, targetScale))
+
+
+Map.addLayer(upscaled, {palette: Palettes.water}, 'occurrence, ~1km')

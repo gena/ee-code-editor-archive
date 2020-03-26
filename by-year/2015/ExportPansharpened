@@ -1,0 +1,23 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+print(Map.getCenter())
+Map.setCenter(-78.18, 37.19)
+
+l8 = l8
+  .filterMetadata('CLOUD_COVER', 'less_than', 10)
+  .filterBounds(ee.Geometry(Map.getBounds(true)).centroid(1))
+
+var image = ee.Image(l8.first())
+
+var rgb = image.select(['B4','B3','B2'])
+var pan = image.select('B8')
+
+var hsv  = rgb.rgbtohsv();
+var huesat = hsv.select('hue', 'saturation');
+var pansharpened = ee.Image.cat(huesat, pan).hsvtorgb();
+
+Map.addLayer(rgb, {min:0.03, max:0.25}, 'rgb')
+Map.addLayer(pansharpened, {min:0.03, max:[0.25,0.25,0.35]}, 'pansharpened')
+
+Export.image(pansharpened)

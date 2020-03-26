@@ -1,0 +1,181 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var points = /* color: #d63000 */ee.FeatureCollection(
+        [ee.Feature(
+            ee.Geometry.Point([-128.38623046875, 42.72482148625276]),
+            {
+              "system:index": "0"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.07861328125, 42.789354160502775]),
+            {
+              "system:index": "1"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-127.979736328125, 43.04480541304369]),
+            {
+              "system:index": "2"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-127.75314331054688, 42.926262918649385]),
+            {
+              "system:index": "3"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-127.562255859375, 42.898100636939276]),
+            {
+              "system:index": "4"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-127.51007080078125, 42.79136972365014]),
+            {
+              "system:index": "5"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-127.55401611328125, 42.63395872267314]),
+            {
+              "system:index": "6"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-127.68585205078125, 42.581399679665054]),
+            {
+              "system:index": "7"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-127.8094482421875, 42.59353262564993]),
+            {
+              "system:index": "8"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-127.94677734375, 42.66628070564928]),
+            {
+              "system:index": "9"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.09646606445312, 42.577354839557856]),
+            {
+              "system:index": "10"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.232421875, 42.59151063198148]),
+            {
+              "system:index": "11"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.30657958984375, 42.490327318304665]),
+            {
+              "system:index": "12"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.5015869140625, 42.48222557002593]),
+            {
+              "system:index": "13"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.52081298828125, 42.58342200132361]),
+            {
+              "system:index": "14"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.5894775390625, 42.68243539838623]),
+            {
+              "system:index": "15"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.770751953125, 42.66426107379469]),
+            {
+              "system:index": "16"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.68560791015625, 42.718768102606326]),
+            {
+              "system:index": "17"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.87237548828125, 42.97049193148624]),
+            {
+              "system:index": "18"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.6663818359375, 42.84979250192646]),
+            {
+              "system:index": "19"
+            }),
+        ee.Feature(
+            ee.Geometry.Point([-128.529052734375, 42.819580715795915]),
+            {
+              "system:index": "20"
+            })]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+function maxAngle(a, b, c) {
+  a = ee.Number(a)
+  b = ee.Number(b)
+  c = ee.Number(c)
+  
+  var angle = ee.List([
+    b.pow(2).add(c.pow(2)).subtract(a.pow(2)).divide(b.multiply(c).multiply(2)).acos(),
+    a.pow(2).add(c.pow(2)).subtract(b.pow(2)).divide(a.multiply(c).multiply(2)).acos(),
+    a.pow(2).add(b.pow(2)).subtract(c.pow(2)).divide(a.multiply(b).multiply(2)).acos()
+  ]).reduce(ee.Reducer.max())
+  
+  return ee.Number(angle).multiply(180 / Math.PI)
+}
+
+function concaveHull(points, scale) {
+  scale = ee.Number(scale)
+
+  var minAngle = 90
+  var maxSearchRadius = scale.multiply(100)
+  var e = scale.multiply(1)
+  
+  function computeCocaveHull(points, previous) {
+    var inner = points.filterBounds(previous.buffer(e.multiply(-1), e))
+    
+    var coords = ee.List(previous.coordinates().get(0))
+    var coords2 = coords.slice(1)
+    var edgeCoords = coords.zip(coords2)
+
+    var triangles = edgeCoords.map(function(pair) {
+      pair = ee.List(pair)
+      var p1 = ee.Algorithms.GeometryConstructors.Point(pair.get(0))
+      var p2 = ee.Algorithms.GeometryConstructors.Point(pair.get(1))
+      var edge = ee.Algorithms.GeometryConstructors.LineString(pair)
+      
+      var l = edge.length()
+      
+      // digging
+      var nearest = inner.filterBounds(edge.buffer(maxSearchRadius, e))
+        .map(function(pt) {
+          var d1 = pt.distance(p1)
+          var d2 = pt.distance(p2)
+          
+          var a = maxAngle(d1, d2, l)
+
+          var triangle = ee.FeatureCollection([edge, pt]).geometry().convexHull()
+
+          var valid = d1.max(d2).lt(l).and(inner.filterBounds(triangle.buffer(e.multiply(-1))).size().eq(0))
+
+          return ee.Feature(triangle).set({a: a, d1: d1, d2: d2, l: l, d: d1.min(d2), valid: valid})
+        }).filter(ee.Filter.eq('valid', 1)).filter(ee.Filter.gt('a', minAngle)).sort('d').limit(1)
+      
+      return nearest
+    })
+
+    triangles = ee.FeatureCollection(ee.FeatureCollection(triangles).flatten())
+
+    return previous.difference(triangles)
+  }
+  
+  var iterations = 5
+  
+  var results = ee.List.sequence(0, iterations).iterate(function(c, p) {
+    return computeCocaveHull(points, ee.Geometry(p))
+  }, points.geometry().convexHull())
+  
+  return ee.Geometry(results)
+}
+
+var convex = points.geometry().convexHull()
+Map.addLayer(convex, {color: 'white'}, 'convexHull')
+
+var concave = concaveHull(points, Map.getScale())
+Map.addLayer(concave, {color: 'black'}, 'concaveHull')

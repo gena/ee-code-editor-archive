@@ -1,0 +1,59 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var s1 = ee.ImageCollection("COPERNICUS/S1_GRD");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+s1 = s1
+  .filterBounds(Map.getBounds(true))
+  .map(function(i) { 
+    return i.resample('bicubic') 
+      .clip(i.geometry().buffer(-5000))
+  })
+  .filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'))
+
+var year = 2015;
+var month = 1;
+
+print(s1.filterDate(ee.Date.fromYMD(year, month, 1), '2050-01-01'))
+
+function get_image(days) {
+  var l = 1
+  
+  var t = ee.Date.fromYMD(year, 1, 1).advance(days, 'day')
+  
+  var vv1 = s1.filterDate(t, t.advance(l, 'month'))
+    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')).select('VV')
+    
+  var vv2 = s1.filterDate(t.advance(-l, 'month'), t)
+    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')).select('VV')    
+
+  var vh2 = s1.filterDate(t.advance(-l, 'month'), t)
+    .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH')).select('VH')
+    
+  
+  var r = vv1
+    .median()
+
+  var g = vh2
+    .median()
+  g = ee.Algorithms.If(vh2.size().gt(0), g.add(10), g)
+
+  var b = vv2
+    .median()
+  b = ee.Algorithms.If(vh2.size().gt(0), b.add(4), b)
+
+  return ee.Image([r, g, b])
+    .set({size_vv1 : vv1.size() })
+    .set({size_vv2 : vv2.size() })
+    .set({size_vh2 : vh2.size() })
+}
+
+var images = ee.List.sequence(0, 100, 7).map(function(m) {
+  return get_image(m)
+})
+
+images = ee.ImageCollection(images)
+
+print(images.aggregate_array('size_vv1'))
+print(images.aggregate_array('size_vv2'))
+print(images.aggregate_array('size_vh2'))
+
+require('users/gena/packages:animation').animate(images, { vis: {min: -10, max: 3} })

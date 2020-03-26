@@ -1,0 +1,188 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var catchment = ee.FeatureCollection("users/gena/water-niger/catchment"),
+    geometryPlot = /* color: #d63000 */ee.Geometry.LineString(
+        [[-2.4319781021495146, 9.922989963283486],
+         [8.16007144889511, 14.509634993659672]]),
+    catchments = ee.FeatureCollection("users/gena/water-niger/wflow/catchments"),
+    catchmentsHomogenized = ee.FeatureCollection("users/gena/water-niger/catchments-homogenized"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([-4.9157287597656705, 15.555255972432954]),
+    occurrence = ee.Image("JRC/GSW1_0/GlobalSurfaceWater");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+var charting = require('users/gena/packages:charting')
+var palettes = require('users/gena/packages:palettes')
+var assets = require('users/gena/packages:assets')
+var hydro = require('users/gena/packages:hydro')
+var thresholding = require('users/gena/packages:thresholding')
+
+function pad(num, size) {
+  var s = num + "";
+  while (s.length < size) s = "0" + s;
+  return s;
+}
+
+Map.addLayer(catchmentsHomogenized, {}, 'catchments')
+
+var start = ee.Date('2016-01-01')
+var stop = ee.Date('2019-01-01')
+
+var hueThreshold = 0.2
+var hueMargin = 0.025
+var vis = { min: 0.03, max: 0.5, bands: ['swir', 'nir', 'green'] }
+
+function computeTimeSeries(catchment, scale) {
+  var region = catchment.geometry()
+  
+  // LANDSAT and MODIS
+  var images = assets.getImages(region, {
+    filterMasked: true,
+    missions: ['S2', 'L8', 'L7', 'L5', 'L4'],
+    filter: ee.Filter.date(start, stop)
+  })
+  
+  images = assets.getMostlyCleanImages(images, region.buffer(5000), { percentile: 85, cloudFrequencyThresholdDelta: 0.25 })
+  
+  images = images.sort('system:time_start')
+  
+  var waterArea = images.map(function(i) {
+    // MNDWI
+    var mndwi = i.normalizedDifference(['green', 'swir'])
+    var th = thresholding.computeThresholdUsingOtsu(mndwi, scale, region, 0.5, 0.7, -0.2)
+    var water = mndwi.gt(th)
+    
+    var areaMNDWI = ee.Image.pixelArea().mask(water)
+      .reduceRegion({
+        reducer: ee.Reducer.sum(),
+        geometry: region,
+        scale: scale
+      }).get('area')
+  
+    // HUE
+    var iRGB = i.visualize(vis)
+    var iHSV = iRGB.unitScale(0, 255).rgbToHsv()
+    var mask = iHSV.select('hue').gt(hueThreshold)
+  
+    var areaBIO = ee.Image.pixelArea().mask(mask).reduceRegion({
+      reducer: ee.Reducer.sum(), 
+      geometry: region, 
+      scale: scale
+    })
+  
+    return i.updateMask(mask).set({ 
+      areaBIO: areaBIO.get('area'),
+      areaMNDWI: areaMNDWI,
+      label: i.date().format('YYYY-MM-dd') 
+    })
+  })
+  
+  return waterArea
+}
+
+function exportTimeSeries(catchment, timeSeries, name) {
+  timeSeries = timeSeries.filter(ee.Filter.notNull(['areaMNDWI', 'areaBIO']))
+
+  var times = timeSeries.aggregate_array('system:time_start')
+  var areaMNDWI = timeSeries.aggregate_array('areaMNDWI')
+  var areaBIO = timeSeries.aggregate_array('areaBIO')
+  
+  catchment = catchment.set({
+    times: times,
+    areaMNDWI: areaMNDWI,
+    areaBIO: areaBIO
+  })
+  
+  Export.table.toDrive({
+    collection: ee.FeatureCollection(catchment),
+    description: name, 
+    folder: 'upper-niger-water', 
+    fileNamePrefix: name, 
+    fileFormat: 'GeoJSON'
+  })
+  
+  return catchment
+}
+
+// export every catchment
+function exportAll() {
+  var count = catchmentsHomogenized.size().getInfo()
+  print(count)
+  var list = catchmentsHomogenized.toList(count)
+  for(var i=400; i<439; i++) {
+    var catchment = ee.Feature(list.get(i))
+    var waterArea = computeTimeSeries(catchment, 90)
+    exportTimeSeries(catchment, waterArea, 'upper-niger-water-area-' + pad(i, 3))
+  }
+}
+
+// exportAll()
+
+// first catchment only
+var catchment = ee.Feature(catchmentsHomogenized.filterBounds(geometry).first())
+  
+Map.addLayer(catchment, { color: 'yellow' }, 'selection', true, 0.5)
+
+
+function printCharts(waterArea, title) {
+  print(ui.Chart.feature.byFeature({
+    features: waterArea, 
+    xProperty: 'system:time_start', 
+    yProperties: ['areaMNDWI', 'areaBIO']
+  })
+  .setOptions({
+    pointSize: 2,
+    lineWidth: 0,
+    title: title
+  }))
+  
+  print(ui.Chart.feature.byFeature({
+    features: waterArea, 
+    xProperty: 'system:time_start', 
+    yProperties: ['areaMNDWI']
+  })
+  .setOptions({
+    pointSize: 2,
+    lineWidth: 0,
+    title: title
+  }))
+  
+  print(ui.Chart.feature.byFeature({
+    features: waterArea, 
+    xProperty: 'system:time_start', 
+    yProperties: ['quality_score']
+  })
+  .setOptions({
+    pointSize: 2,
+    lineWidth: 0
+  }))
+}
+
+var scale = 30
+var waterArea = computeTimeSeries(catchment, scale)
+printCharts(waterArea, '30m')
+
+var scale = 90
+var waterArea = computeTimeSeries(catchment, scale)
+printCharts(waterArea, '90m')
+
+animation.animate(waterArea.filterDate('2016-01-01', '2019-01-01'), { 
+  maxFrames: 50,
+  label: 'label',
+  vis: vis
+})
+
+// get catchments where water occurrence is large enough
+occurrence = occurrence.select('occurrence')
+
+catchmentsHomogenized = catchmentsHomogenized.map(function(f) {
+  var area =  occurrence.reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: f.geometry(),
+    scale: scale
+  }).values().get(0)
+  
+  return f.set({
+    'JRC_water_area': area
+  })
+})
+
+print(ui.Chart.feature.histogram(catchmentsHomogenized, 'JRC_water_area', 100))

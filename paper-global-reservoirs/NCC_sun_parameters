@@ -1,0 +1,25 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var mines = ee.FeatureCollection("users/gena/mines-mrds");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var mines = ee.FeatureCollection("users/gena/mines-mrds");
+var minesImage = ee.Image().paint(mines, 1, 1).focal_max(4)
+Map.addLayer(minesImage, {palette: ['ff0000']}, 'mines')
+
+var assets = require('users/gena/packages:assets')
+
+var clear = true
+var images = assets.getImages(ee.Geometry(Map.getBounds(true)), clear)
+
+images = images
+  .sort('system:time_start')
+  .sort('MEAN_SOLAR_ZENITH_ANGLE')
+  .sort('MEAN_SOLAR_AZIMUTH_ANGLE')
+
+
+print(images.first())
+
+print('Zenith: ', ui.Chart.feature.histogram(images, 'SUN_ELEVATION', 10))
+print('Azimuth: ', ui.Chart.feature.histogram(images, 'SUN_AZIMUTH', 10))  
+print('Zenith vs Azimuth: ', ui.Chart.feature.byFeature(images, 'SUN_AZIMUTH', 'SUN_ELEVATION'))
+
+

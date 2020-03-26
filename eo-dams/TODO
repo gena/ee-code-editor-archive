@@ -1,0 +1,30 @@
+/***
+ * Data colleciton:
+ * 
+ * 1. InSAR points and time series
+ *  CSV: X, Y, T, DLOS
+ * 
+ * 2. Download Planed imagery for 2 dams (Sul Superior and Cava do Germano)
+ * 
+ * 3. Extract time sereis for temperature, precipitation
+ *        precipitation.js
+ *        temperature-landsat.js
+ * 
+ *    What geometry to use for these (tailings, dam, downstream, catchment)?
+ * 
+ * 4. Extract soil moisture time series
+ * 
+ * 5. Extract water extent time series over dam / basin?
+ * 
+ * 6. Analyze and add catchment area (upstream / downstream)
+ * 
+ * 7. Add DEM
+ * 
+ * 8. Develop an app (dashboard)
+ * 
+ * 9. Add satellite imagery preview time lapse per dam
+ * 
+ * 10. Digitize dam crest lines
+ * 
+ * 
+ */

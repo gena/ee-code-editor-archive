@@ -1,0 +1,43 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var image = ee.Image("users/gena/G3WBM"),
+    etopo = ee.Image("NOAA/NGDC/ETOPO1"),
+    l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.addLayer(ee.Image(1).mask(etopo.select('ice_surface').gt(-50)), {palette:['ffffff'], opacity: 0.5}, 'white')
+
+var i = image.mask(
+      image.neq(99) // ocean 
+ .and(image.neq(0)) // land
+ .and(image.neq(1)) // land (no data)
+ .and(image.neq(10)) // snow
+ .and(etopo.select('ice_surface').gt(-50))
+ )
+
+var style = '\
+  <RasterSymbolizer>\
+    <ColorMap  type="intervals" extended="false" >\
+      <ColorMapEntry color="#0000ff" quantity="50" label="permanent water"/>\
+      <ColorMapEntry color="#0000ff" quantity="51" label="permanent water (SWBD)"/>\
+      <ColorMapEntry color="#707090" quantity="40" label="temporal flooded" />\
+      <ColorMapEntry color="#005050" quantity="30" label="salt marsh" />\
+      <ColorMapEntry color="#005080" quantity="20" label="wet soil" />\
+    </ColorMap>\
+  </RasterSymbolizer>';
+
+var style_original = '\
+  <RasterSymbolizer>\
+    <ColorMap  type="intervals" extended="false" >\
+      <ColorMapEntry color="#0000ff" quantity="50" label="permanent water"/>\
+      <ColorMapEntry color="#ff0000" quantity="51" label="permanent water (SWBD)"/>\
+      <ColorMapEntry color="#00ff00" quantity="40" label="temporal flooded" />\
+      <ColorMapEntry color="#c0a816" quantity="30" label="salt marsh" />\
+      <ColorMapEntry color="#663399" quantity="20" label="wet soil" />\
+    </ColorMap>\
+  </RasterSymbolizer>';
+
+Map.addLayer(l8.select(['B6','B5','B3']).reduce(ee.Reducer.percentile([15])).normalizedDifference(['B3_p15', 'B6_p15']), {min:-0.5, max:0.5}, 'l8')
+Map.addLayer(i, {}, 'G3WBD (raw)', false)
+
+Map.addLayer(i.sldStyle(style_original), {}, 'G3WBD')
+Map.addLayer(i.mask(i.eq(50)).sldStyle(style_original), {}, 'G3WBD (permanent)', false)
+

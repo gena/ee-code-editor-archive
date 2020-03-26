@@ -1,0 +1,66 @@
+var table = 
+{
+  cols: [
+    {id: 'x', type: 'number'},
+    {id: 'y', type: 'number'}
+  ],
+  rows: [
+    {c: [{v: 0}, {v: 1}]},
+    {c: [{v: 1}, {v: 4}]},
+    {c: [{v: 2}, {v: 2}]},
+    {c: [{v: 3}, {v: 5}]},
+    {c: [{v: 4}, {v: 2}]}
+  ]
+};
+
+/***
+ * Updates chart randomly
+ */
+function updateChart() {
+  var rows = table.rows.map(function(r) {
+    var v = r.c[1].v
+    
+    var e = Math.random() 
+    
+    r.c[1].v = v + (e - 0.5) * 0.5
+    
+    return r
+  })
+  
+  var table2 = 
+  {
+    cols: [
+      {id: 'x', type: 'number'},
+      {id: 'y', type: 'number'}
+    ],
+    rows: rows
+  };
+
+  chart.setDataTable(table2)
+}
+
+// add chart
+var chart = ui.Chart(table)
+  .setOptions({ vAxis: { viewWindow: { min: 0, max: 10 } } })
+
+
+// add a slider
+var slider = ui.Slider(0, 100, 0, 1)
+
+var style = slider.style()
+style.set('minWidth', '300px')
+
+var update = ui.util.throttle(updateChart, 100)
+
+slider.onSlide(function(v) {
+  update()
+})
+
+var panel = ui.Panel([chart, slider])
+Map.widgets().add(panel)
+
+ui.util.setInterval(function() {
+  update()
+  slider.setValue((slider.getValue() + 1) % 100)
+}, 100)
+

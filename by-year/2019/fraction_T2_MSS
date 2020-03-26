@@ -1,0 +1,58 @@
+var assets = [
+  { name: 'L8 OLI T1', path: 'LANDSAT/LC08/C01/T1_RT' },
+  { name: 'L7 ETM+ T1', path: 'LANDSAT/LE07/C01/T1_RT' },
+  { name: 'L5 TM T1', path: 'LANDSAT/LT05/C01/T1' },
+  { name: 'L4 TM T1', path: 'LANDSAT/LT04/C01/T1' },
+
+  { name: 'L8 OLI T2', path: 'LANDSAT/LC08/C01/T2' },
+  { name: 'L7 ETM+ T2', path: 'LANDSAT/LE07/C01/T2' },
+  { name: 'L5 TM T2', path: 'LANDSAT/LT05/C01/T2' },
+  { name: 'L4 TM T2', path: 'LANDSAT/LT04/C01/T2' },
+
+  { name: 'L5 MSS T1', path: 'LANDSAT/LM05/C01/T1' },
+  { name: 'L5 MSS T2', path: 'LANDSAT/LM05/C01/T2' },
+  { name: 'L4 MSS T1', path: 'LANDSAT/LM04/C01/T1' },
+  { name: 'L4 MSS T2', path: 'LANDSAT/LM04/C01/T2' },
+  { name: 'L3 MSS T2', path: 'LANDSAT/LM03/C01/T1' },
+  { name: 'L3 MSS T2', path: 'LANDSAT/LM03/C01/T2' },
+  { name: 'L2 MSS T2', path: 'LANDSAT/LM02/C01/T1' },
+  { name: 'L2 MSS T2', path: 'LANDSAT/LM02/C01/T2' },
+  { name: 'L1 MSS T2', path: 'LANDSAT/LM01/C01/T1' },
+  { name: 'L1 MSS T2', path: 'LANDSAT/LM01/C01/T2' }
+]
+
+function toImageCollection(info) {
+  return ee.ImageCollection(info.path)
+}
+
+function merge(previous, current) {
+  return previous.merge(current)
+}
+
+var collections = assets.map(toImageCollection)
+
+var empty = ee.ImageCollection([])
+
+var countT1 = collections.slice(0, 4).reduce(merge, empty).select(0).count()
+var countT2 = collections.slice(4, 8).reduce(merge, empty).select(0).count()
+var countMSS = collections.slice(8).reduce(merge, empty).select(0).count()
+
+Map.addLayer(countT2.divide(countT2.add(countT1)), {}, 'T2 / (T2 + T1)')
+Map.addLayer(countMSS.divide(countMSS.add(countT1)), {}, 'MSS / (MSS + T1)')
+
+throw(0)
+
+
+var total = ee.Number(0)
+
+function showInfo(asset) {
+  var images = ee.ImageCollection(asset.path)
+  var size = images.size()
+  total = total.add(size)
+  
+  print(asset.name, size)
+}
+
+assets.map(showInfo)
+
+print('Total: ', total)

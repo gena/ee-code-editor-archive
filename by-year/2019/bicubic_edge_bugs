@@ -1,0 +1,10 @@
+var geometry = ee.Geometry.Polygon([[[-109.109, 41.336],[-109.035, 41.463],[-109.245, 41.479]]]);
+var mask = ee.Image().float().paint(geometry, 1)
+
+var scale = Map.getScale() * 20
+var image = ee.Image.pixelLonLat().mask(mask).reproject('EPSG:3857', null, scale)
+
+var vis = {min: [-109.256, 41.388], max: [-109.091, 41.475]}
+Map.addLayer(image, vis, 'nearest neighbour')
+Map.addLayer(image.resample('bilinear').translate(20, 0, 'pixels'), vis, 'bilinear')
+Map.addLayer(image.resample('bicubic').translate(40, 0, 'pixels'), vis, 'bicubic')

@@ -1,0 +1,21 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var srtm = ee.Image("USGS/SRTMGL1_003");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.addLayer(srtm, {min:0, max:50})
+
+var info = srtm.getInfo() 
+var crs = info.bands[0].crs
+var crs_transform = info.bands[0].crs_transform
+//crs_transform = [crs_transform[0], crs_transform[1], 0.0, crs_transform[3], crs_transform[4], 0.0];
+
+var bounds = ee.Geometry(Map.getBounds(true)).bounds(1e-2).coordinates().getInfo()[0];
+print(bounds)
+
+var url = srtm.getDownloadURL({
+  name: 'srtm_test',
+  crs: crs,
+  crs_transform: JSON.stringify(crs_transform),
+  region: JSON.stringify(bounds),
+});
+
+print(url)

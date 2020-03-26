@@ -1,0 +1,48 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8_sr = ee.ImageCollection("LANDSAT/LC8_SR"),
+    l8_toa = ee.ImageCollection("LANDSAT/LC8_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+//Map.setCenter(151.36, -27.74, 12)
+//var vis_sr = {min:0, max:4000}
+//var vis_toa = {min:0, max:0.4}
+
+Map.setCenter(-52.88, 47.48, 12)
+var vis_sr = {min:0, max:2000}
+var vis_toa = {min:0, max:0.2}
+
+
+print(Map.getCenter())
+
+//Map.addLayer(l8_sr.count())
+
+
+//var bands = ['B7','B5','B3']
+var bands = ['B4','B3','B2']
+
+// SR
+var image_sr = ee.Image(l8_sr.filterBounds(Map.getCenter()).first())
+Map.addLayer(image_sr.select(bands), vis_sr, 'sr')
+
+// clouds, FMask
+var clouds_sr = image_sr.select('cfmask')
+var clouds_sr_conf = image_sr.select('cfmask_conf')
+Map.addLayer(clouds_sr.mask(clouds_sr.eq(4).multiply(clouds_sr_conf.divide(3))), {palette:['ffff00']}, 'clouds (SR)')
+Map.addLayer(clouds_sr.mask(clouds_sr.eq(2)), {palette:['ff0000'], opacity:0.5}, 'clouds shadow (SR)')
+var water_sr = clouds_sr.eq(1)
+Map.addLayer(water_sr.mask(water_sr), {palette:['0000ff'], opacity:0.5}, 'water (SR)')
+Map.addLayer(clouds_sr.mask(clouds_sr.eq(3)), {palette:['ffffff']}, 'snow (SR)')
+
+var water = image_sr.normalizedDifference(['B3', 'B6']).gt(0)
+Map.addLayer(water.mask(water), {palette:['0000ff'], opacity:0.5}, 'water (MNDWI)', false)
+var missed_water = water.and(water_sr.not())
+Map.addLayer(missed_water.mask(missed_water), {palette:['ff00ff']}, 'missed water', true)
+
+
+// TOA
+var image_toa = ee.Image(l8_toa.filterBounds(Map.getCenter()).first())
+Map.addLayer(image_toa.select(bands), vis_toa, 'toa', false)
+
+// clouds, LandsatMask
+var clouds_toa = ee.Algorithms.Landsat.simpleCloudScore(image_toa).select('cloud')
+Map.addLayer(clouds_toa.mask(clouds_toa.divide(100)), {palette:['ffff00']}, 'clouds TOA (simple)', false)
+

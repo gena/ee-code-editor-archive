@@ -1,0 +1,70 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var Rotterdam_harbour = /* color: d63000 */ee.Geometry.Point([4.17755126953125, 51.93198844679552]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// center the map
+Map.centerObject(Rotterdam_harbour,10);
+
+// import the S1 collection and filter to date and geometry and show
+var collection_S1 = ee.ImageCollection('COPERNICUS/S1_GRD').filterBounds(Rotterdam_harbour);
+print('S1 images over the harbor',collection_S1) //->Which modes can you identify?
+
+// filter out the different modes
+var collection_S1_IW = collection_S1.filterMetadata('instrumentMode', 'equals', 'IW');
+print('S1 IW mode images',collection_S1_IW)
+var collection_S1_EW = collection_S1.filterMetadata('instrumentMode', 'equals', 'EW');
+print('S1 EW mode images',collection_S1_EW)
+// ->What is the range of dates of the IW images and do you notice it is not ordered in time?
+// ->Look at the metadata in 'properties' for one of the images in 'features'.
+
+// order images in time and display first image as layer (Change to True)
+var collection_S1_IW_first=ee.Image(collection_S1_IW.sort('system:time_start',false).first());
+print('S1 IW latest acquired image',collection_S1_IW_first)
+var collection_S1_EW_first=ee.Image(collection_S1_EW.sort('system:time_start',false).first());
+Map.addLayer(collection_S1_EW_first, {'bands': 'VV', min: -15,max: 0}, 'Sentinel-1 EW VV');
+Map.addLayer(collection_S1_IW_first, {'bands': 'VV', min: -15,max: 0}, 'Sentinel-1 IW VV');
+Map.addLayer(collection_S1_IW_first, {'bands': 'VH', min: -25,max: -5}, 'Sentinel-1 IW VH');
+Map.addLayer(collection_S1_IW_first, {'bands': 'VV,VH,VV', min: [-15, -25, -15],max: [0, -5, 0]}, 'Sentinel-1 IW VV,VH,VV false color',false);
+// ->observe the resolution difference between the EW and IW modes, try to find this also in the metadata
+// ->try to get the first acquired image (hint: use 'true' as argument)
+// ->try to customize the visualization parameters to your liking, you can start with the GUI in 'Layers'
+// ->which features can you distinguish using the different polarizations?
+// ->check the offshore areas, identify the windfarms
+// ->add a layer to the map showing the band 'angle' of image 'collection_S1_IW_first' and name accordingly
+
+Map.addLayer(collection_S1_IW_first, {'bands': 'angle'}, 'Sentinel-1 IW angle');
+
+// examples to filter with other metadata fields
+var collection_S1_IW_HV_HH = collection_S1_IW
+  // Filter to get images with HV and HH dual polarization.
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'HV'))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'HH'))
+print('S1 IW images containing HV and HH',collection_S1_IW_HV_HH)
+// filter to get images from different look angles.
+var collection_S1_IW_ASC = collection_S1_IW.filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'));
+print('S1 IW images from ascending orbit',collection_S1_IW_ASC)
+var collection_S1_IW_DES = collection_S1_IW.filter(ee.Filter.eq('orbitProperties_pass', 'DESCENDING'));
+print('S1 IW images from descending orbit',collection_S1_IW_DES)
+// filter to get images within a certain date window
+var collection_S1_IW_datefiltered = collection_S1_IW.filterDate('2016-01-01', '2016-03-01')
+print('S1 IW images from 2016-01-01 until 2016-03-01',collection_S1_IW_datefiltered)
+// ->look in the metadata and if desired create a new variable with your own filters
+
+// create a composite from means at different polarizations and look angles, and display
+var collection_S1_IW_composite = ee.Image.cat([
+  collection_S1_IW_ASC.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH')).select('VH').mean(),
+  ee.ImageCollection(collection_S1_IW_ASC.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')).select('VV')
+  .merge(collection_S1_IW_DES.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')).select('VV'))).mean(),
+  collection_S1_IW_DES.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH')).select('VH').mean()
+  ]);
+print('S1 IW composite',collection_S1_IW_composite)
+Map.addLayer(collection_S1_IW_composite, {min: [-25, -15, -25], max: [-5, 0, -5]}, 'S1 Mean and angle composite',false);
+
+// ->this is composite suggested by GEE, though try any more sensible composite here (hint: a VV-VH-VV as R-G-B for example)
+
+// example of other composite
+var collection_S1_IW_composite = ee.Image.cat([
+  collection_S1_IW_ASC.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')).select('VV').mean(),
+  collection_S1_IW_ASC.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH')).select('VH').mean(),
+  collection_S1_IW_DES.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV')).select('VV').mean()
+  ]);
+Map.addLayer(collection_S1_IW_composite, {min: [-15, -25, -15], max: [0, -5, 0]}, 'S1 mean ASC-VV, ASC-VH, DES-VV composite',false);

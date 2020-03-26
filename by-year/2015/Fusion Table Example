@@ -1,0 +1,21 @@
+centerMap(-74.504235, -10.111272, 8);
+// Select the sira reserve outline from fusion table on my G-Drive.
+var sira = ee.FeatureCollection('ft:1nHfTKkYH106L5ddnW_Eq8F7NfI71ZGQEcUilCThX');
+
+
+//create a blank image to paint reserve onto
+var siraImg = ee.Image().toByte();
+
+// paint the feature image with colour 1 from the palette
+var siraFill = siraImg.paint(sira, 1);
+
+// outline the feature with colour 0 and width 3
+var siraComp = siraFill.paint(sira,2, 4);
+
+// Display the reserve.
+addToMap(siraComp,{
+    palette: '000000,FF0000,00FF00,0000FF',
+    max: 3, //max on value mapped in FF.  See ee.dataGetMapId to get help on these parameters
+    opacity: 0.4
+    },
+    'El Sira Reserve');

@@ -1,0 +1,21 @@
+// L8, cloudfree, MNDWI
+
+Map.setCenter(106.6, 12.75, 8)
+
+var bands = ['B7', 'B5', 'B3', 'B6'];
+
+var images = ee.ImageCollection('LC8_L1T_TOA')
+  //.filterDate('2013-01-01', '2015-01-01')
+  .filterBounds(Map.getBounds(true))
+  .select(bands);
+
+Map.addLayer(images.select('B3', 'B6'), {gamma : 1.3}, 'images', false);
+  
+var mean = images.reduce(ee.Reducer.intervalMean(10, 20)).select(['B7_mean', 'B5_mean', 'B3_mean', 'B6_mean'], bands);
+Map.addLayer(mean, {gamma : 1.3}, 'mean(25%, 35%)');
+
+var mndwi = mean.normalizedDifference(['B6','B3']);
+Map.addLayer(mndwi, {gamma : 1.3}, 'MNDWI', false);
+
+var water = mndwi.gte(0.0);
+Map.addLayer(mndwi.mask(water.not()), {palette:'4FD5EE', opacity:0.6}, 'MNDWI <= 0.0');

@@ -1,0 +1,22 @@
+// MODIS NDVI download
+//
+var MODIS = ee.Image('MOD09GQ/MOD09GQ_005_2001_05_24').select(['sur_refl_b01','sur_refl_b02','QC_250m']);
+var MODIS_NDVI = MODIS.normalizedDifference(['sur_refl_b02', 'sur_refl_b01']);
+var palette = ['FFFFFF', 'CE7E45', 'DF923D', 'F1B555', 'FCD163', '99B718',
+               '74A901', '66A000', '529400', '3E8601', '207401', '056201',
+               '004C00', '023B01', '012E01', '011D01', '011301'];
+
+Map.addLayer(MODIS,{'bands': ['sur_refl_b02', 'sur_refl_b02', 'sur_refl_b01'],'min': 0, 'max': 10000},'MODIS_250m');
+//Map.addLayer(MODIS_NDVI,{'bands': ['sur_refl_b02', 'sur_refl_b02', 'sur_refl_b01'],'min': 0, 'max': 10000},'MODIS_250m');
+addToMap(MODIS_NDVI, {min: 0, max: 1, palette: palette}, 'NDVI');
+
+
+var path = MODIS_NDVI.getDownloadURL({
+  'name': 'MOD09GQ_005_2001_05_24_NDVI',
+  'scale': 250,
+  'crs': 'EPSG:32649',
+  'region': '[[110.1955, 35.8738], [112.0275, 35.8738],[112.0275, 34.5129], [110.1955, 34.5129]]',
+});
+
+print(path)
+

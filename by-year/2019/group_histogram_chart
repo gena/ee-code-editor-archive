@@ -1,0 +1,59 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var globe = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-180, 88],
+          [0, 88],
+          [180, 88],
+          [180, -88],
+          [0, -88],
+          [-180, -88]]], null, false),
+    mod13a1 = ee.ImageCollection("MODIS/006/MOD13A1"),
+    mcd12q1 = ee.ImageCollection("MODIS/006/MCD12Q1");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var evi_mean = mod13a1.filterDate('2010-01-01','2010-12-31').select('EVI').mean()
+var evi_median = mod13a1.filterDate('2010-01-01','2010-12-31').select('EVI').median()
+
+var lc = mcd12q1.filterDate('2010','2011').select('LC_Type1').first()
+print(lc)
+
+// Summarize frequency of NLCD w/in zones of IGBP.
+
+function show(v, name) {
+  print(name)
+  
+  var hist = v.addBands(ee.Image(1).rename('count')).addBands(lc).reduceRegion({
+    reducer: ee.Reducer.histogram().combine(ee.Reducer.count()).group({
+      groupField: 2, 
+      groupName: 'biome'
+    }),
+    geometry: globe,
+    scale: 5000,
+    maxPixels: 1e15
+  });
+  
+  print(hist)
+
+  var groups = ee.List(hist.get('groups'))
+
+  // turn values into features to use for chart
+  var features = groups.map(function(g) {
+    g = ee.Dictionary(g)
+    
+    var biome = g.get('biome')
+    var count = g.get('count')
+    var h = ee.Dictionary(g.get('histogram'))
+
+    var features = ee.List(h.get('histogram')).zip(h.get('bucketMeans')).map(function(o) {
+      o = ee.List(o)
+      var p = ee.Number(o.get(0)).divide(count).multiply(100)
+      var value = o.get(1)
+      return ee.Feature(null, { value: value, percentage: p, biome: biome })
+    })
+
+    return features
+  })
+
+  print(ui.Chart.feature.groups(features.flatten(), 'value', 'percentage', 'biome').setChartType('AreaChart'))    
+}
+
+show(evi_mean, 'EVI mean')
+show(evi_median, 'EVI median')

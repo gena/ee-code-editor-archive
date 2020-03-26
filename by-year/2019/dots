@@ -1,0 +1,10 @@
+var crs = 'EPSG:3857'
+var s = ee.Image.constant(Map.getScale())
+var size = ee.Image.constant(5)
+var step = ee.Image.constant(10)
+var dots = ee.Image.pixelCoordinates(crs).mod(s.multiply(step)).abs().lt(s.multiply(step.subtract(size))).reduce(ee.Reducer.max()).not()
+
+Map.addLayer(dots.mask(dots), { palette: ['000000'] })
+
+
+//Map.addLayer(dots.mask(dots))

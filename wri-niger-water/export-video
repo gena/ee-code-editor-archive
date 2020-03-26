@@ -1,0 +1,89 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var catchment = ee.FeatureCollection("users/gena/water-niger/catchment"),
+    modis = ee.ImageCollection("users/gena/water-niger/modis-monthly-upper-niger"),
+    geometrySelingeBamako = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-11.623134342847038, 13.014617628986052],
+          [-11.623134342847038, 8.558639840317092],
+          [-5.426845280347038, 8.558639840317092],
+          [-5.426845280347038, 13.014617628986052]]], null, false),
+    geometryBamakoMarkala = /* color: #98ff00 */ee.Geometry.Polygon(
+        [[[-8.540168553145804, 14.313510069121481],
+          [-8.540168553145804, 12.405616451206818],
+          [-5.463996678145804, 12.405616451206818],
+          [-5.463996678145804, 14.313510069121481]]], null, false),
+    geometrySegouMopti = /* color: #0b4a8b */ee.Geometry.Polygon(
+        [[[-6.7866034628367515, 15.105349125985468],
+          [-6.7866034628367515, 13.313535289016453],
+          [-3.8010687948680015, 13.313535289016453],
+          [-3.8010687948680015, 15.105349125985468]]], null, false),
+    geometryMopti = /* color: #ffc82d */ee.Geometry.Polygon(
+        [[[-5.3913397909617515, 17.034540414142974],
+          [-5.3913397909617515, 13.954136860744281],
+          [-1.5735907675242515, 13.954136860744281],
+          [-1.5735907675242515, 17.034540414142974]]], null, false);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+var utils = require('users/gena/packages:utils')
+
+var vis = { min: 300, max: 5000, bands: ['sur_refl_b06', 'sur_refl_b02', 'sur_refl_b04'] }
+
+animation.animate(modis, { 
+   vis: vis 
+})
+
+modis = modis.map(function(i) {
+  return i.visualize(vis)
+    .set({ label: i.date().format('YYYY-MMM') })
+})
+
+var bounds = catchment.geometry().bounds()
+
+utils.exportVideo(modis, {
+  label: 'label',
+  bounds: bounds,
+  width: 1920,
+  height: 1080,
+  maxFrames: 300,
+  framesPerSecond: 1,
+  name: 'animation-Niger-large'
+})
+
+utils.exportVideo(modis, {
+  label: 'label',
+  bounds: geometrySelingeBamako.bounds(),
+  width: 1920,
+  height: 1080,
+  maxFrames: 300,
+  framesPerSecond: 1,
+  name: 'animation-Niger-SelingeBamako'
+})
+
+utils.exportVideo(modis, {
+  label: 'label',
+  bounds: geometryBamakoMarkala.bounds(),
+  width: 1920,
+  height: 1080,
+  maxFrames: 300,
+  framesPerSecond: 1,
+  name: 'animation-Niger-BamakoMarkala'
+})
+
+utils.exportVideo(modis, {
+  label: 'label',
+  bounds: geometrySegouMopti.bounds(),
+  width: 1920,
+  height: 1080,
+  maxFrames: 300,
+  framesPerSecond: 1,
+  name: 'animation-Niger-SegouMopti'
+})
+
+utils.exportVideo(modis, {
+  label: 'label',
+  bounds: geometryMopti.bounds(),
+  width: 1920,
+  height: 1080,
+  maxFrames: 300,
+  framesPerSecond: 1,
+  name: 'animation-Niger-Mopti'
+})

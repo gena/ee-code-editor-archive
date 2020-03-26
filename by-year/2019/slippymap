@@ -1,0 +1,190 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-11.064092232681332, 6.337528850811287],
+          [-7.9879203576813325, 13.774448943719873],
+          [-12.734014107681332, 19.82909589808022],
+          [-19.237920357681332, 15.220969066028504],
+          [-18.095342232681332, 3.711175041132766]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+function toRadians(degrees) {
+  return degrees * Math.PI / 180;
+}
+ 
+function toDegrees(radians) {
+  return radians * 180 / Math.PI
+}
+
+var SphericalMercator = {
+  RADIUS: 6378137.0, // in meters on the Equator
+  
+  y2lat: function(y) {
+    return toDegrees(Math.atan(Math.exp(y / SphericalMercator.RADIUS)) * 2 - Math.PI/2)
+  },
+  
+  x2lon: function(x) {
+    return Math.toDegrees(x / SphericalMercator.RADIUS);
+  },
+
+  lat2y: function(lat) {
+    return Math.log(Math.tan(Math.PI / 4 + toRadians(lat) / 2)) * SphericalMercator.RADIUS;
+  },
+  
+  lon2x: function(lon) {
+    return toRadians(lon) * SphericalMercator.RADIUS;
+  }
+}
+
+// var x = SphericalMercator.lon2x(10)
+// var y = SphericalMercator.lat2y(10)
+
+// Map.addLayer(ee.Geometry.Point([10, 10]))
+// Map.addLayer(ee.Geometry.Point([x, y], 'EPSG:3857'), {color: 'red'})
+
+var TILE_SIZE = 256
+
+var ORIGIN = 2 * Math.PI * 6378137 / 2.0
+
+var Tiler =  {
+  /***
+   * meters/pixel at the Equator
+   */
+  getResolution: function(zoom) {
+    var resolutionAtEqautor = 2 * Math.PI * 6378137 / TILE_SIZE
+    return resolutionAtEqautor / Math.pow(2, zoom)
+  },
+
+  pixelsToMeters: function(px, py, zoom) {
+    var resolution = Tiler.getResolution(zoom)
+    
+    var x = px * resolution - ORIGIN
+    var y = py * resolution - ORIGIN
+    
+    return [x, y]
+  },
+        
+  metersToPixels: function(x, y, zoom) {
+    var resolution = Tiler.getResolution(zoom)
+    var px = (x + ORIGIN) / res
+    var py = (y + ORIGIN) / res
+    
+    return px, py
+  },
+  
+  degreesToTiles: function(lon, lat, zoom) {
+    var tx = Math.floor((lon + 180) / 360 * Math.pow(2, zoom))
+    var ty = Math.floor((1 - Math.log(Math.tan(toRadians(lat)) 
+      + 1 / Math.cos(toRadians(lat))) / Math.PI) / 2 * Math.pow(2, zoom))
+    
+    return [tx, ty]
+  },
+  
+  tilesToDegrees: function(tx, ty, zoom) {
+    var lon = tx / Math.pow(2, z) * 360 - 180
+  
+    var n = Math.PI - 2 * Math.PI * y / Math.pow(2, z)
+    var lat = toDegrees(Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))))
+  
+    return [lon, lat]
+  },
+  
+  getTilesForGeometry: function(geometry, zoom) {
+    var bounds = ee.List(geometry.bounds().coordinates().get(0))
+    var ll = bounds.get(0).getInfo() // TODO: port to server-side
+    var ur = bounds.get(2).getInfo()
+
+    var tmin = Tiler.degreesToTiles(ll[0], ll[1], zoom)
+    var tmax = Tiler.degreesToTiles(ur[0], ur[1], zoom)
+    
+    var tiles = []
+    for(var tx = tmin[0]; tx < tmax[0] + 1; tx++) {
+      for(var ty = tmax[1]; ty < tmin[1] + 1; ty++) {
+        var bounds = Tiler.getTileBounds(tx, ty, zoom)
+        
+        var rect = ee.Geometry.Rectangle(bounds, 'EPSG:3857', false)
+        
+        tiles.push(ee.Feature(rect).set({ tx: tx, ty: ty, zoom: zoom }))
+      }
+    }
+    
+    return ee.FeatureCollection(tiles)
+  },
+  
+  getTileBounds: function(tx, ty, zoom) {
+    ty = Math.pow(2, zoom) - ty - 1 // // TMS -> XYZ, flip y index
+    
+    var min = Tiler.pixelsToMeters(tx * TILE_SIZE, ty * TILE_SIZE, zoom)
+    var max = Tiler.pixelsToMeters((tx + 1) * TILE_SIZE, (ty + 1) * TILE_SIZE, zoom)
+    
+    return [min, max]
+  }
+}
+
+Map.addLayer(Tiler.getTilesForGeometry(geometry, 6).style({ width: 4, fillColor: '00000022' }), {})
+Map.addLayer(Tiler.getTilesForGeometry(geometry, 7).style({ width: 2, fillColor: '00000022' }), {})
+Map.addLayer(Tiler.getTilesForGeometry(geometry, 8).style({ width: 1, fillColor: '00000022' }), {})
+
+// Map.addLayer(ee.Geometry.Rectangle(Tiler.getTileBounds(8, 7, 4), 'EPSG:3857', false))
+
+// var tiles = Tiler.degreesToTiles(10, 10, 5)
+// print(tiles)
+
+// Map.addLayer(ee.Geometry.Rectangle(Tiler.getTileBounds(tiles[0], tiles[1], 5), 'EPSG:3857', false), { color: 'red' })
+
+  
+
+/*
+    def PixelsToTile(self, px, py):
+        "Returns a tile covering region in given pixel coordinates"
+
+        tx = int( math.ceil( px / float(self.tileSize) ) - 1 )
+        ty = int( math.ceil( py / float(self.tileSize) ) - 1 )
+        return tx, ty
+
+    def PixelsToRaster(self, px, py, zoom):
+        "Move the origin of pixel coordinates to top-left corner"
+        
+        mapSize = self.tileSize << zoom
+        return px, mapSize - py
+        
+    def MetersToTile(self, mx, my, zoom):
+        "Returns tile for given mercator coordinates"
+        
+        px, py = self.MetersToPixels( mx, my, zoom)
+        return self.PixelsToTile( px, py)
+
+    def TileBounds(self, tx, ty, zoom):
+        "Returns bounds of the given tile in EPSG:900913 coordinates"
+        
+        minx, miny = self.PixelsToMeters( tx*self.tileSize, ty*self.tileSize, zoom )
+        maxx, maxy = self.PixelsToMeters( (tx+1)*self.tileSize, (ty+1)*self.tileSize, zoom )
+        return ( minx, miny, maxx, maxy )
+
+    def TileLatLonBounds(self, tx, ty, zoom ):
+        "Returns bounds of the given tile in latutude/longitude using WGS84 datum"
+
+        bounds = self.TileBounds( tx, ty, zoom)
+        minLat, minLon = self.MetersToLatLon(bounds[0], bounds[1])
+        maxLat, maxLon = self.MetersToLatLon(bounds[2], bounds[3])
+         
+        return ( minLat, minLon, maxLat, maxLon )
+        
+    def Resolution(self, zoom ):
+        "Resolution (meters/pixel) for given zoom level (measured at Equator)"
+        
+        # return (2 * math.pi * 6378137) / (self.tileSize * 2**zoom)
+        return self.initialResolution / (2**zoom)
+        
+    def ZoomForPixelSize(self, pixelSize ):
+        "Maximal scaledown zoom of the pyramid closest to the pixelSize."
+        
+        for i in range(30):
+            if pixelSize > self.Resolution(i):
+                return i-1 if i!=0 else 0 # We don't want to scale up
+
+    def GoogleTile(self, tx, ty, zoom):
+        "Converts TMS tile coordinates to Google Tile coordinates"
+        
+        # coordinate origin is moved from bottom-left to top-left corner of the extent
+        return tx, (2**zoom - 1) - ty
+
+*/

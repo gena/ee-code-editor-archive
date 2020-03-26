@@ -1,0 +1,46 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA"),
+    srtm30 = ee.Image("USGS/SRTMGL1_003");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var bounds = ee.Geometry(Map.getBounds(true));
+var center = bounds.centroid(1)
+print(center)
+Map.setCenter(-77.14, 38.4, 11)
+
+print(Map.getScale())
+
+var info = srtm30.getInfo()
+var crs = info.bands[0].crs
+var crs_transform = info.bands[0].crs_transform
+
+var results = l8
+  .filterBounds(center)
+  .select(['B6', 'B5', 'B3'])
+  .filterMetadata('CLOUD_COVER', 'less_than', 10)
+  .map(function(i) {
+    var result = i
+      .normalizedDifference(['B3', 'B5'])
+      .gt(0)
+      .reproject(crs, crs_transform)
+      
+    return result.mask(result)
+      .connectedPixelCount(100, false)
+      .eq(100)
+      ;
+})
+
+// add as vector
+var resultsVector = results.map(function(i) {
+  return i.reduceToVectors({crs: crs, crsTransform: crs_transform, geometry: bounds})
+    //.filter(ee.Filter.gt('count', 1000))
+})
+
+var firstVector = ee.FeatureCollection(resultsVector.first())
+
+Map.addLayer(firstVector, {color: 'ffff00'}, 'first vector')
+
+// add as raster
+var firstRaster = ee.Image(results.first())
+
+Map.addLayer(firstRaster.mask(firstRaster), {palette: ['0000ff'], opacity: 0.7}, 'first raster')
+

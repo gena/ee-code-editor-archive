@@ -1,0 +1,88 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var dem = ee.Image("USGS/SRTMGL1_003"),
+    pt1 = /* color: d63000 */ee.Geometry.Point([-121.70225143432617, 37.5124492009751]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// flood fill
+
+
+var azimuth = 90;
+var zenith = 60;
+
+// Computes radians from a given image.
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+// Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation);
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+var dem_min = 100;
+var dem_max = 5000;
+
+var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+
+// ===========  add ETOPO1 where we don't have SRTM
+var demv = dem.visualize({palette:colors_dem, min:dem_min, max:dem_max, opacity: 1.0});
+Map.addLayer(hillshadeit(demv, dem, 2.0), {}, 'DEM');
+
+
+var iso = dem.subtract(1000).zeroCrossing().or(dem.eq(1000));
+Map.addLayer(iso, {min: 0, max: 1, opacity: 0.4}, 'iso');
+
+print(Map.getScale())
+Map.setCenter(-121.7, 37.5, 13);
+
+print(iso.getInfo())
+
+var bounds = Map.getBounds()
+print(bounds)
+var xmin = bounds[0]
+var xmax = bounds[2]
+var ymin = bounds[1]
+var ymax = bounds[3]
+
+/*
+var nx = 40;
+var ny = 20;
+var xstep = (xmax - xmin) / (2 * nx)
+var ystep = (ymax - ymin) / (2 * ny)
+var center = pt1.coordinates().getInfo()
+
+var geoms = [];
+for(var i=-nx; i<nx; i++) {
+ for(var j=-nx; j<ny; j++) {
+    geoms.push(ee.Geometry.Point(center[0] + i * xstep, center[1] + j * ystep))
+ } 
+}
+
+Map.addLayer(ee.FeatureCollection(geoms))
+*/
+
+var info = iso.getInfo().bands[0]
+var bounds = JSON.stringify(Map.getBounds(true));
+print(iso.getDownloadURL(
+  {
+    name: 'DEM-zero-crossing', 
+    format: 'png', 
+    crs: info.crs,
+    crs_transform: JSON.stringify(info.crs_transform),
+    region: bounds
+  }
+));

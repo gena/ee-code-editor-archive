@@ -1,0 +1,1150 @@
+// OSM, basins and rivers
+
+/*
+https://sites.google.com/site/earthengineapidocs/javascript-api/javascript-code-samples/feature-collection
+https://sites.google.com/site/earthengineapidocs/geometries-features-and-feature-collections/advanced-feature-and-feature-collection-methods
+https://sites.google.com/site/earthengineapidocs/javascript-api/javascript-developers-guide/feature-collection-methods
+*/
+
+Map.addLayer(ee.Image(0), {palette:['ffffff']}, 'BG (white)', false)
+
+function pad(n, width, z) {
+  z = z || '0';
+  n = n + '';
+  return n.length >= width ? n : new Array(width - n.length + 1).join(z) + n;
+}
+
+// I(n+1, i, j) = I(n, i, j) + lambda * (cN * dN(I) + cS * dS(I) + cE * dE(I), cW * dW(I))
+var peronaMalikFilter = function(I, iter, K, method) {
+    var dxW = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 1, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dxE = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  1],
+                            [ 0,  0,  0]]);
+  
+  var dyN = ee.Kernel.fixed(3, 3,
+                           [[ 0,  1,  0],
+                            [ 0, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dyS = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  0],
+                            [ 0,  1,  0]]);
+
+  var lambda = 0.2;
+
+  if(method == 1) {
+    var k1 = ee.Image(-1.0/K);
+
+    for(var i = 0; i < iter; i++) {
+      var dI_W = I.convolve(dxW)
+      var dI_E = I.convolve(dxE)
+      var dI_N = I.convolve(dyN)
+      var dI_S = I.convolve(dyS)
+      
+      var cW = dI_W.multiply(dI_W).multiply(k1).exp();
+      var cE = dI_E.multiply(dI_E).multiply(k1).exp();
+      var cN = dI_N.multiply(dI_N).multiply(k1).exp();
+      var cS = dI_S.multiply(dI_S).multiply(k1).exp();
+  
+      I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))))
+    }
+  }
+  else if(method == 2) {
+    var k2 = ee.Image(K).multiply(ee.Image(K));
+
+    for(var i = 0; i < iter; i++) {
+      var dI_W = I.convolve(dxW)
+      var dI_E = I.convolve(dxE)
+      var dI_N = I.convolve(dyN)
+      var dI_S = I.convolve(dyS)
+      
+      var cW = ee.Image(1.0).divide(ee.Image(1.0).add(dI_W.multiply(dI_W).divide(k2)));
+      var cE = ee.Image(1.0).divide(ee.Image(1.0).add(dI_E.multiply(dI_E).divide(k2)));
+      var cN = ee.Image(1.0).divide(ee.Image(1.0).add(dI_N.multiply(dI_N).divide(k2)));
+      var cS = ee.Image(1.0).divide(ee.Image(1.0).add(dI_S.multiply(dI_S).divide(k2)));
+  
+      I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))))
+    }
+  }
+  
+  return I;
+}
+
+// starting from level 02
+var au = [
+  null, // 0
+  null, // 1
+  ee.FeatureCollection('ft:1Dq_Q2JvvYkYO-kFX7L4E4Nzycwc50j9hfhSsBQJW'), // 2
+  ee.FeatureCollection('ft:1778IyIZLZKSKVgko9X3aIV94E7jcm28uniyD6ycp'), // 3
+  ee.FeatureCollection('ft:1WZ4Utbbatdl3vFVK7kTmAyHDyRjhMVfXeJeJTnBa'), // 4
+  ee.FeatureCollection('ft:1rrk-yEOb8ILSolV_kSVD1qGxszHcy0cSL9UnUxIh'), // 5
+  ee.FeatureCollection('ft:1-aMEhsi4usdxVUSSjKkJGC8pir3duCi_5oItnxtT'), // 6
+  ee.FeatureCollection('ft:1YDeXF2LN8gDeJAOJTX0Kwp9QwV_-ZFI2llKilTGu') // 7
+
+];
+
+/*
+var aoi_features = au[5];
+var aoi = aoi_features.filter(ee.Filter.eq('HYBAS_ID', 5050073410));
+var not_aoi = aoi_features.filter(ee.Filter.neq('HYBAS_ID', 5050073410));
+*/
+
+/*var aoi_features = au[6];
+var aoi = aoi_features.filter(ee.Filter.or(ee.Filter.eq('HYBAS_ID', 5060590270), ee.Filter.eq('HYBAS_ID', 5060591290), ee.Filter.eq('HYBAS_ID', 5060591330)));
+var not_aoi = aoi_features.filter(ee.Filter.and(ee.Filter.neq('HYBAS_ID', 5060590270), ee.Filter.neq('HYBAS_ID', 5060591290), ee.Filter.neq('HYBAS_ID', 5060591330)));
+*/
+
+
+// near Cambera
+var aoi_features = au[5];
+var aoi = aoi_features.filter(ee.Filter.eq('HYBAS_ID', 5050597410));
+var not_aoi = aoi_features.filter(ee.Filter.neq('HYBAS_ID', 5050597410));
+
+// smaller basin near Cambera
+/*
+var aoi_features = au[7];
+var id = 5070596920;
+var aoi = aoi_features.filter(ee.Filter.eq('HYBAS_ID', id));
+var not_aoi = aoi_features.filter(ee.Filter.neq('HYBAS_ID', id));
+*/
+
+
+/*var aoi_features = au[7];
+var aoi = aoi_features.filter(ee.Filter.or(ee.Filter.eq('HYBAS_ID', 5070596920), ee.Filter.eq('HYBAS_ID', 5070596390)));
+var not_aoi = aoi_features.filter(ee.Filter.and(ee.Filter.neq('HYBAS_ID', 5070596920), ee.Filter.neq('HYBAS_ID', 5070596390)));
+*/
+
+
+
+// TOO LARGE for skeleton!
+var aoi_features = au[3];
+var aoi = aoi_features.filter(ee.Filter.eq('HYBAS_ID', 5030073410));
+var not_aoi = aoi_features.filter(ee.Filter.neq('HYBAS_ID', 5030073410));
+
+
+aoi = ee.FeatureCollection(ee.Feature(aoi.first()).buffer(3000, 500))
+
+// aoi = ee.Geometry(Map.getBounds(true)).buffer(2000);
+
+var addWrs = function() {
+  var intersectsFilter = ee.Filter.intersects({ leftField: '.geo', rightField: '.geo',  maxError: 10 });
+  var intersectSaveAll = ee.Join.saveAll({ matchesKey: 'scenes', measureKey: 'distance' });
+  var intersectJoined = intersectSaveAll.apply(aoi, wrs, intersectsFilter);
+  var intersected = ee.FeatureCollection(ee.List(intersectJoined.first().get('scenes')));
+  print('wrs count: ') 
+  print(intersected.aggregate_count('name'))
+  Map.addLayer(intersected, {}, 'wrs', false);
+}  
+
+var maskAndFill = function(image, aoi) {
+  var mask = ee.Image(0).byte().paint(aoi, 1);
+  var fill = mask.not().multiply(-9999);
+
+  var result = image.multiply(mask)//.add(fill);
+  
+  return result;
+}
+
+var azimuth = 90;
+var zenith = 60;
+
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+// DEM Hillshade function - Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+var dem = null;
+
+var waterSlopeMask = ee.Image();
+var waterSlopeLimit = 0.3;
+
+var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+var colors_water = ['023858', '045a8d', '0570b0', '3690c0', '74a9cf', 'a6bddb'/*, 'd0d1e6', 'ece7f2', 'fff7fb'*/];
+
+var addDemToMap = function() {
+  var conddem03 = ee.Image('WWF/HydroSHEDS/03CONDEM');//.clip(aoi);
+  var vfdem03 = ee.Image('WWF/HydroSHEDS/03VFDEM'); //.clip(aoi);
+  
+  var terrain03c = ee.call('Terrain', conddem03);
+  var slope03c = radians(terrain03c.select(['slope']));
+  var aspect03c = radians(terrain03c.select(['aspect']));
+  var conddem03_hillshade = hillshade(azimuth, zenith, slope03c, aspect03c);
+  
+  //Map.addLayer(conddem03_hillshade, {opacity:0.8}, 'hillshade', false);
+  //Map.addLayer(slope03c, {opacity:0.8}, 'slope', false);
+  // Map.addLayer(conddem03, {}, 'HydroSHEDS conditioned DEM', false);
+  
+  // add Bathymetry
+  var etopo = ee.Image('NOAA/NGDC/ETOPO1').select('bedrock');
+  v = etopo.mask(etopo.lt(10)).visualize({palette:colors_water, min:-500, max:10, opacity: 1.0});
+  Map.addLayer(hillshadeit(v, etopo, 2.0, 2.0), {}, 'bathymetry');
+
+  // add DEM  
+  var elev = ee.Image('USGS/SRTMGL1_003');
+  
+  var addAspect = function(dem) {
+    var k_dx = ee.Kernel.fixed(3, 3,
+                           [[ 1/8,  0,  -1/8],
+                            [ 2/8,  0,  -2/8],
+                            [ 1/8,  0,  -1/8]]);
+    
+    var k_dy = ee.Kernel.fixed(3, 3,
+                           [[ -1/8, -2/8,  -1/8],
+                            [ 0,    0,    0],
+                            [ 1/8, 2/8,   1/8]]);
+    
+    
+    var dx = dem.convolve(k_dx)
+    var dy = dem.convolve(k_dy)
+
+    var step = 30    
+    var slope = ee.Image().expression("sqrt((x*x + y*y)/(step*step))", {x: dx, y: dy, step: step}).atan()
+
+    var aspect = dx.atan2(dy).add(Math.PI)
+
+    var colorsRainbow = [
+    'F26C4F', // Light Red
+    'F68E55', // Light Red Orange	
+    'FBAF5C', // Light Yellow Orange
+    'FFF467', // Light Yellow
+    'ACD372', // Light Pea Green
+    '7CC576', // Light Yellow Green
+    '3BB878', // Light Green
+    '1ABBB4', // Light Green Cyan
+    '00BFF3', // Light Cyan
+    '438CCA', // Light Cyan Blue
+    '5574B9', // Light Blue
+    '605CA8', // Light Blue Violet
+    '855FA8', // Light Violet
+    'A763A8', // Light Violet Magenta
+    'F06EA9', // Light Magenta
+    'F26D7D'  // Light Magenta Red
+    ];
+    Map.addLayer(aspect, {min:0, max:2*Math.PI, palette:colorsRainbow}, 'aspect', false)
+  }
+  
+  dem = elev;
+  var v = elev.mask(elev.gt(0)).visualize({palette:colors_dem, min:100, max:1500, opacity: 1.0});
+  Map.addLayer(hillshadeit(v, elev, 1.8, 1.0), {gamma:0.6}, 'elevation (30)');
+
+  var multiplier = 100.0;
+  var z = peronaMalikFilter(elev.multiply(1/multiplier), 20, 0.01, 2).multiply(multiplier)
+  var zv = z.visualize({palette:colors_dem, min:100, max:1500, opacity: 1.0});
+  Map.addLayer(hillshadeit(zv, z, 1.8, 1.0), {gamma:0.6}, 'elevation (AD)', false);
+
+  addAspect(z)
+
+  var elev = ee.Image('srtm90_v4');
+  var v = elev.mask(elev.gt(0)).visualize({palette:colors_dem, min:100, max:1500, opacity: 1.0});
+  Map.addLayer(hillshadeit(v, elev, 1.8, 1.0), {gamma:0.6}, 'elevation (90)', false);
+
+// var elev = ee.Image('NOAA/NGDC/ETOPO1').select('bedrock');
+// var elev = ee.Image('WWF/HydroSHEDS/03CONDEM');
+
+  // add Slope
+  var radius = 30;
+  var sigma = 20;
+  var gaussianKernel = ee.Kernel.gaussian(radius, sigma, 'meters', true, 1);
+  var elev_g = elev.convolve(gaussianKernel);
+
+  v = elev_g.visualize({palette:colors_dem, min:100, max:1500, opacity: 1.0});
+  // Map.addLayer(hillshadeit(v, elev_g, 1.8), {gamma:0.6}, 'G(elevation, ' + radius + ', ' + sigma + ')', false);
+
+  var terrain = ee.call('Terrain', elev_g);
+  var slope = radians(terrain.select(['slope']));
+  slope = slope.gt(waterSlopeLimit); //.focal_min(120, 'circle', 'meters');
+  waterSlopeMask = slope.mask(slope).clip(aoi);
+  //Map.addLayer(waterSlopeMask, {min: 0.2, max: 0.5, palette:'bcbddc, 756bb1'}, 'slope')
+
+  var ddem = ee.Image('CGIAR/SRTM90_V4').subtract(conddem03);
+  Map.addLayer(ddem.mask(ddem.gt(5)), {min:5, max:100, palette:'AAAAAA,1010AA'}, "SRTM - HDEM", false)
+}
+
+var addFlowAccumulationToMap = function() {
+  // Add Flow Accumulation to the map - styled and raw data (for pixel interrogation)
+  // Flow Accumulation (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=15accb )
+  var flowacc = ee.Image('WWF/HydroSHEDS/15ACC');
+  
+  // Style Map for Flow Accumulation                                
+  var style_flowacc = '\
+  <RasterSymbolizer>\
+    <ColorMap  type="intervals" extended="false" >\
+      <ColorMapEntry color="#0000ff" quantity="0" label="none" opacity="0"/>\
+      <ColorMapEntry color="#00ff00" quantity="100" label="1-100" />\
+      <ColorMapEntry color="#00BB66" quantity="10000" label="100-10k" />\
+      <ColorMapEntry color="#0000ff" quantity="100000" label="10k-100k" />\
+      <ColorMapEntry color="#ff00ff" quantity="1000000" label="100k-1M" />\
+      <ColorMapEntry color="#ff0000" quantity="28000000" label="1M-28M" />\
+    </ColorMap>\
+  </RasterSymbolizer>';
+  
+  // addToMap(wwf_15acc, {'min': 1, 'max': 28000000}, 'WWF/HydroSHEDS/15ACC', false);
+  addToMap(flowacc.sldStyle(style_flowacc), {}, 'Flow Accumulation Styled', false);
+  // addToMap(flowacc.mask(flowacc.gt(100)), {palette:['5050FF']}, 'Flow Accumulation Styled = 100', false);
+}
+
+var addToMapAsRaster = function(shapes, name, palette, width, opacity, filled, visible) {
+  var outline = width;
+  var img; 
+  
+  if (filled) {
+    img = ee.Image().toByte();
+    img = img.paint(shapes, 1); // paint fill
+    img = img.paint(shapes, 0, outline + 1); // paint outline
+  } else {
+    img = ee.Image(0).mask(0);
+    img = img.paint(shapes, 0, width);
+  }
+
+  var options = {
+    palette: palette,
+    max: 1,
+    opacity: opacity
+  };
+
+  Map.addLayer(img, options, name, visible);
+
+  return img;
+}
+
+//addToMapAsRaster(au[2], 'AU, level 02', '101010,000000', 3, 0.5, false);
+
+var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8',  'B7'];
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+var p = 30;
+
+// get LANDSAT7 images (1999-2005)
+/*var images = ee.ImageCollection('LANDSAT/LE7_L1T_TOA').filterBounds(aoi).select(LC7_BANDS, STD_NAMES)
+  .filterDate('1999-05-01', '2005-05-01');
+
+var images_sng = images.select(['swir2', 'nir', 'green']);
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(5, 6)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L7 mean(05%-6%)', false);
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(15, 16)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L7 mean(15%-16%)', false);
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(15, 25)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L7 mean(15%-25%)', false);
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(25, 35)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L7 mean(25%-35%)', false);
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(35, 45)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L7 mean(35%-45%)', false);
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(45, 46)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L7 mean(45%-46%)', false);
+
+// MNDWI
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(5, 6)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {gamma:1.5, min:-0.5, max:0.5}, 'L7 mndwi(05%-6%)', false);
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(15, 16)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {gamma:1.5, min:-0.5, max:0.5}, 'L7 mndwi(15%-16%)', false);
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(15, 25)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {gamma:1.5, min:-0.5, max:0.5}, 'L7 mndwi(15%-25%)', false);
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(25, 35)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {gamma:1.5, min:-0.5, max:0.5}, 'L7 mndwi(25%-35%)', false);
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(35, 45)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {gamma:1.5, min:-0.5, max:0.5}, 'L7 mndwi(35%-45%)', false);
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(45, 46)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {gamma:1.5, min:-0.5, max:0.5}, 'L7 mndwi(45%-46%)', false);
+*/
+/*
+print(Chart.image.histogram(images.reduce(ee.Reducer.intervalMean(5, 15)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), Map.getBounds(true), 30));
+print(Chart.image.histogram(mndwi_15_25, Map.getBounds(true), 30));
+print(Chart.image.histogram(images.reduce(ee.Reducer.intervalMean(25, 35)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), Map.getBounds(true), 30));
+print(Chart.image.histogram(images.reduce(ee.Reducer.intervalMean(35, 45)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), Map.getBounds(true), 30));
+*/
+
+// get all LANDSAT8 images
+var images = ee.ImageCollection('LANDSAT/LC8_L1T_TOA').filterBounds(aoi)
+
+  .filterDate('2014-08-02', '2015-11-11')
+  .select(LC8_BANDS, STD_NAMES);
+
+var min_value = 0;
+var max_value = 1;
+
+// print(images)
+
+/*var shift_reg_count = [];
+var shift_x = [];
+var shift_y = [];
+var imagesList = images.toList(1000, 0);
+
+for(var i=0; i<imagesList.size(); i++) {
+    var j = imagesList.get(i).getInfo().properties['google:registration_count'];
+    shift_reg_count.append(j);
+  shift_x.append(img.getInfo().properties['google:registration_offset_x']);
+  shift_y.append(img.getInfo().properties['google:registration_offset_y']);
+}
+*/
+//print(shift_reg_count)
+addDemToMap();
+
+// addWrs();
+
+var images_sng = images.select(['swir2', 'nir', 'green', 'pan', 'red', 'blue', 'swir1']);
+
+// convert to array and remote bottom/top images, then convert back
+//var a1 = images_sng.toArray();
+
+// download
+var img2 = ee.Image().toByte();
+var aoiMap = Map.getBounds(true);
+
+/*// in degrees
+var w = aoiMap.coordinates[0][2][0] - aoiMap.coordinates[0][0][0];
+var h = aoiMap.coordinates[0][2][1] - aoiMap.coordinates[0][0][1];
+
+// pixel size in meters
+var scale = Map.getScale();
+
+// meters in 
+print(w/Map.getScale())
+*/
+
+var exportFormat = 'jpeg'
+
+var exportRealImages = function(start, stop) {
+  var real = images_sng
+    .filterBounds(aoi).toList(1000, 0);
+  
+  var count = real.length().getInfo();
+  
+  print('Number of real images within map bounds: ' + count);
+  
+  for (var i = start; i < stop; i += 1) {
+    var img = ee.Image(real.get(i));
+    
+    var fileName = "FALSE_753_REAL_"+img.getInfo().properties['DATE_ACQUIRED'] + "_" + img.getInfo().properties['LANDSAT_SCENE_ID'];
+   
+    img = img.clip(aoi)
+      .visualize({gamma:1.5, min:0.05, max:0.5});
+  
+    var region = JSON.stringify(aoi.geometry().bounds().getInfo().coordinates[0])
+  
+    print(img.getDownloadURL({name: fileName, scale: 30, format:exportFormat, region: region }))
+  }
+}
+
+var exportPanTrueImages = function(start, stop) {
+  var real = images_sng
+    .filterBounds(aoi).toList(1000, 0);
+  
+  var count = real.length().getInfo();
+  
+  print('Number of real images within map bounds: ' + count);
+  
+  for (var i = start; i < stop; i += 1) {
+    var img = ee.Image(real.get(i));
+    
+    var fileName = "TRUE_PAN_"+img.getInfo().properties['DATE_ACQUIRED'] + "_" + img.getInfo().properties['LANDSAT_SCENE_ID'];
+   
+    var pan = img.select('pan').clip(aoi).unitScale(min_value, max_value);
+    var rgb = img.select('red', 'green', 'blue').clip(aoi).unitScale(min_value, max_value);
+    var hsv  = rgb.rgbtohsv();
+    var huesat = hsv.select('hue', 'saturation');
+    var upres = ee.Image.cat(huesat, pan).hsvtorgb();
+  
+    img = upres.clip(aoi).visualize(visual_pans);
+
+    var region = JSON.stringify(aoi.geometry().bounds().getInfo().coordinates[0])
+  
+    print(img.getDownloadURL({name: fileName, scale: 30, format:exportFormat, region: region }))
+  }
+}
+
+var visual_pans = {gamma:2.2, min:[0.05,0.05,0.05], max:[0.4,0.4,0.6]};
+
+var exportPanFalseImages = function(start, stop, step) {
+  print(JSON.stringify(Map.getBounds()));
+  
+  for (var i = start; i < stop; i+= step) {
+    var fileName = "TRUE_pan_" + pad(i, 3);
+    
+    var pan = images_sng.select('pan').reduce(ee.Reducer.intervalMean(i, i+1)).clip(aoi).unitScale(min_value, max_value);
+    var rgb = images_sng.select('red', 'green', 'blue').reduce(ee.Reducer.intervalMean(i, i+1)).clip(aoi).unitScale(min_value, max_value);
+    var hsv  = rgb.rgbtohsv();
+    var huesat = hsv.select('hue', 'saturation');
+    var upres = ee.Image.cat(huesat, pan).hsvtorgb();
+  
+    var img = upres;
+    
+    img = img.clip(aoi).visualize(visual_pans);
+    var region = JSON.stringify(aoi.geometry().bounds().getInfo().coordinates[0])
+    print(img.getDownloadURL({name: fileName, scale: 15, format:exportFormat, region: region }))
+  }
+}
+
+var exportIntervalMeansAndMNDWI = function(start, stop, step) {
+  var aoiRegion = aoi.geometry(1e-3).bounds(1e-3).coordinates().getInfo()[0];
+  var crs_transform = dem.getInfo().bands[0].crs_transform;
+  var crs = dem.getInfo().bands[0].crs;
+  var w = Math.round((aoiRegion[1][0] - aoiRegion[0][0])/-crs_transform[4]);
+  var h = Math.round((aoiRegion[2][1] - aoiRegion[1][1])/crs_transform[0]);
+  var x = aoiRegion[0][0];
+  var y = aoiRegion[0][1];
+  crs_transform = [crs_transform[0], crs_transform[1], x, crs_transform[3], crs_transform[0], y];
+  var dimensions = w + 'x' + h;
+
+  for (var i = start; i < stop; i+= step) {
+    var fileName = "FALSE_753_"+pad(i, 3);
+
+    var intervalMean = images_sng.reduce(ee.Reducer.intervalMean(i, i+1));
+    
+    var img = intervalMean;
+    
+    img = img.clip(aoi).visualize({gamma:1.5, min:0.05, max:0.5});
+    var region = JSON.stringify(aoi.geometry().bounds().getInfo().coordinates[0])
+    
+    // >>>> Export.image
+    // get CRS from dem
+    Export.image(img, fileName, 
+    { 
+      driveFileNamePrefix: fileName, 
+      //format: 'tif', 
+      crs: crs, 
+      //crs_transform: JSON.stringify(crs_transform), 
+      region: region,
+      dimensions:dimensions, 
+      maxPixels:5e9
+    });
+    // <<<<< Export.image
+    
+    print(img.getDownloadURL({name: fileName, scale: 30, format:exportFormat, region: region }))
+  
+
+    //print(img.getThumbURL({size: w + 'x' + h, format:'jpg'}));
+  
+    fileName = "MNDWI_"+pad(i, 3);
+    
+    img = intervalMean.normalizedDifference(['swir1_mean','green_mean']);
+  
+    img = img.clip(aoi).visualize({gamma:1.5, min:0.05, max:0.5});
+    print(img.getDownloadURL({name: fileName, scale: 30, format:exportFormat, region: region }))
+  }
+  
+  // Export.image(imageToExport, '753', {name: '753', format: 'jpeg', scale: 30, region: aoiMap.coordinates});
+}
+
+//print(images_sng)
+
+// exportRealImages(0, 20);
+// exportPanTrueImages(10,60)
+// exportPanFalseImages(50, 98, 2);
+// exportIntervalMeansAndMNDWI(50, 51, 2);
+
+//Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(0, 1)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean(0%-1%)', false);
+//Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(1, 2)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean(1%-2%)', false);
+//Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(5, 6)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean(05%-06%)', false);
+//Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(7, 8)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean(07%-08%)', false);
+//Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(9, 10)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean(09%-10%)', false);
+//Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(11, 12)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean(11%-12%)', false);
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(15, 16)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean(20%-21%)', false);
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(p, p+1)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean('+p+'%)', false);
+
+
+var pan = images_sng.select('pan').reduce(ee.Reducer.intervalMean(p, p+1)).clip(aoi).unitScale(min_value, max_value);
+var rgb = images_sng.select('red', 'green', 'blue').reduce(ee.Reducer.intervalMean(p, p+1)).clip(aoi).unitScale(min_value, max_value);
+var hsv  = rgb.rgbtohsv();
+var huesat = hsv.select('hue', 'saturation');
+var upres = ee.Image.cat(huesat, pan).hsvtorgb();
+
+Map.addLayer(images_sng.select('pan').reduce(ee.Reducer.intervalMean(p, p+1)).clip(aoi), {gamma:2.2, min:0.05, max:0.4}, 'L8 mean('+p+'%) pan', false);
+Map.addLayer(upres, visual_pans, 'L8 mean('+p+'%) pans', false);
+
+Map.addLayer(images_sng.reduce(ee.Reducer.intervalMean(45, 46)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'L8 mean(45%-46%)', false);
+
+var mndwi_palette = ['0000ff', 'ffffff', '00ff00']
+
+// MNDWI
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(9, 10)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {min:-0.5, max:0.5,palette:mndwi_palette}, 'L8 mndwi(09%-10%)', false);
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(20, 21)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {min:-0.5, max:0.5,palette:mndwi_palette}, 'L8 mndwi(10%-21%)', false);
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(9, 10)).clip(aoi).normalizedDifference(['nir_mean','green_mean']), {min:-0.5, max:0.5,palette:mndwi_palette}, 'L8 ndwi(09%-10%)', false);
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(20, 21)).clip(aoi).normalizedDifference(['nir_mean','green_mean']), {min:-0.5, max:0.5,palette:mndwi_palette}, 'L8 ndwi(10%-21%)', false);
+
+var mndwi_p = images.reduce(ee.Reducer.intervalMean(p, p+1)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']);
+Map.addLayer(mndwi_p, {min:-0.5, max:0.5,palette:mndwi_palette}, 'L8 mndwi('+p+'%)', false);
+var water = mndwi_p.gt(-0.1);
+var water_ = water.mask(water.not())/*.focal_min(1).focal_max(1)*/;
+
+var mndwi_color = 'aa10aa'; //'2b83ba';
+
+Map.addLayer(water_, {min:0, max:1, palette: mndwi_color}, 'L8 mndwi('+p+'%) > -0.1', false);
+
+var water = mndwi_p.lt(0);
+
+var distanceSize = 200;
+
+var water_distance = water.distance(ee.Kernel.euclidean(distanceSize, "meters"));
+Map.addLayer(water_distance.mask(water_distance.lt(distanceSize)), {min:0, max:distanceSize}, 'L8 mndwi('+p+'%) > 0 distance', false);
+
+Map.addLayer(water.mask(water), {min:0, max:1, palette: mndwi_color}, 'L8 mndwi('+p+'%) > 0', false);
+
+var water_0 = water;
+
+
+
+/*var aoiRegion = aoi.geometry(1e-3).bounds(1e-3).coordinates().getInfo()[0];
+Export.image(water.mask(water.not()), 'L8_MNDWI_'+p+'_ge_0', {name: 'L8_MNDWI_'+p+'15_ge_0', format: 'tif', scale: 30, region: aoiRegion, maxPixels:5e9});
+*/
+
+var water = mndwi_p.gt(0.1);
+Map.addLayer(water.mask(water.not()), {min:0, max:1, palette: mndwi_color}, 'L8 mndwi('+p+'%) > 0.1', false);
+
+mndwi_p = peronaMalikFilter(mndwi_p, 30, 0.03, 2)
+//Map.addLayer(mndwi_p, {gamma:1.5, min:-0.5, max:0.5}, 'L8 mndwi('+p+'%), AD', false);
+
+var water = mndwi_p.gt(0.1);
+//Map.addLayer(water.mask(water.not()), {min:0, max:1, palette: mndwi_color}, 'L8 mndwi('+p+'%) > 0.1, AD', false);
+
+
+Map.addLayer(images.reduce(ee.Reducer.intervalMean(45, 46)).clip(aoi).normalizedDifference(['swir1_mean','green_mean']), {gamma:1.5, min:-0.5, max:0.5}, 'L8 mndwi(45%-46%)', false);
+
+var addCannyLayers = function() {
+  var canny = ee.Algorithms.CannyEdgeDetector(mndwi_p, 0.6, 1);
+  Map.addLayer(canny.mask(canny), {min: 0, max: 1, palette: 'FF0000'}, 'L8 mndwi('+p+'%) canny, masked, th = 0.6', false);
+  
+  /*print(Chart.image.histogram(mndwi_p, Map.getBounds(true), 30));
+  print(Chart.image.histogram(mndwi_p.mask(buf), Map.getBounds(true), 30));
+  */
+  
+  var canny = ee.Algorithms.CannyEdgeDetector(mndwi_p, 0.25, 0);
+  //canny = canny.reduceNeighborhood(ee.call("Reducer.max"), ee.call("Kernel.square", 1));
+  
+  Map.addLayer(canny.mask(canny), {min: 0, max: 1, palette: 'FF0000'}, 'L8 mndwi('+p+'%) canny, masked, th = 0.25', false);
+  
+  var buf = canny.focal_max(90, 'circle', 'meters').gt(0);
+  
+  var m = mndwi_p.mask(buf);
+  // Map.addLayer(m, {min:-1.0, max:0.4}, 'mndwi_'+p+'_buf', false)
+  
+  var circle = ee.Kernel.circle(90, "meters");
+  var local_min = m.focal_min(90, 'circle', 'meters').convolve(circle);
+  var local_max = m.focal_max(90, 'circle', 'meters').convolve(circle);
+  
+  // Map.addLayer(local_min, {min:-1.0, max:0.4}, 'mndwi_'+p+'_buf_min', false)
+  // Map.addLayer(local_max, {min:-1.0, max:0.4}, 'mndwi_'+p+'_buf_max', false)
+  
+  var mndwi_local = local_min.add(local_max.subtract(local_min).multiply(0.7));
+  
+  var diff = local_max.subtract(local_min);
+  var diff_small = diff.lt(0.15);
+  // Map.addLayer(diff, {min: 0, max:1}, 'diff', false);
+  // Map.addLayer(diff_small.mask(diff_small), {min: 0, max:1}, 'diff < 0.15', false);
+  //print(Chart.image.histogram(diff, Map.getBounds(true), 30));
+  
+  var mask = m.lt(mndwi_local.mask(diff_small.not()));
+  
+  // Map.addLayer(m.mask(mask), {min:-1.0, max:0.4}, 'mndwi_'+p+'_buf_mask', false)
+}
+
+// addCannyLayers();
+
+var cannyAfterGauss = function() {
+  var xs_crs = mndwi_p.getInfo().bands[0].crs;
+  var xs_upscale = mndwi_p.reproject(xs_crs, null, 5);
+  var gaussianKernel = ee.Kernel.gaussian(30, 15, 'meters', true, 1);
+  var gaussianImage = xs_upscale.convolve(gaussianKernel);
+  Map.addLayer(gaussianImage, {gamma:1.5, min:-0.5, max:0.5}, 'L8 mndwi('+p+'%) gauss', false);
+  
+  var canny = ee.Algorithms.CannyEdgeDetector(gaussianImage, 0.3, 1);
+  //Map.addLayer(canny.mask(canny), {min: 0, max: 1, palette: 'FF0000'}, 'L8 mndwi('+p+'%) canny, masked, th = 0.3', false);
+  
+  var canny = ee.Algorithms.CannyEdgeDetector(gaussianImage, 0.25, 1);
+  Map.addLayer(canny.mask(canny), {min: 0, max: 1, palette: 'FF0000'}, 'L8 mndwi('+p+'%) canny, masked, th = 0.25', false);
+}
+
+//cannyAfterGauss();
+
+/*Export.image(canny.mask(canny), 'canny_0.25', {name: 'canny_0.25', format: 'tif', scale: 30, region: aoiRegion });
+*/
+/*Erosion is: image.reduceNeighborhood(ee.call("Reducer.min"), ee.call("Kernel.square", 1))
+Dilation is: image.reduceNeighborhood(ee.call("Reducer.max"), ee.call("Kernel.square", 1))
+*/
+
+// AU, flow accumulation, hand
+var colors_hand = ['023858', '006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'];
+
+var dand = new ee.Image('GME/images/05889347502198831302-04002734373939046040')// .clip(aoi)
+Map.addLayer(hillshadeit(dand.visualize({min:0, max:0.02, palette:colors_hand}), dand, 1.8, 10000), {}, 'dand', false)
+
+var hand = new ee.Image('GME/images/05889347502198831302-12745745341423157006')//.clip(aoi);
+Map.addLayer(hillshadeit(hand.visualize({min:0, max:300, palette:colors_hand}), hand, 2.0, 2), {}, 'hand', false)
+
+var hand_mask = hand.lt(20)//.focal_max(90, 'circle', 'meters');
+Map.addLayer(hand.mask(hand_mask.not()).visualize({min:0, max:1, palette:['55AA55']}), {}, 'hand <= 20', false)
+
+var dand_mask = dand.lt(20)//.focal_max(90, 'circle', 'meters');
+Map.addLayer(dand.mask(dand_mask.not()).visualize({min:0, max:1, palette:['5555AA']}), {}, 'dand <= 20', false)
+
+Map.addLayer(hand.mask(hand.lte(1)).visualize({palette:['BB2222']}), {}, 'hand <= 1', false)
+
+var flowaccu = new ee.Image('GME/images/05889347502198831302-14427924602502221744')//.clip(aoi);
+var colors_flowaccu = ['00ff00', '0000ff'];
+Map.addLayer(hillshadeit(flowaccu.visualize({min:0, max:300, palette:colors_flowaccu}), dem, 2.0, 1), {}, 'flowaccu', false)
+
+var colors = ['2171b5', '08519c', '08306b'];
+
+var flowaccu_water = flowaccu.gt(1000).focal_max({radius:30, units: 'meters'}).focal_min({radius:30, units: 'meters'})
+
+var flowaccu_distance = flowaccu.gt(1000).distance(ee.Kernel.euclidean(distanceSize, "meters"));
+Map.addLayer(flowaccu_distance.mask(flowaccu_distance.lt(distanceSize)), {min:0, max:distanceSize}, 'flow accumulation (>1000) distance', false)
+
+Map.addLayer(flowaccu.mask(flowaccu_water), {min:1000, max:100000000, palette:colors}, 'flow accumulation (>1000)', false)
+
+Map.addLayer(waterSlopeMask, {min: 0.2, max: 0.5, palette:'555555'}, 'slope > ' + waterSlopeLimit, false);
+
+
+addFlowAccumulationToMap();
+
+/*
+var images = ee.ImageCollection('LANDSAT/LE7_L1T_TOA').filterBounds(aoi)
+  .filterDate('1999-01-01', '2003-01-01');
+Map.addLayer(images.select(['B7', 'B4', 'B2']).reduce(ee.Reducer.intervalMean(15, 25)).clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'mean(15%-25%)', false);
+*/
+
+
+
+// HydroSHEDS rivers
+//var rivers_hs = ee.FeatureCollection('ft:1xfvGA2mK7nNrt0S7asJR-lZXDa5fOPAgCsxUlM17');
+//Map.addLayer(rivers_hs, {color:'4292FF'}, 'HydroSHEDS rivers', false);
+
+var fc = new ee.FeatureCollection('ft:1xfvGA2mK7nNrt0S7asJR-lZXDa5fOPAgCsxUlM17');
+
+var rivers = [
+fc.filter(ee.Filter.gt('UP_CELLS', 0).and(ee.Filter.lte('UP_CELLS', 1000))),
+fc.filter(ee.Filter.gt('UP_CELLS', 1000).and(ee.Filter.lte('UP_CELLS', 10000))), 
+fc.filter(ee.Filter.gt('UP_CELLS', 10000).and(ee.Filter.lte('UP_CELLS', 100000))),
+fc.filter(ee.Filter.gt('UP_CELLS', 100000).and(ee.Filter.lte('UP_CELLS', 500000))),
+fc.filter(ee.Filter.gt('UP_CELLS', 500000).and(ee.Filter.lte('UP_CELLS', 2000000))),
+fc.filter(ee.Filter.gt('UP_CELLS', 2000000).and(ee.Filter.lte('UP_CELLS', 5000000)))
+];
+
+//var colors = ['6baed6', '4292c6', '2171b5', '08519c', '08306b', '08306b'];
+var colors = ['3f9fff', '337ddb', '285bb7', '12176f', '0d065d', '0d065d' ];
+
+var rivers_image = ee.Image(0).mask(0).toByte();
+var count = colors.length;
+for(var i=0; i<count; i++) {
+  rivers_image = rivers_image.paint(rivers[i], i, i*2);
+  //rivers_image = rivers_image.paint(rivers[i], i, i*0.3);
+}
+
+rivers_image = rivers_image.visualize({ palette: colors, max: count, opacity: 1.0 });
+Map.addLayer(rivers_image, {gamma:0.3}, 'HydroSHEDS rivers (15s)', false);
+
+
+// 10-03-2015
+var rivers_lines_osm = ee.FeatureCollection('ft:1nlWWjT4VkGjkp-kXKroFuyUuKDUSTqce_DDtmOt1')
+  .filter(ee.Filter.inList('waterway', ['river', 'stream', 'drain', 'canal', 'drain', 'creek', 'ditch']))
+  //.filterBounds(aoi);
+var rivers_polygons_osm = ee.FeatureCollection('ft:1gUbHjPLpeC4Vzi59vE5JSFfLRDtcrngyWfSn8mQC');
+
+var osm_color = '1010ff';
+
+var rivers_lines_osm_image = ee.Image(0).mask(0).toByte();
+rivers_lines_osm_image = rivers_lines_osm_image.paint(rivers_lines_osm, 0, 2.0);
+//Map.addLayer(rivers_lines_osm_image, {palette:'FF92c6'}, 'rivers_lines', true);
+Map.addLayer(rivers_lines_osm_image, {palette:osm_color}, 'rivers_lines', true);
+
+// Map.addLayer(rivers_lines_osm, {}, 'rivers_lines (vector)', false);
+
+Map.addLayer(ee.Image(0).mask(0).toByte()
+                .paint(rivers_polygons_osm, 'fill')
+                .paint(rivers_polygons_osm, 1, 1), 
+//{palette: 'FF92c6,0000c6,0000c6,0000c6', 'opacity': 1.0}, 'rivers_polygons');
+{palette: osm_color + ',0000c6,0000c6,0000c6', 'opacity': 1.0}, 'rivers_polygons');
+
+//Map.addLayer(rivers_polygons_osm, {color:'4292c6'}, 'rivers_polygons', true);
+
+// old, see https://wiki.openstreetmap.org/wiki/Import/South_Australian_Waterbodies
+var rivers_lines_osm_old = ee.FeatureCollection('ft:1ekNtcJOoRzGhKM9vik3bivm7ERS_yY2NfXeet84e');
+var rivers_polygons_osm_old = ee.FeatureCollection('ft:1hp7-tC7bqEVxrdxqOLKpIqRGEaWCpeluimHAntrD');
+//Map.addLayer(rivers_lines_osm_old, {color:'FF92c6'}, 'rivers_lines (old)', false)
+//Map.addLayer(rivers_polygons_osm_old, {color:'FF92c6'}, 'rivers_polygons (old)', false)
+
+
+// buffer river polylines in order to use it as a mask for histogram / edge detection
+// var rivers_lines_osm2 = rivers_lines_osm;
+
+addToMapAsRaster(not_aoi, 'not aoi', '000000,101010', 0, 0.5, true, true);
+
+addToMapAsRaster(au[3], 'AU, level 03', '101010,000000', 2, 0.8, false, true);
+
+addToMapAsRaster(au[6], 'AU, level 06', '101030,000000', 1, 0.9, false, false);
+
+/*
+addToMapAsRaster(au[4], 'AU, level 04', '101010,000000', 1, 0.9, false, false);
+addToMapAsRaster(au[5], 'AU, level 05', '101010,000000', 1, 0.9, false, false);
+addToMapAsRaster(au[6], 'AU, level 06', '101030,000000', 1, 0.9, false, false);
+addToMapAsRaster(au[7], 'AU, level 07', '101030,000000', 1, 0.9, false, false);
+*/
+
+var maxImageCount = 100;
+
+var addClouds = function() {
+  // total number of images
+  var count = images.select(0).count().clip(aoi);
+  Map.addLayer(count, {min:0, max:maxImageCount, palette:'cbc9e2,9e9ac8,6a51a3', opacity:0.9}, 'pixel count', false);
+
+/*  print(count.reduceRegion(ee.Reducer.histogram(10), aoi, 300))
+  
+  var chart = Chart.image.histogram(count, aoi, 300, 10); 
+  chart.setOptions({ title: 'Pixel Count' });
+  chart.setChartType('PieChart');
+  print(chart)
+*/  
+  // number of clean pixels using BQA
+  var bad = [61440,59424,57344,56320,53248,52256,52224,49184,49152];
+  var clearFn = function(img) { return img.select('BQA').eq(bad).reduce('max').not(); };
+  var clear = images.select('BQA').map(clearFn).sum().clip(aoi);
+
+  // Map.addLayer(clear, {min:0, max:maxImageCount, palette:'cbc9e2,9e9ac8,6a51a3', opacity:0.9}, 'clear', false)
+
+  var cloudRatio = ee.Image(1).subtract(clear.divide(count));
+  Map.addLayer(cloudRatio.mask(cloudRatio), {palette:'FFFFFF'}, 'clouds ratio', false)
+  
+  //print(Chart.image.histogram(cloudRatio, aoi, 60, 80));
+  
+  
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.1)).mask(cloudRatio.mask(cloudRatio.gte(0.1))), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 10%', false);
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.2)).mask(cloudRatio.mask(cloudRatio.gte(0.2))), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 20%', false);
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.3)).mask(cloudRatio.mask(cloudRatio.gte(0.3))), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 30%', false);
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.4)).mask(cloudRatio.mask(cloudRatio.gte(0.4))), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 40%', false);
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.5)).mask(cloudRatio.mask(cloudRatio.gte(0.5))), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 50%', false);
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.6)).mask(cloudRatio.mask(cloudRatio.gte(0.6))), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 60%', false);
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.7)).mask(cloudRatio.mask(cloudRatio.gte(0.7))), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 70%', false);
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.8)).mask(cloudRatio.mask(cloudRatio.gte(0.8))), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 80%', false);
+   Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.9)), {min:0, max:1, palette:'FFFFFF'}, 'clouds > 90%', false);
+}
+
+//addClouds();
+
+var setMapStyle = function() {
+   var styles = {
+    'Soft Blue': [
+      {
+        featureType: 'all',
+        stylers: [
+          { saturation: -80 }
+        ]
+      },{
+        featureType: 'road.arterial',
+        elementType: 'geometry',
+        stylers: [
+          { hue: '#00ffee' },
+          { saturation: 50 }
+        ]
+      },{
+        featureType: 'poi.business',
+        elementType: 'labels',
+        stylers: [
+          { visibility: 'off' }
+        ]
+      }
+    ]
+  };
+  
+  Map.setStyle('Soft Blue', styles);
+}
+
+setMapStyle();
+
+var info = water.getInfo();
+var crs = info.bands[0].crs;
+var crs_transform = info.bands[0].crs_transform;
+
+var convertWaterToVectorsAndSmooth = function() {
+  var water = water_0.mask(hand_mask);
+  
+  var waterVector = water.reduceToVectors({reducer:ee.Reducer.countEvery(), scale:30, geometry: aoi, eightConnected:true})
+    .filter(ee.Filter.neq('label', 1));
+  Map.addLayer(waterVector, {}, 'water vector');
+  
+  // apply closing (dilation followed by erosion)
+  var water2 = water
+    .reproject(crs, null, 10)
+    .focal_max({radius: 60, units: 'meters'}).focal_min({radius: 60, units: 'meters'})
+    
+  var waterVector2 = water2.reduceToVectors({reducer:ee.Reducer.countEvery(), scale:10, maxPixels: 1e9, geometry: aoi, eightConnected:true})
+    .filter(ee.Filter.neq('label', 1));
+  Map.addLayer(waterVector2, {}, 'water vector (smoothed)');
+
+  // Map.addLayer(water.mask(water.not()), {min:0, max:1, palette: mndwi_color}, 'L8 mndwi('+p+'%) > 0', false);
+
+  // Map.addLayer(waterVector.distance(1000), {min: 0, max: 1000, palette: ['FFFF00', 'FF0000']});
+}
+
+// convertWaterToVectorsAndSmooth()
+
+// Map.centerObject(aoi, 13)
+
+print('Scale: ' + Map.getScale())
+
+// Map.centerObject(aoi, 10);
+
+
+
+
+// ================= test OSM lines
+
+var selectLine = function() {
+  // print(rivers_lines_osm.aggregate_count("osm_id"))
+  var id = 143824660;
+  var debug_osm = rivers_lines_osm.filter(ee.Filter.eq('osm_id', 143824660));
+  var debug_osm_image = ee.Image(0).mask(0).toByte();
+  debug_osm_image = debug_osm_image.paint(debug_osm, 0, 2.0);
+  Map.addLayer(debug_osm_image, {palette:'EE2020'}, 'rivers_lines (debug)', true);
+  Map.centerObject(debug_osm)
+}
+//selectLine();
+
+var computeQualityMetrices = function() {
+  var info = images.first().getInfo();
+  var crs = info.bands[0].crs;
+  var crs_transform = info.bands[0].crs_transform;
+  
+  rivers_lines_osm = rivers_lines_osm.map(function(feature){
+    var length = feature.geometry().length();
+    
+    // LANDSAT
+    var water_distance_sum = water_distance.reduceRegion( {'reducer': ee.Reducer.sum(), 'geometry': feature.geometry(), 'maxPixels': 1e10, crs: crs, crsTransform: crs_transform });
+    var water_distance_count = water_distance.reduceRegion( {'reducer': ee.Reducer.count(), 'geometry': feature.geometry(), 'maxPixels': 1e10, crs: crs, crsTransform: crs_transform });
+    var water_distance_count_every = water_distance.reduceRegion( {'reducer': ee.Reducer.countEvery(), 'geometry': feature.geometry(), 'maxPixels': 1e10, crs: crs, crsTransform: crs_transform });
+  
+    // SRTM 30m
+    var flowaccu_distance_sum = flowaccu_distance.reduceRegion( { 'reducer': ee.Reducer.sum(), 'geometry': feature.geometry(), 'maxPixels': 1e10, crs: crs, crsTransform: crs_transform });
+    var flowaccu_distance_count = flowaccu_distance.reduceRegion( { 'reducer': ee.Reducer.count(), 'geometry': feature.geometry(), 'maxPixels': 1e10, crs: crs, crsTransform: crs_transform });
+    var flowaccu_distance_count_every = flowaccu_distance.reduceRegion( { 'reducer': ee.Reducer.countEvery(), 'geometry': feature.geometry(), 'maxPixels': 1e10, crs: crs, crsTransform: crs_transform });
+    
+    feature = feature.set('length', ee.Number(length))
+  
+    feature = feature.set('count_landsat', ee.Number(water_distance_count.get('nd')))
+    feature = feature.set('count_srtm', ee.Number(flowaccu_distance_count.get('b1')))
+    feature = feature.set('count_every_landsat', ee.Number(water_distance_count.get('nd')))
+    feature = feature.set('count_every_srtm', ee.Number(flowaccu_distance_count.get('b1')))
+  
+    feature = feature.set('error_landsat', ee.Number(water_distance_sum.get('nd')))
+    feature = feature.set('error_srtm', ee.Number(flowaccu_distance_sum.get('b1')));
+    
+    return feature;
+  });
+}
+
+// computeQualityMetrices();
+
+var printChartsAndTables = function(result) {
+  var result_list = ee.List(result.reduceColumns(ee.Reducer.toList().repeat(8), 
+    ['osm_id', 'length', 'count_landsat', 'count_every_landsat', 'error_landsat', 'count_srtm', 'count_every_srtm', 'error_srtm']).get('list'))/*.getInfo()*/;
+
+  print(result_list)
+/*  var rows = result_list[0].map(function(v,i) { 
+    return {c: [{v: v}, {v: result_list[1][i]}, {v: result_list[2][i]}]} 
+  });
+  
+  var cols = [
+      {id: 'osm_id', label: 'osm_id', type: 'string'},
+      {id: 'error landsat', label: 'error landsat', type: 'number'},
+      {id: 'error srtm', label: 'error srtm', type: 'number'}
+  ];
+  
+  // print(Chart({cols: cols, rows: rows}, 'ColumnChart'))
+  print(Chart({cols: cols, rows: rows}, 'Table'))
+*/}
+
+// printChartsAndTables(rivers_lines_osm)
+
+
+
+// =================== skeleton of LANDSAT water
+var input = water_0;
+var info = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+      .filterBounds(Map.getBounds(true)).first().getInfo()
+var crs = info.bands[0].crs;
+var crs_transform = info.bands[0].crs_transform;
+
+var hitOrMiss = function(image, se1, se2) {
+  var e1 = image.reduceNeighborhood(ee.call("Reducer.min"), se1);
+  var e2 = image.not().reduceNeighborhood(ee.call("Reducer.min"), se2);
+  return e1.and(e2).reproject(crs, crs_transform);
+}
+
+var upsampleWater = function() {
+  t = crsTransformSetStep(15, crs_transform);
+  
+  // smoothen and reproject water
+  var water2 = water
+    .focal_max({radius: 30, units: 'meters'}).focal_min({radius: 30, units: 'meters'})
+    .reproject(crs, t)
+    
+  var waterVector2 = water2.not().reduceToVectors({reducer:ee.Reducer.countEvery(), scale:step, maxPixels: 1e9, geometry: Map.getBounds(true), eightConnected:true})
+    .filter(ee.Filter.neq('label', 1));
+  Map.addLayer(waterVector2, {}, 'water vector (smoothed)');
+  
+  Map.addLayer(water2.mask(water2), {palette:'0000aa'}, 'water (upsampled ' + step + ')')
+
+  water = water2;
+}
+
+// upsampleWater();
+
+// thining
+var se1w1 = [[0, 0, 0], 
+             [0, 1, 1], 
+             [0, 1, 1]];
+
+var se2w1 = [[1, 1, 0], 
+             [1, 0, 0], 
+             [0, 0, 0]];
+
+var se11 = ee.Kernel.fixed(3, 3, se1w1);
+var se21 = ee.Kernel.fixed(3, 3, se2w1);
+
+var se1w2 = [[0, 0, 0], 
+             [0, 1, 0], 
+             [0, 1, 0]];
+
+var se2w2 = [[1, 1, 1], 
+             [0, 0, 0], 
+             [0, 0, 0]];
+
+var se12 = ee.Kernel.fixed(3, 3, se1w2);
+var se22 = ee.Kernel.fixed(3, 3, se2w2);
+
+for(var i=0; i<25; i++) { // iteration
+  for(var j=0; j<4; j++) { // rotate kernels
+    input = input.subtract(hitOrMiss(input, se11, se21));
+    se11 = se11.rotate(1);
+    se21 = se21.rotate(1);
+
+    input = input.subtract(hitOrMiss(input, se12, se22));
+    se12 = se12.rotate(1);
+    se22 = se22.rotate(1);
+  }
+}
+
+// ================ connect lines
+/*var input2 = input
+  //.reduceNeighborhood(ee.call("Reducer.max"), ee.call("Kernel.square", 4))
+  //.reduceNeighborhood(ee.call("Reducer.min"), ee.call("Kernel.square", 4))
+  .reduceNeighborhood(ee.Reducer.max(), ee.Kernel.circle(210, 'meters'))
+  .reduceNeighborhood(ee.Reducer.min(), ee.Kernel.circle(210, 'meters'));
+Map.addLayer(input2.mask(input2), {min:0, max:1, palette: mndwi_color}, 'L8 mndwi('+p+'%) > 0, closed', false);
+*/
+
+// find parts to connect
+var se1w1 = [[0, 1, 0], 
+             [0, 0, 0], 
+             [0, 1, 0]];
+
+var se2w1 = [[0, 0, 0], 
+             [0, 1, 0], 
+             [0, 0, 0]];
+
+var se11 = ee.Kernel.fixed(3, 3, se1w1);
+var se21 = ee.Kernel.fixed(3, 3, se2w1);
+
+var input2 = hitOrMiss(input, se11, se12);
+
+Map.addLayer(input2.mask(input2), {min:0, max:1, palette: mndwi_color}, 'L8 mndwi('+p+'%) > 0, disconnected', false);
+
+
+
+// =============== distance transform
+// var distance = input.mask(input.gt(0)).distance(ee.Kernel.euclidean(500, "meters"))
+// Map.addLayer(distance.mask(distance.gt(500)), {min:0, max:500}, 'distance')
+
+var water_distance = input.distance(ee.Kernel.euclidean(distanceSize, "meters"));
+Map.addLayer(water_distance.mask(water_distance.lt(distanceSize)), {min:0, max:distanceSize}, 'skeleton distance', false);
+
+var inputMasked = input.mask(input);
+Map.addLayer(inputMasked, {palette:'fec44f', opacity: 0.7}, 'river skeleton', false);
+
+var inputConnected = inputMasked.connectedPixelCount({maxSize: 100, eightConnected: true}).reproject(crs, crs_transform);
+var inputConnectedSmall = inputConnected.lt(100);
+
+Map.addLayer(inputConnectedSmall.mask(inputConnectedSmall), {palette: ['ff0000']}, '100 connected pixels', false);
+
+
+/*
+// Use the MCD12 land-cover as training data.
+var cover = ee.Image("MCD12Q1/MCD12Q1_005_2001_01_01").select("Land_Cover_Type_1")
+
+// A region of the image to train with.
+region = aoi
+
+var PALETTE = ','.join([
+    'aec3d4', # water
+    '152106', '225129', '369b47', '30eb5b', '387242', # forest
+    '6a2325', 'c3aa69', 'b76031', 'd9903d', '91af40', # shrub, grass, savanah
+    '111149', # wetlands
+    '8dc33b', # croplands
+    'cc0013', # urban
+    '6ca80d', # crop mosaic
+    'd7cdcc', # snow and ice
+    'f7e084', # barren
+    '6f6f6f'  # tundra
+])
+
+map.addLayer(
+    image=composite, 
+    vis_params={'min':0, 'max':100, 'bands':"30,20,10"}, 
+    name='Landsat 7 TOA 2000')
+map.addLayer(
+    image=cover,
+    vis_params={'palette': PALETTE, 'min':0, 'max':17},
+    name='MODIS land-cover',
+    visible=False)
+
+# Multiple trainings with different numbers of points.
+nums = [1000, 10000, 100000]
+for num in nums:
+    # Extract random points.
+    points = ee.FeatureCollection.randomPoints(region, num, num, 1)
+    training = cover.addBands(composite).reduceToVectors(
+        reducer="mean",
+        geometry=points,
+        geometryType="centroid",
+        scale=30, 
+        crs="EPSG:4326"
+    )
+    
+    classifier = training.trainClassifier(
+        property_list=bands,
+        class_property="label",
+        classifier_name="FastNaiveBayes"
+    )
+
+    # Apply the classifier to the original composite.
+    out = composite.classify(classifier)
+    map.addLayer(
+        image=out,
+        vis_params={'palette': PALETTE, 'min':0, 'max':17},
+        name="{0} points".format(num),
+        visible=False
+    )
+
+# Add the region that constrains the random sampling.
+map.addLayer(
+        image=ee.Image().paint(ee.Feature(region), 0, 2),
+        name="Region"
+)
+*/
+
+
+
+
+Map.addLayer(hand.mask(hand_mask.not()).visualize({min:0, max:1, palette:['55AA55']}), {}, 'hand <= 15', false)

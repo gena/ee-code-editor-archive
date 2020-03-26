@@ -1,0 +1,54 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA"),
+    l7 = ee.ImageCollection("LANDSAT/LE7_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var LC8_BANDS = ['B1',    'B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',    'B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8', 'B7'];
+var STD_NAMES = ['blue2', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+l8 = l8
+  .filterBounds(ee.Geometry(Map.getBounds(true)).centroid(1))
+  .select(LC8_BANDS, STD_NAMES)
+  
+l7 = l7
+  .select(LC7_BANDS, STD_NAMES)
+  .filterBounds(ee.Geometry(Map.getBounds(true)).centroid(1))
+
+//var images = ee.ImageCollection(l7.merge(l8))
+var images = l8
+  .sort('system:time')
+
+function visualize(i) { 
+  return i.visualize({min:0.05, max:0.5})
+}
+
+function visualizePan(i) { 
+  //var rgb = i.select('temp', 'green', 'blue');
+  //var rgb = i.select('nir', 'red', 'blue');
+  //var rgb = i.select('swir2', 'nir', 'green');
+  //var rgb = i.select('nir', 'blue', 'green');
+  var rgb = i.select('red', 'green', 'blue');
+  //var rgb = i.select('nir', 'red', 'green');
+  var pan = i.select('pan');
+
+  var hsv  = rgb.rgbtohsv();
+  var intensity = pan;
+  var huesat = hsv.select('hue', 'saturation');
+
+  var image = ee.Image.cat(huesat, intensity).hsvToRgb();
+  
+  return image
+    .visualize({min:0.08, max:[0.15, 0.15, 0.3]})
+    
+}
+
+images = images.map(visualizePan)
+
+Map.addLayer(ee.Image(images.first()), {}, '1')
+
+Export.video(images, 'video', {
+  region:ee.Geometry(Map.getBounds(true)).toGeoJSON(), 
+  scale:15,
+  framesPerSecond: 5 
+})
+

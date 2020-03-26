@@ -1,0 +1,27 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC8_L1T"),
+    l8toa = ee.ImageCollection("LANDSAT/LC8_L1T_TOA"),
+    l7 = ee.ImageCollection("LANDSAT/LE7_L1T");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+l8 = l8
+  .filterBounds(Map.getBounds(true))
+  .filterDate('2015-09-1', '2016-01-01')
+  .select(['B6', 'B5', 'B3'])
+  
+l7 = l7
+  .filterBounds(Map.getBounds(true))
+  .filterDate('2015-09-1', '2016-01-01')
+  .select(['B5', 'B4', 'B2'])
+
+var images = ee.ImageCollection(l8.merge(l7))
+  .sort('DATE_ACQUIRED')
+
+var count = images.aggregate_count('system:index').getInfo()
+
+images = ee.List(images.toList(count, 0))
+
+for(var i = 0; i < count; i++) {
+  var image = ee.Image(images.get(i));
+  Map.addLayer(image, {min:1000, max:30000}, image.get('system:id').getInfo() + image.get('DATE_ACQUIRED').getInfo())
+}
+

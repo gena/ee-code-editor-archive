@@ -1,0 +1,25 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.LineString(
+        [[-125.0848388671875, 39.85915479295669],
+         [-125.068359375, 39.75999140525313],
+         [-125.18234252929688, 39.68605343225984],
+         [-125.0813859909423, 39.56977506496732],
+         [-124.925537109375, 39.66491373749128],
+         [-124.85687255859375, 39.63319206567459],
+         [-124.81292724609375, 39.595106849951904],
+         [-124.77996826171875, 39.53793974517628],
+         [-124.7772216796875, 39.499802162332884]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+print(geometry)
+
+print(ee.FeatureCollection(ee.Feature(geometry).set({branch_id: 0, from_node_id: 0, to_node_id: 1})))
+
+var distances = ee.List.sequence(0, geometry.length(), geometry.length().divide(50))
+
+var points = geometry.cutLines(distances).geometries()
+    .map(function(g) { 
+      return ee.Feature(g).centroid(1).set({branch_id: 0, offset: 0, distance: ee.Feature(g).get('distance'), width: 1, discharge: 100}) 
+    })
+
+print(ee.FeatureCollection(points))
+Map.addLayer(ee.FeatureCollection(points))

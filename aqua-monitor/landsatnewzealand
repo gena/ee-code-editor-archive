@@ -1,0 +1,76 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var image1 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B1"),
+    image2 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B2"),
+    image3 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B3"),
+    image4 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B4"),
+    image5 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B5"),
+    image6 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B6"),
+    image7 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B7"),
+    image8 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B8"),
+    image9 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B9"),
+    image10 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B10"),
+    image11 = ee.Image("users/fbaart/landsat/LC80730892016318LGN00_B11"),
+    imageCollection = ee.ImageCollection("LANDSAT/LC8_SR");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+
+  
+var collection = ee.ImageCollection.fromImages(ee.List([
+  image1,
+  image2,
+  image3,
+  image4,
+  image5,
+  image6,
+  image7,
+  image8,
+  image9,
+  image10,
+  image11
+  ]));
+  
+var img = ee.Image.cat([image1, image2, image3, image4, image5, image6, image7, image8, image9, image10, image11]);
+img = img.rename(['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B9', 'B10', 'B11']);
+print(img);
+Map.addLayer(img, {}, 'concatenated', false, 1.0);
+Map.centerObject(img, 10);
+
+// first a false color composite
+var vizParams = {
+  bands: ['B5', 'B4', 'B3'],
+  min: -5622.060571104899,
+  max: 52020.09340393773,
+  gamma: [0.95, 1.1, 1]
+};
+Map.addLayer(img, vizParams, 'false color composite', false, 0.9);
+
+// add some water
+var ndwiMin = -0.1;
+var ndwiMax = 0.1;
+var ndwi = img.normalizedDifference(['B3', 'B5']);
+var ndwiViz = {min: ndwiMin, max: ndwiMax, palette: ['00FFFF', '0000FF']};
+Map.addLayer(ndwi, ndwiViz, 'NDWI', false);
+var ndwiMasked = ndwi.updateMask(ndwi.gte(-0.01));
+Map.addLayer(ndwiMasked, ndwiViz, 'NDWI masked', false);
+
+var ndwiRGB = ndwiMasked.visualize({
+  min: ndwiMin,
+  max: ndwiMax,
+  palette: ['22BBBB', '2222BB']
+});
+Map.addLayer(ndwiRGB, {}, 'ndwiRGB', false, 0.5);
+
+var vizParams = {
+  bands: ['B4', 'B3', 'B2'],
+  min: 6000,
+  max: 25000,
+  gamma: [0.95, 0.99, 1.1]
+};
+Map.addLayer(img, vizParams, 'true color composite', true, 1.0);
+var vizParams = {
+  bands: ['B4', 'B3', 'B2'],
+  min: 6000,
+  max: 25000,
+  gamma: [0.95, 0.99, 1.1]
+};
+Map.addLayer(img, vizParams, 'better true color composite', false, 1.0);

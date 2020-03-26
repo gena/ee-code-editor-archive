@@ -1,0 +1,7 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var grid = ee.FeatureCollection("users/gena/global_grid"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([120.11997800387394, 15.726618123045242]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+grid = grid.filterBounds(geometry)
+
+Map.addLayer(grid, {}, 'grid')

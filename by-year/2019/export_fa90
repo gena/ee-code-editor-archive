@@ -1,0 +1,18 @@
+var fa = ee.ImageCollection('users/imerg/flow_acc_3s').mosaic()
+
+var region = ee.Geometry.Polygon([-180, 60, 0, 60, 180, 60, 180, -60, 0, -60, -180, -60], null, false);
+Map.addLayer(region)
+
+Map.addLayer(fa, {min: 500, max: 10000})
+
+Export.image.toAsset({
+  image: fa, 
+  description: 'fa90', 
+  assetId: 'users/gena/fa90', 
+  pyramidingPolicy: { 'b0': 'max' }, 
+  region: region, 
+  scale: 90, 
+  crs: 'EPSG:4326', 
+  maxPixels: 1e13
+})
+

@@ -1,0 +1,12 @@
+// Vector to raster conversion
+
+Map.setCenter(31.8878, -26.3965, 11);
+
+var test = ee.FeatureCollection('ft:1wWOHbvBTCAPJsVpe0eyVtzQnVy6auy4Xkh5V_-8I');
+Map.addLayer(test, null, 'Feature Collection',false);
+print(test);
+
+var buffer = test.map(function(f) { return f.buffer(200); });
+
+var testRaster = buffer.reduceToImage(['ID'], ee.Reducer.mean());
+Map.addLayer(testRaster, {min:1, max:10, palette:['000000','cc3300']}, 'Points as Raster');

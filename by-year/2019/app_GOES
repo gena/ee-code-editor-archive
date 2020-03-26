@@ -1,0 +1,141 @@
+var animation = require('users/gena/packages:animation')
+var utils = require('users/gena/packages:utils')
+var style = require('users/gena/packages:style')
+
+style.SetMapStyleGrey()
+
+var images = ee.ImageCollection('NOAA/GOES/16/FDCF');
+
+var DQFVis = {
+  min: 0,
+  max: 5,
+  palette: [
+    'blanchedalmond',  // Good quality fire pixel
+    'olive',           // Good quality fire free land
+    'teal',            // Opaque cloud
+                       // Bad surface type, sunglint, LZA threshold exceeded,
+    'darkslateblue',   // off earth, or missing input data
+    'lemonchiffon',    // Bad input data
+    'burlywood'        // Algorithm failure
+  ]};
+
+function render(image) {
+  // var area = utils.focalMax(image.select('Area').gt(0), 2).selfMask()
+  // var temp = utils.focalMax(image.select('Temp').gt(0), 2).selfMask()
+  var area = image.select('Area').gt(0).focal_max(2).selfMask()
+  var temp = image.select('Temp').gt(0).focal_max(2).selfMask()
+
+  var dqf = image.select('DQF')
+  
+  area = area.mask(area).visualize({ palette: 'ffdf00' })
+  temp = temp.mask(temp).visualize({ palette: 'ff0000' })
+  
+  return dqf.visualize(DQFVis).blend(temp).blend(area).set({
+    label: image.date().format('YYYY-MM-dd HH:mm:ss')
+  })
+}
+
+var N = 30
+
+
+
+// take the last N images
+images = images.sort('system:time_start', false).limit(N).sort('system:time_start')
+
+// last 6 hour fires
+var lastTemp = images.select('Temp').max()
+var lastTemp = ee.Image(1).visualize({palette: ['000000'], opacity: 0.1}).blend(lastTemp.focal_max(2).selfMask().visualize({ palette: 'ff0000' }))
+Map.addLayer(lastTemp, {}, 'last 6 hour fires', true, 0.7)
+
+
+// var layerSelection = ui.Map.Layer(ee.Feature(null), { color: 'yellow' }, 'selection', false)
+var a = null
+
+a = animation.animate(images.map(render), { label: 'label', maxFrames: N, opacity: "0.8", preload: false })
+  .then(function() {
+    Map.onChangeZoom(function(zoom) {
+      a.hideLayers()
+    })
+
+  //   Map.layers().add(layerSelection)
+  })
+  
+
+Map.onClick(function(pt) {
+  pt = ee.Geometry.Point([pt.lon, pt.lat]).buffer(Map.getScale() * 3, Map.getScale() / 2)
+  // layerSelection.setShown(true)
+  // layerSelection.setEeObject(pt)
+  
+  updateChart(pt)
+})
+
+var chart = ui.Label('<chart>')
+var buttonClose = ui.Button('Close')
+var panelChart = ui.Panel([chart, buttonClose], ui.Panel.Layout.flow('vertical'), { 
+  shown: false, position: 'bottom-left',
+  minWidth : '350px', minHeight: '300px'  
+})
+Map.add(panelChart)
+
+buttonClose.onClick(function() {
+  panelChart.style().set({ shown: false })
+})
+
+var now = Date.now()
+
+function updateChart(pt) {
+  var stop = ee.Date(now)
+  var start = stop.advance(-2, 'day')
+  var images = ee.ImageCollection('NOAA/GOES/16/FDCF').filterDate(start, stop).select('Temp')
+    // .map(function(i) { return i })
+    
+  var values = images.getRegion(pt, Map.getScale())
+  
+  var features = values.slice(1).map(function(o) {
+    o = ee.List(o)
+    var t = ee.Number(o.get(3))
+    var temp = ee.Number(o.get(4))
+    
+    return ee.Feature(null, { temp: temp, 'system:time_start': t })
+  })
+  
+  features = ee.FeatureCollection(features).filter(ee.Filter.neq('temp', null))
+
+    
+  // var features = images.map(function(i) {
+  //   var t = i.reduceRegion({ reducer: ee.Reducer.max(), geometry: pt, scale: Map.getScale(), tileScale: 4 }).values().get(0)
+  //   return ee.Feature(pt, { temp: t })
+  //     .set('system:time_start', i.get('system:time_start'))
+  // })
+  
+  features = features.filter(ee.Filter.neq('temp', null)).map(function(f) {
+    var t = ee.Number(f.get('temp')).multiply(0.0549367).subtract(-273.15)
+    return f.set({ temp: t })
+  })
+    
+  var chart = ui.Chart.feature.byFeature(features, 'system:time_start', ['temp'])
+  
+  var max = now
+  var min = max - 2 * 24 * 60 * 60 * 1000
+
+  chart = chart.setOptions({ 
+    lineWidth: 0, pointSize: 2,
+    width: '400px', height: '300px', 
+    vAxis: { title: 'Temperature, °C' }, 
+    hAxis: { 
+      title: 'Time',
+      viewWindowMode:'explicit',
+      viewWindow: {
+        max: max,
+        min: min
+      } 
+    },
+    series: []
+  })
+  
+  panelChart.clear()
+  panelChart.widgets().reset([chart, buttonClose])
+  panelChart.style().set({ shown: true })
+}
+
+Map.style().set({ cursor: 'crosshair' })

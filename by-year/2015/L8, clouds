@@ -1,0 +1,52 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// L8, clouds
+
+// get all LANDSAT8 images
+var images = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+  .filterBounds(Map.getBounds(true))
+  //.sort('date_range')
+  //.filterDate('2013-04-01', '2013-10-01')
+  ;
+
+Map.addLayer(images.select(['B1', 'B2', 'B3', 'B4', 'B7']), {}, 'images', false)
+
+//var images2 = ee.ImageCollection('LEDAPS/LE7_L1T_SR')
+var images2 = ee.ImageCollection('LE7_L1T')
+  .filterDate('1999-01-01', '2005-01-01')
+  .filterBounds(Map.getBounds(true))
+  .sort('date_range')
+  ;
+
+Map.addLayer(images2.select(['B1', 'B2', 'B3', 'B4', 'B7']), {}, 'images2', false)
+
+// mask bad pixels
+var bad = [61440,59424,57344,56320,53248,52256,52224,49184,49152];
+var clearFn = function(img) { return img.select('BQA').eq(bad).reduce('max').not(); };
+var clear = images.select('BQA').map(clearFn).sum();
+
+// total number of images
+var count = images.select(0).count();
+
+var cloudRatio = ee.Image(1).subtract(clear.divide(count));
+
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.1)), {min:0, max:1, palette:'FFFFFF, FF00AA'}, 'clouds > 10%', false);
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.2)), {min:0, max:1, palette:'FFFFFF, FF22AA'}, 'clouds > 20%', false);
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.3)), {min:0, max:1, palette:'FFFFFF, FF44AA'}, 'clouds > 30%', false);
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.4)), {min:0, max:1, palette:'FFFFFF, FF66AA'}, 'clouds > 40%', false);
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.5)), {min:0, max:1, palette:'FFFFFF, FF88AA'}, 'clouds > 50%', false);
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.6)), {min:0, max:1, palette:'FFFFFF, FFAAAA'}, 'clouds > 60%', false);
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.7)), {min:0, max:1, palette:'FFFFFF, FFCCAA'}, 'clouds > 70%', false);
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.8)), {min:0, max:1, palette:'FFFFFF, FFEEAA'}, 'clouds > 80%', false);
+Map.addLayer(cloudRatio.mask(cloudRatio.gte(0.9)), {min:0, max:1, palette:'FFFFFF, FFFFAA'}, 'clouds > 90%', false);
+
+Map.addLayer(count, {min:0, max:100, palette:'FFFFFF,33FF33'}, 'count', false); // Q: is there a way to compute min/max for a very large region?
+
+Map.addLayer(clear.mask(clear.lte(40)), {palette:'0000FF'}, 'clear < 40 images')
+Map.addLayer(clear.mask(clear.lte(30)), {palette:'00FFFF'}, 'clear < 30 images')
+Map.addLayer(clear.mask(clear.lte(20)), {palette:'FF00FF'}, 'clear < 20 images')
+Map.addLayer(clear.mask(clear.lte(10)), {palette:'7700FF'}, 'clear < 10 images')
+Map.addLayer(clear.mask(clear.lte(5)), {palette:'AA00FF'}, 'clear < 5 images')
+Map.addLayer(clear.mask(clear.eq(0)), {palette:'FF0000'}, 'no data')
+

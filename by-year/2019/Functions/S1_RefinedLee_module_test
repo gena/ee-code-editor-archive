@@ -1,0 +1,61 @@
+var sdate = '2015-09-01';
+var edate = '2015-12-01';
+
+var rectAOI = ee.Geometry.Rectangle([608487.945936+100, 5022007.85454+100, 641377.945936+100, 5041817.85454+100], 'EPSG:3767', false); // coordinates: xMin, xMax, yMin, yMax
+//Map.addLayer(rectAOI);
+
+rectAOI = ee.Geometry(Map.getBounds(true))
+
+Map.centerObject(rectAOI, 12);
+
+var imagery = ee.ImageCollection('COPERNICUS/S1_GRD_FLOAT')
+  .filterBounds(rectAOI)
+  
+print(imagery.limit(10))  
+  
+  
+// var band1 = 'VV'
+// var band2 = 'VH'  
+// var mode = 'IW'
+
+var band1 = 'HH'
+var band2 = 'HV'  
+var mode = 'EW'
+
+imagery = imagery  
+  // Filter to get images with VV and VH dual polarization.
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', band1))
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', band2))
+  // Filter to get images collected in interferometric wide swath mode.
+  .filter(ee.Filter.eq('instrumentMode', mode))
+  .filter(ee.Filter.eq('orbitProperties_pass', 'ASCENDING'))
+  .filterDate(sdate, edate)
+  .sort('system:time_start', true);
+print(imagery);
+
+var RL = require('users/gena/default:Functions/S1_RefinedLee_module');
+// RefinedLee
+// RL_allbandsReplace
+// RL_allbandsAdd
+// toDBaddRatio
+// toDBaddRatio_SF
+
+var imagery_SF = imagery.map(RL.RL_allbandsReplace(band1, band2));
+
+// var imagery_dB = imagery.map(RL.toDBaddRatio);
+// print(imagery_dB)
+var imagery_SF_dB = imagery_SF.map(RL.toDBaddRatio(band1, band2));
+print(imagery_SF_dB)
+
+// show images
+var animation = require('users/gena/packages:animation')
+
+imagery_SF_dB = imagery_SF_dB.map(function(i) {
+  return i.set({ label: i.date().format('dd-MM-YYYY')})
+})
+
+animation.animate(imagery_SF_dB, {
+  vis: { bands: [band1, band2, 'R'], min: [-25, -30, 0], max: [5, 10, 40] },
+  label: 'label',
+  maxFrames: 100
+})

@@ -1,0 +1,127 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var dams_au = ee.FeatureCollection("ft:1IQFERzDolyfn20UU9-oz1SDclGE9uMrO7g0T");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.addLayer(dams_au, {}, 'dams')
+
+var features = ee.FeatureCollection('ft:1rrk-yEOb8ILSolV_kSVD1qGxszHcy0cSL9UnUxIh');
+var aoi = features.filter(ee.Filter.eq('HYBAS_ID', 5050597410));
+Map.addLayer(ee.Image(0).mask(0).paint(aoi, 'fill').paint(aoi, 1, 2), {palette: '000000', opacity: 0.8}, 'fill')
+
+Map.centerObject(aoi, 10)
+print(Map.getScale())
+
+
+var LC8_BANDS = ['B1', 'B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8'];
+var LC7_BANDS = ['B1', 'B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8'];
+var STD_NAMES = ['deepblue', 'blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan'];
+
+// get all LANDSAT8 images
+var images = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+  // .filterBounds(aoi)
+  .filterBounds(Map.getBounds(true))
+  //.filterDate('2014-05-01', '2015-11-11')
+  .select(LC8_BANDS, STD_NAMES);
+
+//Map.addLayer(images, {}, 'images', false)
+
+//print(images.aggregate_stats('google:registration_offset_x'))
+
+var list = images.select(['swir2', 'nir', 'green']).toList(3, 0)
+Map.addLayer(ee.Image(list.get(0)), {gamma:1.5, min:0.05, max:0.5}, '1', false);
+Map.addLayer(ee.Image(list.get(1)), {gamma:1.5, min:0.05, max:0.5}, '2', false);
+Map.addLayer(ee.Image(list.get(2)), {gamma:1.5, min:0.05, max:0.5}, '3', false);
+
+print(images)
+
+var water_color = ['1010ff', '101050'];
+
+var images_sng = images.select(['swir2', 'nir', 'green', 'pan', 'red', 'blue', 'swir1']);
+
+var compute_images = function(p) {
+  // add 40% image
+  var image_sng = images_sng.reduce(ee.Reducer.intervalMean(p, p+1));
+  Map.addLayer(image_sng.clip(aoi), {gamma:1.5, min:0.05, max:0.5}, 'mean('+p+'%) SNG', true);
+  var image = images.reduce(ee.Reducer.intervalMean(p, p+1));
+  
+  Map.addLayer(image, {}, 'image (percentile)', false)
+  
+  Map.addLayer(image.clip(aoi).select(['red_mean','green_mean','blue_mean']), {gamma:2.0, min:[0.05,0.05,0.05], max:[0.3,0.3,0.7]}, 'mean('+p+'%)', false);
+  
+  var ndwi_min=-0.15
+  var ndwi_max=0.15
+  
+  var im = image_sng.clip(aoi);
+  
+  // add MNDWI of 40% image 
+  // AWEInsh = 4 × ( BAND 3 − BAND 6 )− ( 0.25 × BAND 5 + 2.75 × BAND 7 )
+  var awei = im.expression("4.0 * (b('green') - b('swir1')) - (0.25 * b('nir') + 2.75 * b('swir2'))")
+  Map.addLayer(awei, {gamma:1.5, min:-0.5, max:0.5}, 'awei('+p+'%)', false);
+  
+  var mndwi = im.normalizedDifference(['green_mean', 'swir1_mean']);
+  Map.addLayer(mndwi, {gamma:1.5, min:-0.5, max:0.5}, 'mndwi('+p+'%)', false);
+  
+  var ndwi = im.normalizedDifference(['green_mean', 'nir_mean']);
+  Map.addLayer(ndwi, {gamma:1.5, min:-0.5, max:0.5}, 'ndwi('+p+'%)', false);
+  
+  var weight = 0.5
+  var ndwi_mndwi = ndwi.multiply(weight).add(mndwi.multiply(1-weight));
+  Map.addLayer(ndwi_mndwi, {gamma:1.5, min:-0.5, max:0.5}, '0.5 * (ndwi+mndwi)  ('+p+'%)', false);
+  
+  var nir_lt_red = image.select('nir_mean').lt(image.select('red_mean'));
+  
+  // add MNDWI > -0.15
+  var water = mndwi.gt(-0.15); 
+  Map.addLayer(mndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'mndwi('+p+'%) > -0.15', false);
+  
+  // add MNDWI > 0.0
+  var water = mndwi.gt(0.0);
+  Map.addLayer(mndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'mndwi('+p+'%) > 0.0', false);
+  
+  // add MNDWI > 0.15
+  var water = mndwi.gt(0.15);
+  Map.addLayer(mndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'mndwi('+p+'%) > 0.15', false);
+  
+  // add NDWI > -0.15
+  var water = ndwi.gt(-0.15); 
+  Map.addLayer(ndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'ndwi('+p+'%) > -0.15', false);
+  
+  // add NDWI > 0.0
+  var water = ndwi.gt(0.0);
+  Map.addLayer(ndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'ndwi('+p+'%) > 0.0', false);
+  
+  // add NDWI > 0.15
+  var water = ndwi.gt(0.15);
+  Map.addLayer(ndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'ndwi('+p+'%) > 0.15', false);
+  
+  // add ndwi_mndwi > -0.15
+  var water = ndwi_mndwi.gt(-0.15); 
+  Map.addLayer(ndwi_mndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'ndwi_mndwi('+p+'%) > -0.15', false);
+  
+  // add ndwi_mndwi > 0.0
+  var water = ndwi_mndwi.gt(0.0);
+  Map.addLayer(ndwi_mndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'ndwi_mndwi('+p+'%) > 0.0', false);
+  
+  // add ndwi_mndwi > 0.15
+  var water = ndwi_mndwi.gt(0.15);
+  Map.addLayer(ndwi_mndwi.mask(water), {min:ndwi_min, max:ndwi_max, palette: water_color}, 'ndwi_mndwi('+p+'%) > 0.15', false);
+  
+  Map.addLayer(nir_lt_red.mask(nir_lt_red),{palette:['FFFFFF']}, 'nir_lt_red', false);
+  
+  var nir_div_red = image.select('nir_mean').divide(image.select('red_mean'));
+  Map.addLayer(nir_div_red.mask(nir_div_red.lt(1.5)),{min:0.6, max:1.5, palette:['FF0000', '000000']}, 'nir_div_red', false);
+  
+  var nir_div_pan = image.select('nir_mean').divide(image.select('pan_mean'));
+  Map.addLayer(nir_div_pan.mask(nir_div_pan.lt(1.5)),{min:0.6, max:1.5, palette:['00FF00', '000000']}, 'nir_div_pan', false);
+  
+  var mndwi_crs = mndwi.getInfo().bands[0].crs;
+  var mndwi_upscale = mndwi.reproject(mndwi_crs, null, 5);
+  var gaussianKernel = ee.Kernel.gaussian(30, 15, 'meters', true, 1);
+  var mndwi_gauss = mndwi_upscale.convolve(gaussianKernel);
+  Map.addLayer(mndwi_gauss, {gamma:1.5, min:ndwi_min, max:ndwi_max}, 'mndwi_gauss('+p+'%)', false);
+  
+  var canny = ee.Algorithms.CannyEdgeDetector(mndwi_gauss, 0.2, 0);
+  Map.addLayer(canny.mask(canny), {min: 0, max: 1, palette: 'FF0000'}, 'Canny, mndwi('+p+'%)', false);
+}  
+  
+var p = 20;
+compute_images(p)

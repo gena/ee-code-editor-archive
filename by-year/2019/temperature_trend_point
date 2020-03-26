@@ -1,0 +1,34 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([7.485237454347498, 31.413083352766243]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var assets = require('users/gena/packages:assets')
+
+var aoi = Map.getCenter()
+var scale = 30
+
+var images = assets.getImages(aoi, {
+  includeTemperature: true,
+  filter: ee.Filter.date('2000-01-01', '2020-01-01'),
+  missions: ['L5', 'L7', 'L8']
+})
+
+print(images.size())
+
+images = assets.getMostlyCleanImages(images, aoi.buffer(100 * scale).bounds(scale))
+
+print(images.size())
+
+var chart = ui.Chart.image.series(images.select('temp').map(function(i) { 
+  return i.subtract(273.15).copyProperties(i, ['system:time_start'])
+}), aoi, ee.Reducer.first(), scale, 'system:time_start')
+
+chart = chart.setOptions({
+  trendlines: {
+    0: {
+      showR2: true,
+      visibleInLegend: true,
+      color: 'ff0000'
+    }
+  }
+})
+print(chart)

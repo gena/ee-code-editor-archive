@@ -1,0 +1,21 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var images = ee.ImageCollection("LANDSAT/LC8_L1T_TOA"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([-113.37890625, 41.96765920367816]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var timeSeries = images
+  .filterBounds(geometry)
+  .sort('system:time_start')
+  .getRegion(geometry, 30)
+  
+print(timeSeries)  
+
+// export
+var f = ee.Feature(null).set('timeSeries', timeSeries)
+Export.table.toDrive({collection: ee.FeatureCollection([f]), fileFormat: 'GeoJSON'})
+
+// plot values
+print('Headers: ', timeSeries.get(0))
+var times = timeSeries.slice(1).map(function(o) { return ee.List(o).slice(3, 4) })
+var values = timeSeries.map(function(o) { return ee.List(o).slice(7, 9) })
+
+print(ui.Chart.array.values(values, 0, times).setOptions({title: 'RED, NIR', type: 'line'}))

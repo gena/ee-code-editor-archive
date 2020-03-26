@@ -1,0 +1,135 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([-54.738349944793015, -7.768110274982776]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+function TimeInspector(map) {
+  this.map = map
+  this.images = ee.ImageCollection('COPERNICUS/S2')
+  this.imageLabels = []
+  this.bands = ['B2', 'B8', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8A']
+  this.bandLayers = []
+  this.selectedBand = 0
+  this.sigmaMin = 2
+  this.sigmaMax = 2.5
+  this.selectedImage = 0
+
+  var tool = this
+
+  this.initialize = function() {
+    this.map.onClick(this.onMapClick)
+    
+    // unselect all but current layer on zoom
+    this.map.onChangeZoom(function() {
+      tool.bandLayers.map(function(l, i) {
+        tool.bandLayers[i].setShown(tool.selectedBand === i)  
+      })
+    })
+    
+    this.createBandLayers()
+
+    this.pointLayer = ui.Map.Layer(ee.Image(), { color: 'red' }, 'clicked point')
+    this.map.layers().add(this.pointLayer)
+    
+    this.createUI()
+  }  
+  
+  this.createBandLayers = function() {
+    tool.bands.map(function(b) {
+      var opacity = b === tool.bands[0] ? 1 : 0
+      var layer = ui.Map.Layer(ee.Image(), { min: 0, max: 1 }, b, false, opacity)
+      tool.bandLayers.push(layer)
+      tool.map.layers().add(layer)
+    })
+  }
+
+  this.onMapClick = function(pt) {
+    tool.point = ee.Geometry.Point([pt.lon, pt.lat])
+    tool.pointLayer.setEeObject(tool.point)
+    
+    if(tool.map.getZoom() < 12) {
+      tool.map.centerObject(tool.point, 12)
+    }
+    
+    // reset to 0 if not not empty
+    if(tool.imageLabels.length > 0) {
+      tool.selectedImage = 0
+    }
+    
+    tool.loadImages(tool.point, tool.selectedImage)
+  }
+  
+  this.createUI = function() {
+    tool.ui = {
+      labelImages: ui.Label('Select image:'),
+      imageSelector: ui.Select(tool.imageLabels, 'Select location ...'),
+      labelBands: ui.Label('Select band:'),
+      imageSlider: ui.Slider(0, 7, 0, 1)
+    }
+
+    tool.ui.panel = ui.Panel([
+      tool.ui.labelImages, 
+      tool.ui.imageSelector,
+      tool.ui.labelBands, 
+      tool.ui.imageSlider
+    ])
+    ui.root.widgets().insert(0, tool.ui.panel)
+    
+    tool.ui.imageSelector.onChange(this.selectImage)
+    tool.ui.imageSlider.onSlide(this.selectBand)
+    tool.ui.imageSlider.setDisabled(true)
+  }
+  
+  this.selectBand = function(value) {
+    tool.bandLayers[tool.selectedBand].setOpacity(0)
+    tool.selectedBand = value
+    tool.bandLayers[tool.selectedBand].setOpacity(1)
+    tool.bandLayers[tool.selectedBand].setShown(true)
+  }
+  
+  this.selectImage = function(value) {
+    var t = ee.Date(value)
+
+    var imageSelected = tool.images.filterBounds(tool.point).filterDate(t, t.advance(1, 'hour')).first().resample('bilinear')
+    
+    tool.bands.map(function(b, i) {
+      var image = imageSelected.select(b)
+      
+      var mean = image.reduceRegion(ee.Reducer.mean(), Map.getBounds(true), Map.getScale() * 4)
+      var sigma = image.reduceRegion(ee.Reducer.stdDev(), Map.getBounds(true), Map.getScale() * 4)
+      var min = ee.Number(mean.get(b)).subtract(ee.Number(sigma.get(b)).multiply(tool.sigmaMin))
+      var max = ee.Number(mean.get(b)).add(ee.Number(sigma.get(b)).multiply(tool.sigmaMax)).add(0.0001)
+
+      tool.bandLayers[i].setShown(tool.selectedBand === i)  
+      tool.bandLayers[i].setEeObject(image.unitScale(min, max))
+    })
+    tool.ui.imageSlider.setDisabled(false)
+  }
+
+  this.loadImages = function(pt, index) {
+    tool.ui.imageSelector.setPlaceholder('Loading ...')
+    
+    tool.images.filterBounds(pt).sort('system:time_start', false).map(function(i) {
+      return i.set({ label: i.date().format() })
+    }).aggregate_array('label').evaluate(function(items) {
+      tool.imageLabels = items
+      tool.ui.imageSelector.items().reset(tool.imageLabels)
+      tool.ui.imageSelector.setPlaceholder('Select image ...')
+      
+      tool.ui.imageSelector.setValue(tool.imageLabels[index], true)
+    })
+  }
+}
+
+
+var ti = new TimeInspector(Map)
+ti.initialize()
+
+var pt = [-124.66363, 48.49805]
+Map.setCenter(pt[0], pt[1], 13)
+ti.selectedImage = 4
+ti.onMapClick({ lon: pt[0], lat: pt[1] })
+
+// Map.centerObject(geometry, 13)
+// var pt = geometry.centroid().coordinates().getInfo()
+// ti.selectedImage = 1
+// ti.onMapClick({ lon: pt[0], lat: pt[1] })
+// print(pt)

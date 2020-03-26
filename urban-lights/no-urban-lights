@@ -1,0 +1,100 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var imageCollection = ee.ImageCollection("JRC/GHSL/P2016/BUILT_LDS_GLOBE_V1"),
+    lights = ee.ImageCollection("NOAA/DMSP-OLS/CALIBRATED_LIGHTS_V4");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+
+Map.addLayer(ee.Image(1), {palette: ['000000']}, 'black', true, 0.7)
+
+// =========== urban extent    
+var urban = imageCollection.map(function(i) { return i.unmask(0)./*focal_mode(2).*/resample('bilinear') }).mean()
+var urban = urban.mask(urban.unitScale(1, 5))
+
+Map.addLayer(urban, {min: 0, max: 50, palette: 
+//["8e0152","c51b7d","de77ae","f1b6da","fde0ef","f7f7f7","e6f5d0","b8e186","7fbc41","4d9221","276419"].reverse()
+//['353535', 'BD0A0D', 'EA2100', 'EA5849', 'A01A1F', '212121']
+//["7f3b08","b35806","e08214","fdb863","fee0b6","f7f7f7","d8daeb","b2abd2","8073ac","542788","2d004b"].reverse()  
+//["67001f","b2182b","d6604d","f4a582","fddbc7","ffffff","e0e0e0","bababa","878787","4d4d4d"].reverse()
+['f2f0f7', 'cbc9e2', '9e9ac8', '756bb1', '54278f']
+}, 'urban')
+
+
+// First version of expected lights
+var kernel = ee.Kernel.circle({
+  radius: 10000, 
+  units: 'meters'
+})
+var scale = Map.getScale()
+var minScale = 1000
+var projection = urban.projection()
+var newScale = Math.max(scale, minScale)
+print(newScale)
+
+var expectedLight = urban
+  .unmask()
+  // make course (at most 1 km)
+  .reproject(projection, null, newScale)
+  .focal_mean({
+    radius: 10000, 
+    kernelType: 'circle', 
+    units: 'meters',
+    iterations: 3
+  })
+  //.resample('bilinear')
+  .reproject(projection, null, scale)
+  .max(urban.unmask())
+// var expectedLight = urban.unmask()
+//   .reproject(projection, null, newScale)
+//   .reduceResolution(ee.Reducer.mean(), false, 1024)
+//   .focal_mean({
+//     radius: 10000, 
+//     kernelType: 'circle', 
+//     units: 'meters',
+//     iterations: 3
+//   })
+//   .reproject(projection, null, 1000)
+//   .max(urban.unmask())
+
+var expectedLight = expectedLight.mask(expectedLight.unitScale(1, 5))
+// compute relation between urban mask and light
+Map.addLayer(expectedLight, {min: 0, max: 50, palette: ['f2f0f7', 'cbc9e2', '9e9ac8', '756bb1', '54278f']}, 'expected-light')
+
+
+// =========== night lights
+var paletteLights = ['f03b20', 'ffff55', 'ffffb2', 'ffffee']
+
+var start = '2017-01-01'
+var stop = '2018-01-01'
+    
+var lights = ee.ImageCollection('NOAA/VIIRS/DNB/MONTHLY_V1/VCMCFG').select('avg_rad')
+  .filterDate(start, stop)
+  .map(function(i) { return i.resample('bilinear')})
+  .mean()
+  
+var lights = lights
+  .where(lights.lte(0), 0)
+  
+var nocityLights = lights.updateMask(expectedLight.unmask(0).lt(0.001)/*.focal_min(2)
+  .reproject(ee.Projection('EPSG:3857').atScale(Map.getScale()*2)).resample('bilinear')*/)
+
+
+var lights = lights
+  .mask(lights.multiply(0.2))
+
+var nocityLights = nocityLights
+   .mask(nocityLights.multiply(0.2))
+   
+   
+Map.addLayer(nocityLights, {
+        min: 0,
+        max: 10,
+        palette: paletteLights
+      }, 'no-city-lights'
+)
+
+Map.addLayer(lights, {
+        min: 0,
+        max: 10,
+        palette: paletteLights
+      }, 'lights'
+)

@@ -1,0 +1,17 @@
+// getTileUrl
+
+var srtm = ee.Image('USGS/SRTMGL1_003')
+  .visualize({min:0, max:1000});
+
+
+Map.addLayer(srtm);
+
+// I guess getMap().mapId is just an id of a given image to be used for map (tiledImageId?)
+var id = srtm.getMap();
+
+// how to get these parameters? tile schema for images
+var x = 165;
+var y = 400;
+var z = 10;
+
+print(ee.data.getTileUrl(id, x, y, z))

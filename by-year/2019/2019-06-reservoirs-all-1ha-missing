@@ -1,0 +1,85 @@
+var reservoirs = ee.FeatureCollection('users/gena/eo-reservoirs/reservoirs-all-with-area')
+print('all', reservoirs.size())
+
+var reservoirs10ha = reservoirs.filter(ee.Filter.gte('Lake_area', 0.1))
+print('reservoirs 10ha', reservoirs10ha.size())
+Map.addLayer(reservoirs10ha.style({ color: 'green', width: 1 }), {}, 'reservoirs (>10ha)')
+
+var reservoirs1ha = reservoirs.filter(ee.Filter.gte('Lake_area', 0.01))
+print('reservoirs 1ha', reservoirs1ha.size())
+Map.addLayer(reservoirs1ha.style({ color: 'cyan', width: 1 }), {}, 'reservoirs (>1ha)')
+
+function addName(name, features) {
+  return features.map(function(f) {
+    return f.set({ source: name })
+  })
+}
+
+/*
+// 1ha with dams
+var damsGOOD2 = addName('GOOD2', ee.FeatureCollection("users/gena/eo-reservoirs/dams-GOOD2")),
+    damsGRAND = addName('GRAND', ee.FeatureCollection("users/gena/eo-reservoirs/dams-GRaND")),
+    damsKCL = addName('KCL', ee.FeatureCollection("users/gena/eo-reservoirs/dams-KCL")),
+    damsNWIS = addName('NWIS', ee.FeatureCollection("users/gena/eo-reservoirs/dams-NWIS")),
+    damsOSMnodesOld = addName('OSM node old', ee.FeatureCollection("users/gena/eo-reservoirs/dams-OSM-nodes-old")),
+    damsOSMways = addName('OSM way', ee.FeatureCollection("users/gena/eo-reservoirs/dams-OSM-way")),
+    damsOSMwaysOld = addName('OSM way old', ee.FeatureCollection("users/gena/eo-reservoirs/dams-OSM-ways-old")),
+    damsSARP = addName('SARP', ee.FeatureCollection("users/gena/eo-reservoirs/dams-SARP")),
+    damsOSMnodesOld2 = addName('OSM node old2', ee.FeatureCollection("users/gena/eo-reservoirs/dams-nodes-old")),
+    damsOSMwaysOld2 = addName('OSM way old2', ee.FeatureCollection("users/gena/eo-reservoirs/dams-ways-old"))
+
+var damsAll = damsGOOD2.merge(damsGRAND).merge(damsNWIS).merge(damsOSMnodesOld)
+  .merge(damsOSMways).merge(damsOSMwaysOld).merge(damsSARP)
+  .merge(damsOSMnodesOld2).merge(damsOSMwaysOld2)
+
+Map.addLayer(damsAll, { color: 'yellow'}, 'dams all')
+
+Export.table.toAsset({
+  collection: damsAll, 
+  description: 'dams-all', 
+  assetId: 'users/gena/eo-reservoirs/dams-all'
+})
+*/  
+
+var damsAll = ee.FeatureCollection('users/gena/eo-reservoirs/dams-all')
+print('Dams all', damsAll.size())
+  
+var reservoirs1haWithDams = reservoirs1ha.filter(ee.Filter.intersects('.geo', damsAll.geometry()))
+print("Reservoirs all 1ha with dams", reservoirs1haWithDams.size())
+    
+
+// 1ha and not in exported HydroLAKES reservoirs
+
+var waterbodiesPoints = ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies-points-2019-01-20-all")
+waterbodiesPoints = waterbodiesPoints.merge(ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies-points-2019-02-10-EU1"))
+waterbodiesPoints = waterbodiesPoints.merge(ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies-points-2019-03-05-ua"))
+waterbodiesPoints = waterbodiesPoints.merge(ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies-points-2019-03-05-nk"))
+waterbodiesPoints = waterbodiesPoints.merge(ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies-points-2019-06-reservoirs"))
+waterbodiesPoints = waterbodiesPoints.merge(ee.FeatureCollection("users/gena/eo-reservoirs/waterbodies-points-2019-06-reservoirs-missing"))
+Map.addLayer(waterbodiesPoints.style({ color: 'cyan', pointSize: 2, width: 0}), {}, 'exported waterbodies', false)
+print('waterbodiesPoints', waterbodiesPoints.size())
+
+var reservoirs1haMissing = reservoirs1ha.filter(ee.Filter.intersects({
+  leftField: '.geo', rightValue: waterbodiesPoints.geometry()
+}).not())
+
+print('reservoirs 1ha not exported: ', reservoirs1haMissing.size())
+Map.addLayer(reservoirs1haMissing.style({ color: 'red', width: 1 }), {}, 'reservoirs (>1ha) missing')
+
+var reservoirs1haWithDamsMissing = reservoirs1haWithDams.filter(ee.Filter.intersects({
+  leftField: '.geo', rightValue: waterbodiesPoints.geometry()
+}).not())
+
+print('reservoirs 1ha with dams not exported: ', reservoirs1haWithDamsMissing.size())
+Map.addLayer(reservoirs1haWithDamsMissing.style({ color: 'red', width: 1 }), {}, 'reservoirs (>1ha) with dams missing')
+
+
+Export.table.toAsset({
+  collection: reservoirs1haWithDamsMissing, 
+  description: 'reservoirs-all-with-dams-toexport', 
+  assetId: 'users/gena/eo-reservoirs/reservoirs-all-with-dams-toexport'
+})
+  
+
+
+Map.setOptions('HYBRID')

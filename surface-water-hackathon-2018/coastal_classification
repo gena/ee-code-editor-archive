@@ -1,0 +1,242 @@
+
+var cdl2016 = ee.Image("users/jhnienhuis/dauphin_island_habitat_map_2015");
+var geometry = cdl2016.geometry()
+Map.centerObject(geometry)
+cdl2016 = cdl2016
+  .updateMask(cdl2016.neq(0))
+  .rename('class')
+
+Map.addLayer(cdl2016, {}, 'CDL2016 (RAW)', false)
+
+Map.addLayer(cdl2016.randomVisualizer(), {}, 'CDL2016')
+
+
+var bands = ['B4', 'B3', 'B2', 'B8', 'B12']
+
+//
+var img = ee.ImageCollection("COPERNICUS/S2")
+  .filterDate('2014-01-01', '2017-01-01')
+  .select(bands)
+  .filterBounds(geometry)
+  .map(function(i) { 
+    return i.resample('bilinear') 
+  })
+  .reduce(ee.Reducer.percentile([15]))
+  .rename(bands);
+  
+var kernel = ee.Kernel.gaussian(3)
+img = img.convolve(kernel)
+
+function erode(img, distance) {
+  var d = (img.not().unmask(1)
+       .fastDistanceTransform(30).sqrt()
+       .multiply(ee.Image.pixelArea().sqrt()))
+  return img.updateMask(d.gt(distance))
+}
+
+function dilate(img, distance) {
+  var d = (img.fastDistanceTransform(30).sqrt()
+       .multiply(ee.Image.pixelArea().sqrt()))
+  return d.lt(distance)
+}
+
+function expandSeeds(seeds) {
+  seeds = seeds.unmask(0).focal_max()
+  return seeds.updateMask(seeds)
+}
+
+Map.addLayer(img, {gamma: 1,min:500,max:1500}, "RGBN")
+
+// supervised classification
+
+// create training set
+var training = cdl2016.addBands(img).addBands(ee.Image.pixelLonLat())
+  .sample({
+    region: cdl2016.geometry(), 
+    scale: 10, 
+    numPixels: 1000,
+    dropNulls: true
+  })
+
+// add locations (plotting)
+var training = training.map(function(f) {
+  var coords = [f.get('longitude'), f.get('latitude')]
+  
+  var pt = ee.Algorithms.GeometryConstructors.Point(coords)
+  
+  return ee.Feature(pt).copyProperties(f)
+})
+
+Map.addLayer(training, {}, 'training locations')
+
+
+// train classifier
+var classifier = ee.Classifier.randomForest(5)
+  .train(training, 'class', bands)
+
+
+var cm = classifier.confusionMatrix()
+print('Confusion Matrix: ', cm)
+print('Accuracy: ', cm.accuracy())
+
+// classify
+var classified = img.classify(classifier)
+
+Map.addLayer(classified.randomVisualizer(), {}, 'classified')
+
+print(img)
+
+// Run SNIC on the regular square grid.
+var seeds = ee.Algorithms.Image.Segmentation.seedGrid(100);
+var snic = ee.Algorithms.Image.Segmentation.SNIC({
+  image: img, 
+  size: 32,
+  compactness: 5,
+  connectivity: 8,
+  neighborhoodSize:256,
+  seeds: seeds
+})
+
+var bandsSneaky = snic.bandNames().slice(1)
+
+var clusters = snic.select("clusters").clip(geometry)
+Map.addLayer(clusters.randomVisualizer(), {}, "clusters")
+
+Map.addLayer(snic, {bands: ["B4_mean", "B3_mean", "B2_mean"], min:0, max:1000, gamma: 0.8}, "means")
+ 
+/*
+// Build and train a classifer using the seed points.
+var points2 = snic.select(bandsSneaky).addBands(cdl2016).updateMask(seeds).sample(geometry, 5);
+
+var classifier2 = ee.Classifier.randomForest(10).train(training, "class", bandsSneaky)
+print(snic)
+snic2 = snic.select(bandsSneaky).rename(bands)
+var classified2 = snic2.classify(classifier2)
+Map.addLayer(classified2)
+//Map.addLayer(snic.classify(classifier2), {min:0, max:254}, "Classified clusters", false)
+//Map.addLayer(expandSeeds(seeds), {palette: "white"}, "seeds")
+/*
+// Compute per-cluster stdDev.
+var stdDev = img.addBands(clusters).reduceConnectedComponents(ee.Reducer.stdDev(), "clusters", 256)
+Map.addLayer(stdDev, {min:0, max:0.1}, "StdDev")
+
+// Display outliers as transparent
+var outliers = stdDev.reduce('sum').gt(0.25)
+Map.addLayer(outliers.updateMask(outliers.not()), {}, "Outliers", false)
+
+// Within each outlier, find most distant member.
+var distance = img.select(bands).spectralDistance(snic.select(bands), "sam").updateMask(outliers)
+var maxDistance = distance.addBands(clusters).reduceConnectedComponents(ee.Reducer.max(), "clusters", 256)
+Map.addLayer(distance, {min:0, max:0.3}, "max distance")
+Map.addLayer(expandSeeds(expandSeeds(distance.eq(maxDistance))), {palette: ["red"]}, "second seeds")
+
+var newSeeds = seeds.unmask(0).add(distance.eq(maxDistance).unmask(0))
+newSeeds = newSeeds.updateMask(newSeeds)
+
+// Run SNIC again with both sets of seeds.
+var snic2 = ee.Algorithms.Image.Segmentation.SNIC({
+  image: img, 
+  size: 32,
+  compactness: 5,
+  connectivity: 8,
+  neighborhoodSize: 256,
+  seeds: newSeeds
+}).select(["R_mean", "G_mean", "B_mean", "N_mean", "clusters"], ["B4", "B3", "B2", "B8", "clusters"])
+var clusters2 = snic2.select("clusters")
+Map.addLayer(clusters2.randomVisualizer(), {}, "clusters 2")
+Map.addLayer(snic2, {bands: ["R", "G", "B"], min:0, max:1, gamma: 0.8}, "means", false)
+/*
+// Compute outliers again.
+var stdDev2 = img.addBands(clusters2).reduceConnectedComponents(ee.Reducer.stdDev(), "clusters", 256)
+Map.addLayer(stdDev2, {min:0, max:0.1}, "StdDev 2")
+var outliers2 = stdDev2.reduce('sum').gt(0.25)
+outliers2 = outliers2.updateMask(outliers2.not())
+Map.addLayer(outliers2, {}, "Outliers 2", false)
+
+// Show the final set of seeds.
+Map.addLayer(expandSeeds(newSeeds), {palette: "white"}, "newSeeds")
+Map.addLayer(expandSeeds(distance.eq(maxDistance)), {palette: ["red"]}, "second seeds")
+
+
+/*
+// Apply a softening.
+
+Map.addLayer(img, {gamma: 0.8}, "RGBN blur", false)
+
+
+
+// Try to create seeds in important places by finding points that are local minima/maxima in the gradient.
+// This didn't work out too great.
+var d1 = gradient.lt(0.2).fastDistanceTransform().sqrt().aside(Map.addLayer, {}, "d1", false)
+var d2 = gradient.gt(0.2).fastDistanceTransform().sqrt().aside(Map.addLayer, {}, "d2", false)
+var minima = d1.gt(3).and(d1.eq(d1.focal_max())).rename("seeds")
+minima = minima.updateMask(minima).aside(Map.addLayer, {palette: "red"}, "minima", false)
+var maxima = d2.gt(10).and(d2.eq(d2.focal_max())).rename("seeds")
+maxima = maxima.updateMask(maxima).aside(Map.addLayer, {palette: "cyan"}, "maxima", false)
+// Combine the minima and maxima to produce a layer of seeds.
+var plusSeeds = ee.ImageCollection([minima, maxima]).mosaic()
+plusSeeds = erode(dilate(plusSeeds, 30), 30)
+
+// Run SNIC on the regular square grid.
+var snic = ee.Algorithms.Image.Segmentation.SNIC({
+  image: img, 
+  size: 32,
+  compactness: 5,
+  connectivity: 8,
+  neighborhoodSize:256,
+  seeds: seeds
+}).select(["B4_mean", "B3_mean", "B2_mean", "B8_mean", "clusters"], ["B4", "B3", "B2", "B8", "clusters"])
+
+var clusters = snic.select("clusters")
+Map.addLayer(clusters.randomVisualizer(), {}, "clusters")
+Map.addLayer(snic, {bands: ["B4", "B3", "B2"], min:0, max:1, gamma: 0.8}, "means", false)
+/*
+// Build and train a classifer using the seed points.
+var points2 = snic.select(bands).addBands(cdl2016).updateMask(seeds).sample(geometry, 5)
+var classifier2 = ee.Classifier.randomForest(10).train(points2, "cropland")
+Map.addLayer(snic.classify(classifier2), {min:0, max:254, palette: palette}, "Classified clusters", false)
+Map.addLayer(expandSeeds(seeds), {palette: "white"}, "seeds")
+
+// Compute per-cluster stdDev.
+var stdDev = img.addBands(clusters).reduceConnectedComponents(ee.Reducer.stdDev(), "clusters", 256)
+Map.addLayer(stdDev, {min:0, max:0.1}, "StdDev")
+
+// Display outliers as transparent
+var outliers = stdDev.reduce('sum').gt(0.25)
+Map.addLayer(outliers.updateMask(outliers.not()), {}, "Outliers", false)
+
+// Within each outlier, find most distant member.
+var distance = img.select(bands).spectralDistance(snic.select(bands), "sam").updateMask(outliers)
+var maxDistance = distance.addBands(clusters).reduceConnectedComponents(ee.Reducer.max(), "clusters", 256)
+Map.addLayer(distance, {min:0, max:0.3}, "max distance")
+Map.addLayer(expandSeeds(expandSeeds(distance.eq(maxDistance))), {palette: ["red"]}, "second seeds")
+
+var newSeeds = seeds.unmask(0).add(distance.eq(maxDistance).unmask(0))
+newSeeds = newSeeds.updateMask(newSeeds)
+
+// Run SNIC again with both sets of seeds.
+var snic2 = ee.Algorithms.Image.Segmentation.SNIC({
+  image: img, 
+  size: 32,
+  compactness: 5,
+  connectivity: 8,
+  neighborhoodSize: 256,
+  seeds: newSeeds
+}).select(["R_mean", "G_mean", "B_mean", "N_mean", "clusters"], ["B4", "B3", "B2", "B8", "clusters"])
+var clusters2 = snic2.select("clusters")
+Map.addLayer(clusters2.randomVisualizer(), {}, "clusters 2")
+Map.addLayer(snic2, {bands: ["R", "G", "B"], min:0, max:1, gamma: 0.8}, "means", false)
+/*
+// Compute outliers again.
+var stdDev2 = img.addBands(clusters2).reduceConnectedComponents(ee.Reducer.stdDev(), "clusters", 256)
+Map.addLayer(stdDev2, {min:0, max:0.1}, "StdDev 2")
+var outliers2 = stdDev2.reduce('sum').gt(0.25)
+outliers2 = outliers2.updateMask(outliers2.not())
+Map.addLayer(outliers2, {}, "Outliers 2", false)
+
+// Show the final set of seeds.
+Map.addLayer(expandSeeds(newSeeds), {palette: "white"}, "newSeeds")
+Map.addLayer(expandSeeds(distance.eq(maxDistance)), {palette: ["red"]}, "second seeds")
+
+
+*/

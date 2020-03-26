@@ -1,0 +1,87 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var demALOS = ee.Image("JAXA/ALOS/AW3D30_V1_1"),
+    ldd = ee.Image("WWF/HydroSHEDS/03DIR"),
+    demSRTM90 = ee.Image("CGIAR/SRTM90_V4"),
+    demSRTM30 = ee.Image("USGS/SRTMGL1_003"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([128.0245051577674, 41.997365785717534]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// terrain_analysis
+
+Map.addLayer(demALOS, {}, 'ALOS', false)
+
+Map.addLayer(ee.Terrain.hillshade(demALOS.select('MED'), 315).resample('bicubic'), {min: 150, max: 250})
+
+function Terrain(elevation) {
+  var step = ee.Image.pixelArea().sqrt()
+  
+  function radians(img) { 
+    return img.toFloat().multiply(Math.PI).divide(180); 
+  }
+  
+  var k_dx = ee.Kernel.fixed(3, 3,
+                         [[ 1/8,  0,  -1/8],
+                          [ 2/8,  0,  -2/8],
+                          [ 1/8,  0,  -1/8]]);
+  
+  var k_dy = ee.Kernel.fixed(3, 3,
+                         [[ -1/8, -2/8,  -1/8],
+                          [ 0,    0,    0],
+                          [ 1/8, 2/8,   1/8]]);
+  
+  
+  var dx = elevation.convolve(k_dx)
+  var dy = elevation.convolve(k_dy)
+  
+  var slope = ee.Image().expression("sqrt((x*x + y*y)/(step*step))", {x: dx, y: dy, step: step}).atan()
+  
+  var aspect = dx.atan2(dy).add(Math.PI)
+  
+  return {aspect: aspect, slope: slope}
+}
+
+var colorsRainbow = [
+'F26C4F', // Light Red
+'F68E55', // Light Red Orange	
+'FBAF5C', // Light Yellow Orange
+'FFF467', // Light Yellow
+'ACD372', // Light Pea Green
+'7CC576', // Light Yellow Green
+'3BB878', // Light Green
+'1ABBB4', // Light Green Cyan
+'00BFF3', // Light Cyan
+'438CCA', // Light Cyan Blue
+'5574B9', // Light Blue
+'605CA8', // Light Blue Violet
+'855FA8', // Light Violet
+'A763A8', // Light Violet Magenta
+'F06EA9', // Light Magenta
+'F26D7D'  // Light Magenta Red
+];
+
+Map.addLayer(Terrain(demALOS.select('MED').resample('bicubic')).aspect, {min:0, max:2*Math.PI, palette:colorsRainbow}, 'aspect (ALOS)', true)
+Map.addLayer(Terrain(demSRTM90.resample('bicubic')).aspect, {min:0, max:2*Math.PI, palette:colorsRainbow}, 'aspect (SRTM90)', true)
+Map.addLayer(Terrain(demSRTM30.resample('bicubic')).aspect, {min:0, max:2*Math.PI, palette:colorsRainbow}, 'aspect (SRTM30)', true)
+
+// 1=E, 2=SE, 4=S, 8=SW, 16=W, 32=NW, 64=N, 128=NE
+ldd = ldd.remap([32,64,128,1,2,4,8,16].reverse(), [0,0.25*Math.PI,0.5*Math.PI,0.75*Math.PI,Math.PI,1.25*Math.PI,1.5*Math.PI,1.75*Math.PI])
+Map.addLayer(ldd, {min:0, max:2*Math.PI, palette:colorsRainbow}, 'aspect (LDD)', true)
+
+var source = ee.Image.constant(0).int().paint(geometry.buffer(100), 1)
+
+Map.addLayer(source, {min: 0, max: 1}, 'source', false)
+
+var o = Terrain(demALOS.select('MED').resample('bicubic'))
+var aspect = o.aspect
+var slope = o.slope
+
+var result = aspect.cumulativeCost(source, Map.getScale() * 200, false)
+Map.addLayer(result, {min: 0, max: 15000}, 'C(aspect)')
+
+var result = slope.cumulativeCost(source, Map.getScale() * 200, false)
+Map.addLayer(result, {min: 0, max: 2500}, 'C(slope)')
+
+var result = ee.Image.constant(2450).float().resample('bicubic')
+  .subtract(demALOS.select('MED').resample('bicubic')).cumulativeCost(source, Map.getScale() * 200, false)
+Map.addLayer(result, {min: 0, max: 2500}, 'C(elevation)')
+
+

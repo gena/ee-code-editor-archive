@@ -1,0 +1,27 @@
+// default geometry length
+
+var g = [
+        ee.Geometry.LineString([[-180, 30], [-50, 30]]),
+        ee.Geometry.LineString([[-180, 0], [-50, 0]])
+        ];
+          
+var fc = ee.FeatureCollection(g);
+
+// print default length
+print('default: ' + g[0].length(1e-3).getInfo())
+print('default: ' + g[1].length(1e-3).getInfo())
+
+// print length in WGS84
+var wgs84 = ee.Projection('EPSG:4326')
+print('WGS84: ' + g[0].length(1e-3, wgs84).getInfo())
+print('WGS84: ' + g[1].length(1e-3, wgs84).getInfo())
+
+// print length in Pseudo-Mercator
+var pseudoMercator = ee.Projection('EPSG:3857')
+print('Pseudo-Mercator: ' + g[0].length(1e-3, pseudoMercator).getInfo())
+print('Pseudo-Mercator: ' + g[1].length(1e-3, pseudoMercator).getInfo())
+
+
+Map.addLayer(fc)
+
+Map.centerObject(fc)

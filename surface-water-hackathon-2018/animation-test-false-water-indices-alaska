@@ -1,0 +1,177 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var alaska = /* color: #d63000 */ee.Geometry({
+      "type": "GeometryCollection",
+      "geometries": [
+        {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -158.01429748535156,
+                64.79781874626237
+              ],
+              [
+                -158.0115509033203,
+                64.73371077379488
+              ],
+              [
+                -157.78152465820312,
+                64.73371077379488
+              ],
+              [
+                -157.78427124023438,
+                64.79811112776754
+              ]
+            ]
+          ],
+          "evenOdd": true
+        },
+        {
+          "type": "LineString",
+          "coordinates": [
+            [
+              -157.9246041803617,
+              64.76706440166558
+            ],
+            [
+              -157.9179109218221,
+              64.76552783785193
+            ]
+          ],
+          "geodesic": true
+        }
+      ],
+      "coordinates": []
+    });
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var thresholding = require('users/gena/packages:thresholding')
+var animation = require('users/gena/packages:animation')
+var assets = require('users/gena/packages:assets')
+var palettes = require('users/gena/packages:colorbrewer').Palettes
+
+var bounds = ee.Geometry(Map.getBounds(true))
+var startDay = 232; //use noaa day of year calendar
+var endDay = 274;
+
+// get images from one or multiple missions
+var images = assets.getImages(bounds.centroid(1), {
+  //filter: ee.Filter.and(
+    //ee.Filter.date("2017-01-01", "2018-01-01"),
+    //ee.Filter.dayOfYear(startDay, endDay)
+  //),
+  resample: true,
+  //filterMasked: true,
+  missions: [
+    'S2', 
+    'L8', 
+    //'L7', 
+    //'L5'
+  ]
+}).sort('system:time_start')
+
+// images = images.map(function(i) { 
+//   return i.visualize({bands:['swir','nir','red'], gamma: 2, min: 0.07})
+//     .set({ label: i.date().format('YYYY-MM-dd') })
+// })
+//animation.animate(images, {label: 'label', maxFrames: 300})  
+
+// filter out noisy images
+images = assets.getMostlyCleanImages(images, bounds, {
+    scale: Map.getScale() * 10, 
+    
+    // how much should we deviate from cloud frequency when filtering images, use negative value to allow more (cloudy) images
+    cloudFrequencyThresholdDelta: 0.15,
+
+    // percentile and band used for cloudness, usually enough to choose one like green    
+    scorePercentile: 95,
+    qualityBand: 'green',
+  })
+//   .sort('system:time_start')
+  //.sort('quality')
+
+print('Count: ', images.size())
+
+var bandNames = ee.Image(images.first()).bandNames()
+
+// percentile composite on less cloudy images
+var composite = images.reduce(ee.Reducer.percentile([75])).rename(bandNames)
+Map.addLayer(composite, {min: 0.05, max: 0.3}, 'composite')
+
+var scale = Map.getScale() 
+var bounds = bounds
+var cannyThreshold = 0.7 
+var cannySigma = 0.5
+var minValue = -0.1
+var debug = false
+var minEdgeLength = 0
+var minEdgeGradient = 0
+var minEdgeValue = 0
+
+
+// potential water =
+var mndwiComposite = composite.normalizedDifference(['green', 'nir'])
+
+var th = thresholding.computeThresholdUsingOtsu(mndwiComposite, scale, bounds, cannyThreshold, cannySigma, minValue, debug, minEdgeLength, minEdgeGradient, minEdgeValue)
+
+var waterComposite = mndwiComposite.gt(th)
+
+Map.addLayer(waterComposite.mask(waterComposite), {palette:['0000ff']}, 'potential water')
+
+/*
+images = images
+  .map(function(i) {
+    var image = i
+    
+    var ndwi = i.normalizedDifference(['green', 'nir']).rename('ndwi')
+    var mndwi = i.normalizedDifference(['green', 'swir']).rename('mndwi')
+    
+    return i.addBands(ndwi).addBands(mndwi)//.visualize({bands: ['blue', 'ndwi', 'mndwi']})
+    
+    //var image = images.filterDate(i.date(), i.date().advance(-1, 'month')).mosaic()
+  
+    //return image.visualize({bands:['red','green','blue'], gamma: 1.4, min:0.05, max:[0.5, 0.5, 0.55]})
+    //return image.normalizedDifference(['nir','red']).visualize({palette:palettes.YlGn[9], min: -0.1, max: 1})    
+    // return image.visualize({bands:['swir','nir','red'], gamma: 2, min: 0.05, max: 0.6})
+      .set({ label: i.date().format('YYYY-MM-dd') })
+  })
+  
+// animate
+// animation.animate(images, {label: 'label', maxFrames: 200})  
+
+
+// export video
+/*var utils = require('users/gena/packages:utils')
+utils.exportVideo(images, {
+  bounds: bounds, 
+  label: 'label', 
+  maxFrames: 600, 
+  name: 'animation', 
+  label: 'label', 
+  framesPerSecond: 10 
+})*/
+
+/*
+var output = images
+  .map(function(i) {
+    var mndwi = i.select('mndwi')
+      .updateMask(waterComposite)
+    
+    var th = thresholding.computeThresholdUsingOtsu(mndwi, scale, bounds, cannyThreshold, cannySigma, minValue, debug, minEdgeLength, minEdgeGradient, minEdgeValue)
+    
+    // show edge
+    var water = mndwi.gt(th)
+    var edge = ee.Algorithms.CannyEdgeDetector(water, 0.5, 0)
+    
+    var label = ee.String(i.get('label'))
+      .cat(' ')
+      .cat(th.format('%.3f'))
+    
+    return ee.ImageCollection.fromImages([
+        i.visualize({bands: ['swir', 'nir', 'green']}),
+        edge.mask(edge).visualize({palette: ['ff0000']})
+      ]).mosaic()
+          .set({label: label})  
+    
+  })
+
+animation.animate(output, {label: 'label', maxFrames: 50})*/

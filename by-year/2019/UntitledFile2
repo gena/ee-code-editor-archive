@@ -1,0 +1,6 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var image = ee.Image("users/gena/Limpopo_occurrence_cell1_detail5");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.addLayer(ee.Image(1), {palette:['ffffaa']}, 'white', true, 0.5)
+Map.addLayer(image.resample('bicubic'), {min: -0.15, max:0.25, bands:['ndwi','ndwi','mndwi']}, 'ndwi, ndwi, mndwi')
+Map.addLayer(image.resample('bicubic'), {min: -0.15, max:0.25}, 'ndvi, ndwi, mndwi')

@@ -1,0 +1,234 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    s2 = ee.ImageCollection("COPERNICUS/S2"),
+    srtm = ee.Image("USGS/SRTMGL1_003"),
+    modisClouds = ee.Image("users/gena/MODCF_meanannual"),
+    l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var styles = require('users/gena/packages:style')
+var hydro = require('users/gena/packages:hydro') 
+var utils = require('users/gena/packages:utils')
+var dem = hydro.Map.addDem({layer: {visible: false, name: 'DEM'}})
+
+Map.addLayer(ee.Image.pixelLonLat(), {}, 'coords', false)
+
+var jrcWaterOccurrence = jrc.select('occurrence').divide(100)
+var jrcWater = jrcWaterOccurrence.gt(0)
+
+
+var assets = require('users/gena/packages:assets')
+
+var aoi = ee.Geometry(Map.getBounds(true))
+var scale = Map.getScale()
+
+var images = assets.getImages(aoi, {resample: true})
+  .sort('system:time_start')
+  .sort('SUN_ELEVATION')
+  .sort('SUN_AZIMUTH')
+
+images = assets.getMostlyCleanImages(images, aoi, { cloudFrequencyThresholdDelta: 0.15 })
+
+print('Zenith: ', ui.Chart.feature.histogram(images, 'SUN_ELEVATION', 10))
+print('Azimuth: ', ui.Chart.feature.histogram(images, 'SUN_AZIMUTH', 10))  
+print('Zenith vs Azimuth: ', ui.Chart.feature.byFeature(images, 'SUN_AZIMUTH', 'SUN_ELEVATION').setChartType('ScatterChart'))
+
+// clip  
+var p75 = images.select('green').reduce(ee.Reducer.percentile([75]))
+
+images = images.map(function(i) {
+  var green = i.select('green')
+  var bad = green.gt(p75)
+  
+  return i
+        .updateMask(bad.not())
+        .set('bad', green.reduceRegion({
+          reducer: ee.Reducer.sum(), 
+          geometry: aoi, 
+          scale: scale*10
+          }).values().get(0))
+    })
+    
+print(ui.Chart.feature.histogram(images, 'bad'))
+
+var max = images.reduceColumns(ee.Reducer.percentile([75]), ['bad']).values().get(0)
+print(max)
+
+images = images.filter(ee.Filter.lt('bad', max))
+  .map(function(i) {
+    return i
+      .addBands(ee.Image.constant(i.get('SUN_ELEVATION')).rename('SUN_ELEVATION').float())
+      .addBands(ee.Image.constant(i.get('SUN_AZIMUTH')).rename('SUN_AZIMUTH').float())
+      .copyProperties(i)
+  })
+
+
+var name = 'Limpopo-mine'
+
+var videoFrames = images
+Export.video.toDrive({
+    collection: videoFrames,
+    description: 'images-illumination-' + name,
+    dimensions: 1920,
+    region: aoi,
+    framesPerSecond: 5,
+    crs: 'EPSG: 4326',
+    maxFrames: 5000
+})
+  
+
+var count = 30
+var list = images.toList(count)
+for(var i=0; i<count; i++) {
+  var image = ee.Image(images.get(i))
+  Map.addLayer(image, {min:0.03, max:0.25}, i.toString(), false)
+}
+
+
+
+function computeCorrelation(zmin, zmax, amin, amax) {
+  var c = images.select(['nir', 'SUN_ELEVATION'])
+    .filter(ee.Filter.and(
+        ee.Filter.gte('SUN_ELEVATION', zmin),
+        ee.Filter.lte('SUN_ELEVATION', zmax),
+        ee.Filter.gte('SUN_AZIMUTH', amin),
+        ee.Filter.lte('SUN_AZIMUTH', amax)
+    ))
+  
+  // normalize
+  var mean = c.reduce(ee.Reducer.mean()) //intervalMean(5, 45))
+  var stddev = c.reduce(ee.Reducer.stdDev())
+  
+  var r = c.map(function(i) {
+    var e = i.subtract(mean).divide(stddev)
+    var p = e.reduce(ee.Reducer.product()).rename('p')
+    return p.addBands(e.pow(2))
+  })
+  
+  var s1 = r.select(1).reduce(ee.Reducer.sum())
+  var s2 = r.select(2).reduce(ee.Reducer.sum())
+  var r1 = r.select('p').reduce(ee.Reducer.sum()).divide(s2.multiply(s2).sqrt())
+  
+  Map.addLayer(r1, {min: -0.8, max: 0.8, palette: ['000000', 'ffffff', '000000']}, 'Z ' + zmin + '-' + zmax + ', A ' + amin + '-' + amax, false)
+  
+  return r1
+}
+
+computeCorrelation(0, 90, 0, 180)  
+
+for(var a=0; a<=180; a+=45) {
+  computeCorrelation(0, 90, a, a+45)
+}
+
+/*
+for(var i=0; i<80; i+=10) {
+  for(var j=0; j<180; j+=60) {
+    computeCorrelation(i, i+20, j, j+60)  
+  }
+}
+
+var r = computeCorrelation(16, 36, 0, 180)
+var g = computeCorrelation(24, 44, 0, 180)
+var b = computeCorrelation(32, 64, 0, 180)  
+Map.addLayer(ee.Image([r,g,b]), {min: -0.7, max: 0.7}, 'corellation, zenith, composite', false)
+
+var r = computeCorrelation(16, 36, 0, 180)
+var g = computeCorrelation(20, 48, 0, 180)
+var b = computeCorrelation(22, 52, 0, 180)  
+Map.addLayer(ee.Image([r,g,b]), {min: -0.7, max: 0.7}, 'corellation, zenith 2, composite', false)
+
+var r = computeCorrelation(16, 64, 128, 148)
+var g = computeCorrelation(16, 64, 136, 156)
+var b = computeCorrelation(16, 64, 144, 180)  
+Map.addLayer(ee.Image([r,g,b]), {min: -0.7, max: 0.7}, 'corellation, azimuth, composite', false)
+*/
+
+// ==============
+
+var c = images.select(['nir', 'SUN_ELEVATION'])
+
+// normalize
+var mean = c.reduce(ee.Reducer.mean()) //intervalMean(5, 45))
+var stddev = c.reduce(ee.Reducer.stdDev())
+
+var r = c.map(function(i) {
+  var e = i.subtract(mean).divide(stddev)
+  var p = e.reduce(ee.Reducer.product()).rename('p')
+  return p.addBands(e.pow(2))
+})
+
+var s1 = r.select(1).reduce(ee.Reducer.sum())
+var s2 = r.select(2).reduce(ee.Reducer.sum())
+var r2 = r.select('p').reduce(ee.Reducer.sum()).divide(s2.multiply(s2).sqrt())
+
+Map.addLayer(r2, {min: -0.7, max: 0.7, palette: ['000000', 'ffffff', '000000']}, 'corellation, azimuth ')
+
+//Map.addLayer(ee.Image([r1,r2,r1]), {min: [0, 0, 0], max: [-1, 1, -1]}, 'corellation (zenith, azimuth, zenith)')
+
+
+
+/*
+
+
+
+
+// add rivers
+var rivers = ee.FeatureCollection('ft:1yMXz_cItkAJFvmeXNcsuW2i7kK5i1iJ0QcYK3g')
+Map.addLayer(rivers, {color: 'lightblue'}, 'rivers (Natural Earth)', false)  
+
+// add Limpopo river and basins
+var limpopo = {
+  rivers: rivers.filter(ee.Filter.eq('name', 'Limpopo')),
+}
+
+// detect outlet
+var outlet = ee.Geometry.Point(limpopo.rivers.geometry().coordinates().get(-5))
+Map.addLayer(outlet, {color: 'red'}, 'outlet')
+
+// get catchments limited by the outlet
+limpopo.basins = hydro.getCatchmments({level: 5, outlet: outlet})
+  //.map(function(f) { return f.buffer(500) })
+
+utils.Map.addAsImage(limpopo.basins, 'Limpopo (basins)', {outline: true, fill: false, opacity: 0.9, palette: ['000000', 'ffffff']})
+
+Map.addLayer(ee.Image(1).clip(limpopo.basins), {palette:['000000']}, 'black (Limpopo)', false, 0.3)
+Map.addLayer(ee.Image(1).clip(limpopo.basins), {palette:['ffff00']}, 'yellow (Limpopo)', false, 0.3)
+Map.addLayer(ee.Image(1).clip(limpopo.basins), {palette:['ffffff']}, 'white (Limpopo)', false, 0.3)
+
+// add DEM and HAND
+var hand = hydro.Map.addHand({region: limpopo.basins, layer: {visible: false, name: 'HAND'}})
+hydro.Map.addHand({region: limpopo.basins, styleAsDem: true, layer: {visible: false, name: 'HAND (DEM style)'}})
+var dem = hydro.Map.addDem({region: limpopo.basins, layer: {visible: false, name: 'DEM'}})
+
+// water
+var waterIndex = waterIndex//.resample('bicubic')
+  .clip(limpopo.basins)
+Map.addLayer(waterIndex, {}, 'water index')
+
+var handMask = hand.gt(30)
+  .and(jrcWater.unmask().not())
+  
+Map.addLayer(handMask.mask(handMask), {palette:['000000']}, 'HAND > 30m', true, 0.8)
+
+var palette = styles.Palettes.Water
+var palette = ['ffffff', 'ff0000']
+Map.addLayer(jrcWaterOccurrence, {palette: palette}, 'water (JRC)', true)
+
+// 1. detect blobs
+
+// 2. for every blob collect distribution of HAND values
+
+var blobs = waterIndex.mask().reduce(ee.Reducer.max()).gt(0.1).connectedComponents(ee.Kernel.plus(10, 'meters'), 256)
+Map.addLayer(blobs.randomVisualizer(), {}, 'waterbodies (blobs)')
+
+var waterbodies = blobs.select('labels').reduceToVectors({geometry: Map.getBounds(true), scale: 10})
+Map.addLayer(waterbodies, {}, 'waterbodies (vector)')
+
+// for every blob polygon report HAND distribution
+waterbodies = waterbodies.map(function(f) {
+  return f.set({
+    handStdDev: hand.reduceRegion({reducer: ee.Reducer.stdDev(), geometry: f.geometry(), scale: 10}).values().get(0) })
+})
+
+Map.addLayer(ee.Image().paint(waterbodies, 'handStdDev'), {}, 'hand sigma per waterbody')
+
+*/

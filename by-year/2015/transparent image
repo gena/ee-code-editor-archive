@@ -1,0 +1,5 @@
+// transparent image
+
+var lat = ee.Image.pixelLonLat().select('latitude');
+var mask = lat.subtract(0).multiply(1);
+Map.addLayer(lat.mask(mask), {'palette':"FF0000"});

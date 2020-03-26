@@ -1,0 +1,349 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry2 = /* color: #0b4a8b */ee.Geometry.Polygon(
+        [[[-4.404144287109375, 33.36853726277201],
+          [-3.6309814453125, 33.38803244611342],
+          [-3.690032958984375, 33.87056754618992],
+          [-4.437103271484375, 33.873988202822474]]]),
+    geometry = /* color: #98ff00 */ee.Geometry.Polygon(
+        [[[-70.1861572265625, -30.338391134875945],
+          [-69.54071044921875, -30.354982932162866],
+          [-69.3841552734375, -29.889352533827864],
+          [-70.07354736328125, -29.867918913544585]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// GEE script for NCG2016
+// Author: Stef Lhermitte
+// Date: 29 Nov 2016
+
+///////////////////////////////////////////////////////////////
+// Set Region of interest
+///////////////////////////////////////////////////////////////
+
+// Create Region of Interest (ROI)
+var roi = ee.Geometry.Rectangle(9.9,47.1,10.1,47.3);
+roi = geometry
+Map.centerObject(roi)
+
+var dem = ee.Image('CGIAR/SRTM90_V4')
+Map.addLayer(dem,{min:0,max:3000},'DEM')
+
+// Visualize ROI
+// Map.addLayer(roi,{color:'red'},'ROI');
+
+// Set dates
+var start = '2010-10-01'
+var end = '2016-09-30'
+
+
+// Apply second function that accounts for masking
+var maskCloud = function(image){
+     return image.updateMask(image.select('Cloud').neq(1)).addBands(image.metadata('system:time_start').rename('time'))
+}
+
+// Function to QA bit data
+var getQABits = function(image, start, end, newName) {
+    // Compute the bits we need to extract.
+    var pattern = 0;
+    for (var i = start; i <= end; i++) {
+       pattern += Math.pow(2, i);
+    }
+    // Return the QA-bit image data
+    return image.select([0], [newName]).bitwiseAnd(pattern).rightShift(start);
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Pre-process LANDSAT
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Load collection
+var L8col=ee.ImageCollection("LANDSAT/LC8_L1T_TOA_FMASK");
+
+// Filter collection based on location (roi) and date (2015-2016 winter)
+var L8fil=L8col.filterBounds(roi).filterDate(start,end).filterMetadata('CLOUD_COVER', 'less_than', 50);
+print(L8fil.getInfo())
+
+// Create function to mask out cloudy pixels
+var maskClouds = function(image) {
+  // Select the QA band containing the cloud mask values
+  var QA = image.select('fmask');
+  // Return an image masking out cloudy areas (fmask=4) and shadow areas (fmask=2)
+  var cloud = QA.neq(4).and(QA.neq(2)).rename('Cloud')
+  return image.addBands(cloud).updateMask(QA.neq(1));
+};
+
+// Apply cloud mask function to filtered collection
+var L8mask = L8fil.map(maskClouds);
+
+// Create function to convert RGB images to snow cover
+var snomap = function(image){
+  // Calculate Normalized Difference Snow Index
+  var NDSI = image.normalizedDifference(['B3','B6']);
+  // Convert NDSI to snow based on 0.4 threshold
+  var snow = NDSI.gte(0.4);
+  var land = NDSI.lt(0.4);
+  return image.addBands(snow.rename('Snow')).addBands(land.rename('Land'));
+}
+
+// Apply the snomap function to the masked collection
+var L8sno = L8mask.map(snomap);
+//print(L8sno.getInfo())
+
+// interpolate images ------------------------------------------------------
+// code assisted (greatly) by Noel Gorelick
+// finds each image's nearest neighbors, mosaics them, and then interpolates
+// based on the image's time
+
+// select bands of interest
+var interpBands = ee.List(['time','Snow','Land']);
+var bandi = L8sno.map(maskCloud).select(interpBands);
+
+var time = 'system:time_start'
+var lagRange = 10
+
+
+// Looks for all images up to 'lagRange' days away from the current image.
+var maxDiff = ee.Filter([
+  ee.Filter.maxDifference(lagRange * (1000*60*60*24), time, null, time)])
+
+// Images after, sorted in descending order (so closest is last).
+var f1 = ee.Filter.and(maxDiff, ee.Filter.lessThanOrEquals(time, null, time))
+var c1 = ee.Join.saveAll('after', time, false).apply(bandi, bandi, f1)
+
+// Images before, sorted in ascending order (so closest is last).
+var f2 = ee.Filter.and(maxDiff, ee.Filter.greaterThanOrEquals(time, null, time))
+var c2 = ee.Join.saveAll('before', time, true).apply(c1, c1, f2)
+
+var L8interpolated = ee.ImageCollection(c2.map(function(img) {
+  img = ee.Image(img);
+  var before = ee.ImageCollection.fromImages(ee.List(img.get('before'))).mosaic()
+  var after = ee.ImageCollection.fromImages(ee.List(img.get('after'))).mosaic()
+
+  // Compute the ratio between the image times.
+  var x1 = before.select('time').double()
+  var x2 = after.select('time').double()
+  var now = ee.Image.constant(img.date().millis()).double();
+  var ratio = now.subtract(x1).divide(x2.subtract(x1))  // this is zero anywhere x1 = x2
+  // Compute the interpolated image.
+  var interp = after.subtract(before).multiply(ratio).add(before)
+  return interp.set('system:time_start', img.get('system:time_start'));
+}))
+
+//print(L8interpolated.getInfo())
+
+// Landsat area
+// Map.addLayer(L8sno.mean(),{bands:'Snow', min:0, max:1, palette:['#084594','#f7fbff'],opacity:.8},'L8 snow frequency') 
+// TIME SERIES
+// MODIS snow cover frequency
+print(ui.Chart.image.series(L8sno.select(['Snow','Land','Cloud']), roi, ee.Reducer.sum(),1000)
+  // .setChartType('ScatterChart')
+  .setChartType('LineChart')
+  .setOptions({
+      title: 'Landsat snow area',
+      hAxis: {'title': 'Time', min : new Date(start), max: new Date(end)},
+      vAxis: {'title': 'Area [x1000 km]'},
+      pointSize: 3,
+      series: {
+            0: { lineWidth: 1 },
+            1: { lineWidth: 3 },
+            2: { lineWidth: 3 }},
+      crosshair: { trigger: 'both' },
+      colors: ['#e41a1c','#4daf4a','#377eb8']
+})
+);
+
+// Landsat fraction
+// print(ui.Chart.image.series(L8sno.map(maskCloud).select(['Snow','Land']), roi, ee.Reducer.mean(),1000)
+//   // .setChartType('ScatterChart')
+//   .setChartType('LineChart')
+//   //.setChartType('ColumnChart')
+//   .setOptions({
+//       title: 'Landsat area fraction ',
+//       hAxis: {'title': 'Time', min : new Date(start), max: new Date(end)},
+//       vAxis: {'title': 'Area fraction [%]'},
+//       pointSize: 3,
+//       series: {
+//             0: { lineWidth: 3 },
+//             1: { lineWidth: 3 }},
+//       crosshair: { trigger: 'both' },
+//       colors:['#4daf4a','#377eb8']
+// }))
+
+// Landsat 
+Map.addLayer(L8interpolated.mean(),{bands:'Snow', min:0, max:1, palette:['#084594','#f7fbff'],opacity:.8},'L8 snow frequency: interpolated') 
+// TIME SERIES
+// MODIS snow cover frequency
+print(ui.Chart.image.series(L8interpolated.select(['Snow','Land']), roi, ee.Reducer.mean(),1000)
+  // .setChartType('ScatterChart')
+  .setChartType('LineChart')
+  .setOptions({
+      title: 'Landsat interpolated snow fraction',
+      hAxis: {'title': 'Time', min : new Date(start), max: new Date(end)},
+      vAxis: {'title': 'Area fraction [%]'},
+      pointSize: 3,
+      series: {
+            0: { lineWidth: 3 },
+            1: { lineWidth: 3 }},
+      crosshair: { trigger: 'both' },
+      colors:['#4daf4a','#377eb8']
+}));
+
+
+////////////////////////////////////
+// Pre-process MOD10
+////////////////////////////////////
+var MOD10col=ee.ImageCollection('MODIS/MOD10A1');
+// Filter collection based on location (roi)
+var MOD10_fil=MOD10col.filterBounds(roi).filterDate(start,end);
+// Define function to reclass MOD10 to snow (1), no-snow (0), and missing (101)
+// by using the 'Snow_Cover_Daily_Tile' band and 
+// by setting no-snow (25), lake (37) and ocean (39) to 0
+// and by setting lake ice (100) and snow (200) to 1
+// and all other values to 101
+// and finally masking all 101 values
+var reclassmask = function(image){
+  var snow = ee.Image(image).remap(
+        [100, 200, 25, 37, 39],
+        [1, 1, 0, 0, 0],
+        0,'Snow_Cover_Daily_Tile').select(['remapped'],['Snow'])
+  var land = ee.Image(image).remap(
+        [100, 200, 25, 37, 39],
+        [0, 0, 1, 1, 1],
+        0,'Snow_Cover_Daily_Tile').select(['remapped'],['Land'])
+  var cloud = ee.Image(image).remap(
+        [1,50],
+        [1,1],
+        0,'Snow_Cover_Daily_Tile').select(['remapped'],['Cloud'])
+  return snow.addBands(land).addBands(cloud)//.divide(land.gte(0))
+}
+// Apply reclassmask to MODIS filtered collection
+var MOD10m = MOD10_fil.map(reclassmask)
+//print(MOD10m.getInfo())
+
+// interpolate images ------------------------------------------------------
+// code assisted (greatly) by Noel Gorelick
+// finds each image's nearest neighbors, mosaics them, and then interpolates
+// based on the image's time
+
+// select bands of interest
+var interpBands = ee.List(['time','Snow','Land']);
+var bandi = MOD10m.map(maskCloud).select(interpBands);
+
+var time = 'system:time_start'
+var lagRange = 10
+
+
+// Looks for all images up to 'lagRange' days away from the current image.
+var maxDiff = ee.Filter([
+  ee.Filter.maxDifference(lagRange * (1000*60*60*24), time, null, time)])
+
+// Images after, sorted in descending order (so closest is last).
+var f1 = ee.Filter.and(maxDiff, ee.Filter.lessThanOrEquals(time, null, time))
+var c1 = ee.Join.saveAll('after', time, false).apply(bandi, bandi, f1)
+
+// Images before, sorted in ascending order (so closest is last).
+var f2 = ee.Filter.and(maxDiff, ee.Filter.greaterThanOrEquals(time, null, time))
+var c2 = ee.Join.saveAll('before', time, true).apply(c1, c1, f2)
+
+var MODinterpolated = ee.ImageCollection(c2.map(function(img) {
+  img = ee.Image(img);
+  var before = ee.ImageCollection.fromImages(ee.List(img.get('before'))).mosaic()
+  var after = ee.ImageCollection.fromImages(ee.List(img.get('after'))).mosaic()
+
+  // Compute the ratio between the image times.
+  var x1 = before.select('time').double()
+  var x2 = after.select('time').double()
+  var now = ee.Image.constant(img.date().millis()).double();
+  var ratio = now.subtract(x1).divide(x2.subtract(x1))  // this is zero anywhere x1 = x2
+  // Compute the interpolated image.
+  var interp = after.subtract(before).multiply(ratio).add(before)
+  return interp.set('system:time_start', img.get('system:time_start'));
+}))
+
+//print(MODinterpolated.getInfo())
+
+////////////////////////////////////
+// Map and create time series
+////////////////////////////////////
+
+// MAP
+// MODIS snow cover frequency
+// Map.addLayer(MOD10m.mean(),{bands:'Snow', min:0, max:1, palette:['#084594','#f7fbff'],opacity:.8},'MOD10 snow frequency') 
+// TIME SERIES
+// MODIS snow cover frequency
+print(ui.Chart.image.series(MOD10m.select(['Snow','Land','Cloud']), roi, ee.Reducer.sum(),1000)
+  // .setChartType('ScatterChart')
+  .setChartType('LineChart')
+  .setOptions({
+      title: 'MOD10A1 Area',
+      hAxis: {'title': 'Time', min : new Date(start), max: new Date(end)},
+      vAxis: {'title': 'Area [1000 km^2]'},
+      pointSize: 3,
+      series: {
+            0: { lineWidth: 1 },
+            1: { lineWidth: 3 },
+            2: { lineWidth: 3 }},
+      crosshair: { trigger: 'both' },
+      colors: ['#e41a1c','#4daf4a','#377eb8']
+})
+);
+
+// MODIS snow cover frequency
+// print(ui.Chart.image.series(MOD10m.map(function(image){
+//   return(ee.Image(image).mask(image.select(['Cloud']).neq(1)).select(['Snow','Land']))
+// }), roi, ee.Reducer.mean(),1000)
+//   // .setChartType('ScatterChart')
+//   .setChartType('LineChart')
+//   //.setChartType('ColumnChart')
+//   .setOptions({
+//       title: 'MOD10A1 area fraction ',
+//       hAxis: {'title': 'Time', min : new Date(start), max: new Date(end)},
+//       vAxis: {'title': 'Area fraction [%]'}, 
+//       pointSize: 3,
+//       series: {
+//             0: { lineWidth: 2 },
+//             1: { lineWidth: 3 }},
+//       crosshair: { trigger: 'both' },
+//       colors: ['#4daf4a','#377eb8']
+// })
+// );
+
+// MODIS snow cover frequency
+Map.addLayer(MODinterpolated.mean(),{bands:'Snow', min:0, max:1, palette:['#084594','#f7fbff'],opacity:.8},'MOD10 snow frequency: interpolated') 
+// TIME SERIES
+// MODIS snow cover frequency
+print(ui.Chart.image.series(MODinterpolated.select(['Snow','Land']), roi, ee.Reducer.mean(),1000)
+  // .setChartType('ScatterChart')
+  .setChartType('LineChart')
+  .setOptions({
+      title: 'MOD10A1 interpolated snow fraction',
+      hAxis: {'title': 'Time', min : new Date(start), max: new Date(end)},
+      vAxis: {'title': 'Area fraction [%]'},
+      pointSize: 3,
+      series: {
+            0: { lineWidth: 2 },
+            1: { lineWidth: 3 }},
+      crosshair: { trigger: 'both' },
+      colors: ['#4daf4a','#377eb8']
+})
+);
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Sentinel 2C
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// // Load collection
+// var S2col=ee.ImageCollection("COPERNICUS/S2");
+
+// // Filter collection based on location (roi) and date (2015-2016 winter)
+// var S2fil=S2col.filterBounds(roi).filterDate(start,end);
+// print(S2fil.getInfo())
+
+
+// // Create function to mask out cloudy pixels
+// var maskClouds = function(image) {
+//   // Select the QA band containing the cloud mask values
+//   var QA = image.select('fmask');
+//   // Return an image masking out cloudy areas (fmask=4) and shadow areas (fmask=2)
+//   var cloud = QA.neq(4).and(QA.neq(2)).rename('Cloud')
+//   return image.addBands(cloud).updateMask(QA.neq(1));
+// };
+

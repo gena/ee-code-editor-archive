@@ -1,0 +1,25 @@
+function hexGrid(size) {
+  var scale = Map.getScale()
+  
+  var step = scale * size
+
+  var image1 = ee.Image.pixelCoordinates('EPSG:3857')
+    .mod(ee.Image.constant([step * 2, step * 3]))
+    .abs()
+    .gt(scale * 2)
+    .reduce(ee.Reducer.anyNonZero())
+    .not()
+
+  var image2 = ee.Image.pixelCoordinates('EPSG:3857').add(ee.Image.constant([step, step * 1.5]))
+    .mod(ee.Image.constant([step * 2, step * 3]))
+    .abs()
+    .gt(scale * 2)
+    .reduce(ee.Reducer.anyNonZero())
+    .not()
+
+  return ee.Image([image1, image2]).reduce(ee.Reducer.anyNonZero())
+}
+
+var grid = hexGrid(10)
+
+Map.addLayer(grid.mask(grid), {min: 0, max: 1, palette: ['ffff00']})

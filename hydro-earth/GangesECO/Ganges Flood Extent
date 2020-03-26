@@ -1,0 +1,84 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var EcoZones = ee.FeatureCollection("users/gerben199066/Zonation_Gangabasin_Complete"),
+    Ribasim_nodes = ee.FeatureCollection("users/gerben199066/Ribasim_Nodes"),
+    L7 = ee.ImageCollection("LANDSAT/LE07/C01/T1_TOA"),
+    L5 = ee.ImageCollection("LANDSAT/LT5_L1T_TOA"),
+    GangesLandUse = ee.Image("users/gerben199066/GangesLanduse");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+ // Find AOI (intersection between ecozone and buffer around node)
+print(EcoZones.size())
+Map.addLayer(EcoZones,{color:'green'},'EcoZones')
+
+function Buffering(feature){
+  var buffer = ee.Geometry(feature.geometry()).buffer(10*1000)
+  buffer = ee.Feature(buffer)
+  return buffer
+}
+
+var EcoZonesBuffers = ee.FeatureCollection(EcoZones).map(Buffering);
+Export.table.toCloudStorage(EcoZonesBuffers)
+
+
+// Load RIBASIM nodes
+Map.addLayer(Ribasim_nodes,{color:'red'},'Ribasim nodes')
+
+// Define AOI
+// RIBASIM buffer + intersection with ecozone
+var node = ee.Feature(Ribasim_nodes.first())
+var nodeID = ee.Number(node.get('ID'))
+var nodeBuffer = node.buffer(10000)
+var aoi = EcoZones.geometry().intersection(nodeBuffer.geometry())
+Map.addLayer(aoi,{color:'red'},'aoi ' + nodeID.getInfo())
+
+aoi = Map.getBounds(true)
+
+// Add landuse map
+var urbanArea = GangesLandUse.mask(GangesLandUse.eq(13))
+Map.addLayer(urbanArea.clip(aoi),{},'Urban')
+
+var agriculuture = GangesLandUse.mask(GangesLandUse.eq(12))
+Map.addLayer(agriculuture.clip(aoi),{},'Agirculture')
+
+// Load images
+L7 = L7.filterBounds(aoi).filterMetadata('CLOUD_COVER','less_than', 70)
+L5 = L5.filterBounds(aoi).filterMetadata('CLOUD_COVER','less_than', 70)
+var col = ee.ImageCollection(L7.select('B4','B3','B2','B1').merge(L5.select('B4','B3','B2','B1')))
+
+var date = ee.Date('2001-01-01')
+
+// loop over periods
+for (var i = 0; i < 1; i++) { 
+  
+  var sdate = date.advance(-2,'month')
+  var edate = date.advance(2,'month')
+  var timestamp = sdate.format('yyyy-M-d HH:MM').getInfo();
+  
+  var image = ee.Image(col.filterDate(sdate,edate).reduce(ee.Reducer.intervalMean(14,15)))
+  image = image.select(['B4_mean','B3_mean','B2_mean','B1_mean'],['NIR','R','G','B']).clip(aoi)
+  Map.addLayer(image.select('R','G','B'),{min:0,max:0.2}, timestamp + ' Image' , false)
+  
+  // calculate NDWI
+  var NDWI = image.normalizedDifference(['G','NIR'])
+  Map.addLayer(NDWI,{min:-1,max:1}, timestamp + ' NDWI', false)
+  
+  // Mask water (implement OTSU)
+  var water = ee.Image(NDWI.mask(NDWI.gte(0)))
+  water = water.focal_min(1)
+  Map.addLayer(water,{palette:'blue'}, timestamp + ' Water', false)
+  
+  // Calculate number of water pixels
+  var waterarea = water.reduceRegion({reducer:ee.Reducer.count(),geometry:aoi,scale:30,maxPixels:1e8}).get("nd")
+  print(sdate, col.filterDate(sdate,edate).size(), waterarea)
+  
+  // Match with land use map
+  //water = water.select('nd').reduceToVectors(null, aoi, 30)
+  var inundatedUrban = urbanArea.mask(water).eq(13)
+  var inundatedUrban = inundatedUrban.reduceRegion({reducer:ee.Reducer.sum(),geometry:aoi,scale:30,maxPixels:1e8}).get('b1') // number of urban pixels inundated
+  
+  var inunadatedAgri = agriculuture.mask(water).eq(12)
+  var inunadatedAgri = inunadatedAgri.reduceRegion({reducer:ee.Reducer.sum(),geometry:aoi,scale:30,maxPixels:1e8}).get('b1') // number of agri pixels indunated
+  
+  print(inundatedUrban,inunadatedAgri)
+  date = date.advance(1,'month') // advance to next period
+}
+

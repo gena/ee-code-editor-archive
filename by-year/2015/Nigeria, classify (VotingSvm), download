@@ -1,0 +1,127 @@
+// Nigeria, classify (VotingSvm), download
+
+var region = ee.FeatureCollection('ft:1por15YtXdSZxpELxIc166LY41-By2yeU5eBlQhnZ','geometry');
+Map.addLayer(region,'region');
+
+var applyCloudScore = function(image) {
+  var t = ee.Algorithms.Landsat.simpleCloudScore(image);
+  var quality = t.select('cloud').lte(15);
+  var maskedImage = image.mask().reduce('min').and(quality);
+  return image.mask(maskedImage);
+};
+
+var collection1b = ee.ImageCollection('LANDSAT/LE7_L1T_TOA')
+    .filterDate('1999-01-01','2005-01-31')
+    .map(applyCloudScore)  
+    .select([0,1,2,3,4,6],["blue","green","red","nir","swir1","swir2"]);
+
+var masked_image1b = collection1b.select(['nir','swir1','red'])
+                   .median()
+                   .multiply(255)
+                   .toUint8()
+                   .clip(region);
+
+//addToMap(masked_image1b,{},"l7_only");
+    
+var collection1a = ee.ImageCollection('LANDSAT/L5_L1T_TOA')
+    .filterDate('1999-01-01','2005-01-31')
+    .map(applyCloudScore)  
+    .select([0,1,2,3,4,6],["blue","green","red","nir","swir1","swir2"]);
+    
+var collection1 = ee.ImageCollection(collection1a.merge(collection1b));
+
+var masked_image1 = collection1.select(['nir','swir1','red'])
+                   .median()
+                   .multiply(255)
+                   .toUint8()
+                   .clip(region); 
+addToMap(masked_image1b,{},"L5_l7");
+
+var collection2a = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+    .filterDate('2009-01-01','2015-01-31')
+    .map(applyCloudScore)  
+    .select([1,2,3,4,5,6],["blue","green","red","nir","swir1","swir2"]);
+
+var collection2 = ee.ImageCollection(collection1.merge(collection2a));
+
+var masked_image2 = collection2.select(['nir','swir1','red'])
+                   .median()
+                   .multiply(255)
+                   .toUint8()
+                   .clip(region); 
+
+// combined masked product
+var cloudArea1and2= masked_image1.mask().and(masked_image2.mask());
+
+// apply the combined mask to both of the images
+var masked_image11 = masked_image1.mask(cloudArea1and2);
+var masked_image22 = masked_image2.mask(cloudArea1and2);
+
+
+//addToMap(masked_image3,{},"L5_l7_L8");
+var features = ee.FeatureCollection("ft:1g6pewI94uiSxBs6dgCtI0bmikJmVaFG2uYm6tVad")
+var classifier = masked_image22.trainClassifier({ 
+  training_features: features,
+  training_property: "class",
+  classifier_name: "VotingSvm",
+  "crs": "EPSG:4326",
+        "crs_transform": [
+          0.00008983152841195213,
+          0,
+          -180,
+          0,
+          -0.00008983152841195213,
+          90]});
+var result = masked_image22.classify(classifier);
+
+var palette = ["22e5ef","ff4217","4de41c","2b783b","fbff13"];
+Map.addLayer(result, {palette: palette, min:1, max:5,"resolution": 10, format:"png"});
+Map.addLayer(ee.Image().paint(region, 1, 1));
+
+print(ee.data.getValue({
+
+     image: classifier.serialize(),
+
+'fields': 'classifier'}));
+
+//===============================================================//
+// download image all in one go.
+var roi = ee.Geometry.Polygon(region.geometry().bounds().getInfo().coordinates).toGeoJSONString()
+var path = result.getDownloadURL({
+  'name': 'file_name',
+  'scale': 30,
+  'crs': 'EPSG: 4326', 
+  'region': roi,
+
+  'filePerBand': 'false'
+});
+print("Whole area: ", path);
+
+
+//===============================================================//
+// Extract each polygon individually
+var region_geom = region.geometry() // convert to geometry
+var geom_cords = region_geom.getInfo().coordinates // selects just coordinates 
+print(region_geom)
+print(geom_cords)
+
+for (var i = 0; (i = i+10) < geom_cords.length - 0; i++) { // skips every 10 so as not to crash
+var geom_indv = geom_cords[i]; // selects each polygon as a list
+var final_geom = ee.Geometry.Polygon(geom_indv) // Because geom_indv is a list you have to redefine as a polygon
+var str_print = final_geom.toGeoJSONString(); // convert to GeoJSONString.
+print ("String is", str_print); // prints
+
+var path = result.getDownloadURL({
+  'name': 'file_name',
+  'scale': 30,
+  'crs': 'EPSG: 4326', 
+  'region': str_print,
+
+  'filePerBand': 'false'
+});
+print(path);
+
+}
+
+
+

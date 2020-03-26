@@ -1,0 +1,126 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_SR"),
+    s2 = ee.ImageCollection("COPERNICUS/S2"),
+    geometry = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-44.11789365034019, -20.115358594038405],
+          [-44.12441678266441, -20.115036212920156],
+          [-44.12617631177818, -20.117494352166407],
+          [-44.126347973155134, -20.119227115635724],
+          [-44.12591881971275, -20.120597194091125],
+          [-44.127077534007185, -20.121524005063968],
+          [-44.12797875623619, -20.12297465469021],
+          [-44.128107502268904, -20.123820860757593],
+          [-44.128064586924665, -20.125472964167052],
+          [-44.127335026072615, -20.130952987064173],
+          [-44.12870831708824, -20.135062878160547],
+          [-44.135102703379744, -20.136231356876657],
+          [-44.13711972455894, -20.135022585635195],
+          [-44.138535930918806, -20.1338943907074],
+          [-44.138535930918806, -20.132403549203733],
+          [-44.13935132245933, -20.130308288458835],
+          [-44.14201207380211, -20.130308288458835],
+          [-44.14668984632408, -20.129139765459286],
+          [-44.14763398389732, -20.131758856581477],
+          [-44.14587445478355, -20.13494200055331],
+          [-44.14634652357017, -20.138487704842714],
+          [-44.149050190257185, -20.142677978901204],
+          [-44.1457027934066, -20.146948719488513],
+          [-44.1476342562799, -20.149849533284183],
+          [-44.14939378539367, -20.152105684535844],
+          [-44.14810632506652, -20.15271000522814],
+          [-44.14372895995422, -20.148963179230353],
+          [-44.142269838250115, -20.144289592841556],
+          [-44.14171193877502, -20.138930912221593],
+          [-44.14046739379211, -20.137399826855276],
+          [-44.136519182122186, -20.14030081798926],
+          [-44.13295720855041, -20.1427988505235],
+          [-44.130511033928826, -20.145337132985816],
+          [-44.12639116088195, -20.145699741398833],
+          [-44.12209962645812, -20.142476525989522],
+          [-44.11866639891906, -20.14445075332105],
+          [-44.117336023247674, -20.142234782152563],
+          [-44.115833986199334, -20.140824602314233],
+          [-44.1132161502008, -20.133974976329498],
+          [-44.112786996758416, -20.129623293277145],
+          [-44.11338781157775, -20.12365967900257],
+          [-44.11300157347961, -20.119388301959297],
+          [-44.11446069518371, -20.116567517314913]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+var palettes = require('users/gena/packages:palettes')
+var assets = require('users/gena/packages:assets')
+
+s2 = s2.filterBounds(Map.getCenter())
+print(s2.size())
+
+s2 = assets.getMostlyCleanImages(s2, Map.getBounds(true), { 
+  qualityBand: 'B3',
+  cloudFrequencyThresholdDelta: -0.05
+})
+print(s2.size())
+
+s2 = s2
+  .filterDate('2018-01-01', '2020-01-01')
+
+print(s2.size())
+
+if(1) {
+  // animate
+  var images = s2.sort('system:time_start').map(function(i) {
+    i = i.resample('bicubic')
+    var imageRGB = i.visualize({ min: 400, max: 2500, gamma: 1.7, bands: ['B4', 'B3', 'B2']})
+    
+    var moisture = i.expression('b("B11") / b("B8A")')
+    var moistureRGB = moisture
+      .mask(moisture.unitScale(0.6, 0.8))
+      .visualize({ min: 0.5, max: 1, palette: palettes.colorbrewer.RdYlBu[11] })
+      .clip(geometry)
+      
+    return imageRGB.blend(moistureRGB)
+      .set({ label: i.date().format('YYYY-MM-dd') })
+  })
+  
+  print(images.first())
+  
+  animation.animate(images, { maxFrames: images.size(), label: 'label' })
+}
+
+if(0) {
+  // single image
+  
+  var image = s2.sort('system:time_start', false).first().resample('bicubic')
+  
+  Map.addLayer(image, { min: 400, max: 3000, gamma: 1.4, bands: ['B4', 'B3', 'B2']})
+  
+  var moisture = image.expression('b("B11") / b("B8A")')
+  Map.addLayer(moisture.mask(moisture.unitScale(0.6, 0.7)), { min: 0.5, max: 1, palette: palettes.colorbrewer.RdYlBu[11] })
+}
+
+throw('stop')
+
+s2 = assets.getMostlyCleanImages(s2, Map.getBounds(true), { qualityBand: 'B3' })
+
+/*
+var images = l8.filterBounds(Map.getBounds(true))
+  .select(['B5', 'B6'])
+  .map(function(i) {
+    return i.normalizedDifference()
+  })
+*/
+
+var images = s2.filterBounds(Map.getBounds(true))
+  .map(function(i) {
+    i = i.resample('bicubic').unitScale(0, 10000)
+    var moisture = i.select('B11').divide(i.select('B8A'))
+    
+    var moistureRGB = moisture
+      .mask(moisture.unitScale(1, 1.5))
+      .visualize({ palette: palettes.colorbrewer.RdYlBu[11], min: -0.5, max: 1.5 })
+      
+    
+    return i.select(['B4', 'B3', 'B2']).add(ee.Image([0, i.select('B8').multiply(0.2), 0])).visualize({ min: 0.05, max: 0.2 })
+      .blend(moistureRGB.updateMask(0.5))
+  })
+
+animation.animate(images)
+

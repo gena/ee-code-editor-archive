@@ -1,0 +1,23 @@
+var projGeo = ee.Projection('EPSG:4326')
+var projWeb = ee.Projection('EPSG:3857')
+
+var scale = Map.getScale()
+
+var countries = ee.FeatureCollection('USDOS/LSIB/2013')
+  .map(function(f) {
+    var areaMismatchRatio = f.area(scale, projWeb).divide(f.area(scale.projGeo))
+    
+    return f.set({ areaMismatchRatio: areaMismatchRatio })
+  })
+
+var countriesImage = countries.reduceToImage(['areaMismatchRatio'], ee.Reducer.first())
+
+Map.addLayer(countriesImage, { min: 1, max: 5 }, 'area mismatch')
+
+var countriesScaled = countries.map(function(f) {
+  var r = ee.Number(1).divide(f.get('areaMismatchRatio'))
+  var coords = f.transform(projWeb.scale(r, r), scale)
+  return ee.Geometry.Polygon(coords)
+})
+
+Map.addLayer(countriesScaled.style({ color: '000000', fillColor: '00000000' }), {}, 'countries scaled')

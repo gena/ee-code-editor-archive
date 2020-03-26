@@ -1,0 +1,251 @@
+// ***** some plot functionality ******
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+var azimuth = 90;
+var zenith = 60;
+
+// visualization settings (elevation)
+// function to visualize the specific DEM
+var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+var dem_min = 0;
+var dem_max = 100;
+
+var addDem = function(dem, name, visible) {
+  var im = dem.visualize({palette:colors_dem, min:dem_min, max:dem_max, opacity: 1.0});
+  var hillshade_im = hillshadeit(im, dem, 2.0, 2.0);
+  Map.addLayer(hillshade_im, {}, name, visible);
+  return hillshade_im;
+};
+
+
+// **** FUNCTIONALITY STARTS BELOW *****
+// test step 1-3 pipeline with actual OSM data
+
+// step 1: filter OSM feature collection (fc)
+/***
+ * filters fc based on property keys & (list of) values
+ */
+var filter_fc = function(fc, keys, values){
+  // function to loop over filters
+  var filter_multiple = function(i, fc){
+  return ee.FeatureCollection(fc).filter(ee.Filter.inList(keys.get(i), values.get(i)))};
+  // declare keys and props as list and make index
+  
+  keys = ee.List(keys);
+  values = ee.List(values);
+  var index = ee.List.sequence(0,null,1, keys.length());
+  // iterate over keys and props and return filtered fc
+  return ee.FeatureCollection(index.iterate(filter_multiple, fc));
+};
+  
+
+// step 2: add default info about height and widths
+// ***** GENERAL functions *****
+/***
+ *split feature collection based on wheather property exist (isnull) 
+ */
+function splitIsNull(fc, prop) {
+  return [
+    fc.filter(ee.Filter.eq(ee.String(prop).cat('_isempty'), 0)).cache(), // not NULL
+    fc.filter(ee.Filter.eq(ee.String(prop).cat('_isempty'), 1)).cache()   // NULL
+    ];
+}
+
+
+/***
+ * if not exist, set property (trg_key) to default value
+ */
+var set_property_constant = function(fc, trg_key, default_value){
+  var split = splitIsNull(fc, trg_key);
+
+  var notnull = split[0];
+  var isnull = split[1];
+  
+  return notnull.merge(isnull.map(function(f){return f.set(trg_key, default_value)}));
+};
+
+
+// step 4: resample and smooth dem
+/***
+ * Perona malik filter
+ * I(n+1, i, j) = I(n, i, j) + lambda * (cN * dN(I) + cS * dS(I) + cE * dE(I), cW * dW(I))
+ */
+var peronaMalikFilter = function(I, iter, K, method) {
+    var dxW = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 1, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dxE = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  1],
+                            [ 0,  0,  0]]);
+  
+  var dyN = ee.Kernel.fixed(3, 3,
+                           [[ 0,  1,  0],
+                            [ 0, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dyS = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  0],
+                            [ 0,  1,  0]]);
+
+  var lambda = 0.2;
+
+  var k1 = ee.Image(-1.0/K);
+  var k2 = ee.Image(K).multiply(ee.Image(K));
+
+  for(var i = 0; i < iter; i++) {
+    var dI_W = I.convolve(dxW)
+    var dI_E = I.convolve(dxE)
+    var dI_N = I.convolve(dyN)
+    var dI_S = I.convolve(dyS)
+
+    switch(method) {
+      case 1:
+        var cW = dI_W.multiply(dI_W).multiply(k1).exp();
+        var cE = dI_E.multiply(dI_E).multiply(k1).exp();
+        var cN = dI_N.multiply(dI_N).multiply(k1).exp();
+        var cS = dI_S.multiply(dI_S).multiply(k1).exp();
+    
+        I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))))
+        break;
+      case 2:
+        var cW = ee.Image(1.0).divide(ee.Image(1.0).add(dI_W.multiply(dI_W).divide(k2)));
+        var cE = ee.Image(1.0).divide(ee.Image(1.0).add(dI_E.multiply(dI_E).divide(k2)));
+        var cN = ee.Image(1.0).divide(ee.Image(1.0).add(dI_N.multiply(dI_N).divide(k2)));
+        var cS = ee.Image(1.0).divide(ee.Image(1.0).add(dI_S.multiply(dI_S).divide(k2)));
+    
+        I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))));
+        break;
+    }
+  }
+
+  return I;
+};
+
+
+/***
+ * function makes dem straight (horizontal in perpendical direction
+ * for all lines (features in fc)
+*/
+var straighten_dem = function(dem, fc ) {
+  var info = dem.getInfo().bands[0];
+  
+  // function creates dem clip image with straight elev for one line
+  // and adds to image collection
+  var straighten_single_road = function(f, ic) {
+    var width = ee.Number(f.get('width'));
+    var roadBuffer = ee.Feature(f).buffer(width);
+    var roadImage = 
+      dem.clip(roadBuffer)
+        .reduceNeighborhood(ee.Reducer.mean(), ee.Kernel.circle(ee.Number(width).multiply(2.5),'meters'));
+    
+    // weird bug in GEE requires axtra mask statemant, as otherwise the edge of the kernel is not written correctly
+    return ee.ImageCollection(ic).merge(ee.ImageCollection(roadImage.mask(roadImage)
+              .reproject(info.crs, info.crs_transform)));
+  };
+  
+  // get image collection with clips for for roads and reduce to single image
+  var roads_elev = ee.ImageCollection(fc.iterate(straighten_single_road,ee.ImageCollection([])))
+                      .reduce(ee.Reducer.min());
+  
+  // fill missings with original dem
+  return roads_elev.unmask(ee.Image(dem), false)
+              .reproject(info.crs, info.crs_transform);
+};
+
+// ********* ALL INPUTS START HERE! *********************************
+Map.setCenter(-66.052, 18.442, 15);
+
+// get elev data
+var srtm_30 = ee.Image("USGS/SRTMGL1_003");
+var info = srtm_30.getInfo().bands[0];
+var dem = ee.Image("users/dirkeilander/san_juan_pr_prvd");
+
+// resolution in meters
+var res = 1; 
+
+// get project shape data
+var buffer = 0
+var xmin = 809372-buffer;
+var xmax = 813434+buffer;
+var ymin = 2039755-buffer;
+var ymax = 2043436+buffer;
+var w = (xmax-xmin)/res;
+var h = (ymax-ymin)/res;
+var dim_str = w + 'x' + h;
+var crs_transform = JSON.stringify([res, 0, xmin, 0, -res, ymax]);
+var region = ee.List([[xmin,ymin],[xmax,ymin],[xmax,ymax],[xmin, ymax], [xmin, ymin]]);
+var bounds = ee.Geometry.Polygon(region, 'EPSG:32619', null, null, false);
+var boundsWGS84 = bounds.transform(info.crs); // reproject to filter latlon fc from OSM
+var exportInfoUTM = {'crs': 'EPSG:32619', 'crs_transform': crs_transform, 'dimensions': dim_str, 'driveFolder': 'EarthEngineTemp', 'maxPixels': 350000000};
+
+// get osm data
+var osm_lines =     ee.FeatureCollection('ft:1VOnqyiiXrivOUQ5m2sv8-wl3XwttXxGB2hCoebJ_')
+
+// smooth for higher res.
+// apply PM filter
+var dem_pm = peronaMalikFilter(dem, 5, 5, 2).reproject(info.crs,null,res);
+// resample to resolution        
+var dem_res = dem_pm.resample('bicubic').reproject(info.crs,null,res);
+
+
+// straighten roads
+// load OSM lines & set width property
+var road_primary = filter_fc(osm_lines,['highway'], [['primary', 'motorway']]);
+var road_secondary = filter_fc(osm_lines, ['highway'], [['secondary', 'tertiary', 'residential']]);
+            // .merge( filter_fc(osm_lines, ['highway'], [['tertiary']]));
+road_primary = set_property_constant(road_primary, 'width', 6);
+road_secondary = set_property_constant(road_secondary, 'width', 3);
+// straighten roads in dem 
+var dem_res_wRoads = straighten_dem(dem_res, road_primary.merge(road_secondary));
+
+// visualize
+addDem(srtm_30, 'srtm_30', false);
+addDem(dem, 'local DEM', false);
+// addDem(dem_gaus, 'step1. gaus smoothing', false);
+addDem(dem_pm, 'step2. pm smoothing', false);
+// addDem(dem_res, 'step3. bicubic resampling', false);
+// addDem(dem_org_res, 'bicubic resampling org dem', false);
+// Map.addLayer(dem_diff, {}, 'dem_diff', false);
+Map.addLayer(bounds, {color: 'BB4400'}, 'bounding box', false);
+
+Map.addLayer(road_primary,{color: 'E5E500'}, 'primary road line', false);
+Map.addLayer(road_secondary,{color: 'FFFFB2'}, 'secondary road line', false);
+addDem(dem_res_wRoads, 'dem with roads', false);
+
+Map.addLayer(bounds, {color: 'BB4400'}, 'bounding box', false);
+
+/***
+* download data
+*/
+// download data
+var name = ee.String('dem_smoothed_').cat(ee.Number(res).format('%03d')).cat('m_UTM19N').getInfo();
+Export.image(dem_res, name, exportInfoUTM);
+
+var name = ee.String('dem_smoothed_wRoads').cat(ee.Number(res).format('%03d')).cat('m_UTM19N').getInfo();
+Export.image(dem_res_wRoads, name, exportInfoUTM);
+

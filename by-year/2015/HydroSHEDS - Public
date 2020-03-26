@@ -1,0 +1,165 @@
+// HydroSHEDS - Public
+//
+// WWF/USGS HydroSHEDS datasets demo
+// http://hydrosheds.cr.usgs.gov
+// =================================
+
+// -----------------------
+// 3 arc-second datasets:
+
+// Flow Accumulation 3s - This dataset is not produced by the data provider. 
+
+// Flow Direction 3s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=3dirb )
+var flowdir03 = ee.Image('WWF/HydroSHEDS/03DIR');
+
+// Conditioned DEM 3s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=3accb )
+var conddem03 = ee.Image('WWF/HydroSHEDS/03CONDEM');
+//   NOTE: conditioned DEM is for flow analysis only, not applicable for other terrain analysis.
+//         For more info, see: http://hydrosheds.cr.usgs.gov/datasets.php#4
+
+// Void-Filled DEM 3s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=3demb )
+var vfdem03 = ee.Image('WWF/HydroSHEDS/03VFDEM');
+
+// -----------------------
+// 15 arc-second datasets:
+
+// Flow Accumulation 15s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=15accb )
+var flowacc15 = ee.Image('WWF/HydroSHEDS/15ACC');
+
+// Flow Direction 15s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=15dirb )
+var flowdir15 = ee.Image('WWF/HydroSHEDS/15DIR');
+
+// Conditioned DEM 15s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=15demb )
+var conddem15 = ee.Image('WWF/HydroSHEDS/15CONDEM');
+//   NOTE: conditioned DEM is for flow analysis only, not applicable for other terrain analysis.
+//         For more info, see: http://hydrosheds.cr.usgs.gov/datasets.php#4
+
+// -----------------------
+// 30 arc-second datasets:
+
+// Flow Accumulation 30s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=30accb )
+var flowacc30 = ee.Image('WWF/HydroSHEDS/30ACC');
+
+// Flow Direction 30s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=30dirb )
+var flowdir30 = ee.Image('WWF/HydroSHEDS/30DIR');
+
+// Conditioned DEM 30s (from: http://hydrosheds.cr.usgs.gov/datadownload.php?reqdata=30demb )
+var conddem30 = ee.Image('WWF/HydroSHEDS/30CONDEM')
+//   NOTE: conditioned DEM is for flow analysis only, not applicable for other terrain analysis.
+//         For more info, see: http://hydrosheds.cr.usgs.gov/datasets.php#4
+
+// -----------------------
+
+// Style Map for Flow Accumulation                                
+var style_flowacc = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#0000ff" quantity="0" label="none" opacity="0"/>\
+    <ColorMapEntry color="#00ff00" quantity="100" label="1-100" />\
+    <ColorMapEntry color="#00BB66" quantity="10000" label="100-10k" />\
+    <ColorMapEntry color="#0000ff" quantity="100000" label="10k-100k" />\
+    <ColorMapEntry color="#ff00ff" quantity="1000000" label="100k-1M" />\
+    <ColorMapEntry color="#ff0000" quantity="28000000" label="1M-28M" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+// Style Map for Flow Direction
+var style_flowdir = '\
+<RasterSymbolizer>\
+  <ColorMap  type="intervals" extended="false" >\
+    <ColorMapEntry color="#0000ff" quantity="0" label="none" opacity="0"/>\
+    <ColorMapEntry color="#3FBB04" quantity="1" label="E (1)" />\
+    <ColorMapEntry color="#027340" quantity="2" label="SE (2)" />\
+    <ColorMapEntry color="#9BD5F9" quantity="4" label="S (4)" />\
+    <ColorMapEntry color="#08A3FF" quantity="8" label="SW (8)" />\
+    <ColorMapEntry color="#0072BF" quantity="16" label="W (16)" />\
+    <ColorMapEntry color="#D09CFE" quantity="32" label="NW (32)" />\
+    <ColorMapEntry color="#F34714" quantity="64" label="N (64)" />\
+    <ColorMapEntry color="#FBB400" quantity="128" label="NE (128)" />\
+    <ColorMapEntry color="#0000ff" quantity="247" label="No Data" opacity="0"/>\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+// Radians Function (used in hilshade computation)
+function radians(img) {
+  return img.toFloat().multiply(3.1415927).divide(180);
+}
+
+// DEM Hillshade function - Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  // Hillshade = cos(Azimuth - Aspect) * sin(Slope) * sin(Zenith) +
+  //     cos(Zenith) * cos(Slope)
+  return azimuth.subtract(aspect).cos()
+    .multiply(slope.sin())
+    .multiply(zenith.sin())
+    .add(
+      zenith.cos().multiply(slope.cos()));
+}
+
+var azimuth = 0;
+var zenith = 60;
+
+var terrain03c = ee.call('Terrain', ee.Image(conddem03));
+var slope03c = radians(terrain03c.select(['slope']));
+var aspect03c = radians(terrain03c.select(['aspect']));
+var conddem03_hillshade = hillshade(azimuth, zenith, slope03c, aspect03c);
+
+
+var terrain03v = ee.call('Terrain', ee.Image(vfdem03));
+var slope03v = radians(terrain03v.select(['slope']));
+var aspect03v = radians(terrain03v.select(['aspect']));
+var vfdem03_hillshade = hillshade(azimuth, zenith, slope03v, aspect03v);
+
+
+var terrain15 = ee.call('Terrain', ee.Image(conddem15));
+var slope15 = radians(terrain15.select(['slope']));
+var aspect15 = radians(terrain15.select(['aspect']));
+var conddem15_hillshade = hillshade(azimuth, zenith, slope15, aspect15);
+
+var terrain30 = ee.call('Terrain', ee.Image(conddem30));
+var slope30 = radians(terrain30.select(['slope']));
+var aspect30 = radians(terrain30.select(['aspect']));
+var conddem30_hillshade = hillshade(azimuth, zenith, slope30, aspect30);
+
+
+// -----------------------
+// Add layers to the Map
+
+// Add Conditioned DEM 30s to map - hillshaded and raw data (for pixel interrogation)
+addToMap(conddem30, {'min':0, 'max':9000}, ' - Conditioned DEM 30s data', false);
+addToMap(conddem30_hillshade, {}, 'Conditioned DEM 30s Hillshade', true);
+
+// Add Flow Direction 30s to map - styled and raw data (for pixel interrogation)
+addToMap(flowdir30, {'min': 1, 'max': 128}, ' - Flow Direction 30s data', false);
+addToMap(flowdir30.sldStyle(style_flowdir), {}, 'Flow Direction 30s Styled', true);
+
+// Add Flow Accumulation 30s to map - styled and raw data (for pixel interrogation)
+addToMap(flowacc30, {'min': 1, 'max': 28000000}, ' - Flow Accumulation 30s data', false);
+addToMap(flowacc30.sldStyle(style_flowacc), {}, 'Flow Accumulation 30s Styled', true);
+
+// Add Conditioned DEM 15s to map - hillshaded and raw data (for pixel interrogation)
+addToMap(conddem15, {'min':0, 'max':9000}, ' - Conditioned DEM 15s data', false);
+addToMap(conddem15_hillshade, {}, 'Conditioned DEM 15s Hillshade', true);
+
+// Add Flow Direction 15s to the map - styled and raw data (for pixel interrogation)
+addToMap(flowdir15, {'min': 1, 'max': 128}, ' - Flow Direction 15s data', false);
+addToMap(flowdir15.sldStyle(style_flowdir), {}, 'Flow Direction 15s Styled', true);
+
+// Add Flow Accumulation 15s to the map - styled and raw data (for pixel interrogation)
+addToMap(flowacc15, {'min': 1, 'max': 28000000}, ' - Flow Accumulation 15s data', false);
+addToMap(flowacc15.sldStyle(style_flowacc), {}, 'Flow Accumulation 15s Styled', true);
+
+
+// Add Void-Filled DEM 3s to map - hillshaded and raw data (for pixel interrogation)
+addToMap(vfdem03, {'min':0, 'max':9000}, ' - Void-Filled DEM 3s data', false);
+addToMap(vfdem03_hillshade, {}, 'Void-Filled DEM 3s Hillshade', true);
+
+// Add Conditioned DEM 3s to map - hillshaded and raw data (for pixel interrogation)
+addToMap(conddem03, {'min':0, 'max':9000}, ' - Conditioned DEM 3s data', false);
+addToMap(conddem03_hillshade, {}, 'Conditioned DEM 3s Hillshade', true);
+
+// Add Flow Direction 3s to map - styled and raw data (for pixel interrogation)
+addToMap(flowdir03, {'min': 1, 'max': 128}, ' - Flow Direction 3s data', false);
+addToMap(flowdir03.sldStyle(style_flowdir), {}, 'Flow Direction 3s Styled', true);

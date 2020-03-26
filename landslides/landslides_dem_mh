@@ -1,0 +1,274 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var dem_srtm30 = ee.Image("USGS/SRTMGL1_003"),
+    dem_alos = ee.Image("JAXA/ALOS/AW3D30_V1_1");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+ 
+
+  //(2)calculate slope aspect,
+ 
+// Apply an algorithm to an image.
+  var slope_srtm30 = ee.Terrain.slope(dem_srtm30)
+  var aspect_srtm30 = ee.Terrain.aspect(dem_srtm30)
+  
+  var slope_alos = ee.Terrain.slope(dem_alos)
+  var aspect_alos = ee.Terrain.aspect(dem_alos)
+  
+  var dem_alos_ave= dem_alos.select('AVE')
+  
+  
+  //visualization
+
+// Map.addLayer(slope, {min: -10, max: 6500}, 'slope_srtm', false)
+Map.addLayer(dem_srtm30, {min: -10, max: 6500}, 'dem_srtm', false)
+Map.addLayer(dem_alos, {min: -479, max: 8859}, 'dem_alos', false)
+
+
+//  (3) Add  landslides ocurrences 
+
+// var events = ee.FeatureCollection('ft:1B6LxrrIRytfR_HOoTCVEeRD5luO-Op2WIB7xJKhV', 'latitude')
+var events = ee.FeatureCollection('ft:1Md4KIpfOIw2hjI5Fzhl2UNbRhHypDqDzjpyEfrHl', 'latitude')  //landslides_ocurrences_2019
+
+// print(events.distinct('landslide_size').aggregate_array('landslide_size'))
+// print(events.distinct('landslide_id').aggregate_array('landslide_id'))
+// print(events.distinct('location_accuracy').aggregate_array('location_accuracy'))
+
+// add readable date/time
+events = events.map(function(f) {
+    return f.set({t: ee.Date(f.get('event_date'))}) 
+    .set({event_date: ee.Number(f.get('event_date'))})
+  })
+
+events = events.filter(ee.Filter.lt('location_accuracy', ee.Number(25)))   // location accuracy 25, greater than and lower than
+events = events.filter(ee.Filter.notEquals('location_accuracy', ee.Number(2)))
+
+// events = events.filter(ee.Filter.equals('location_accuracy', ee.Number(2)))
+
+// events = events.filter(ee.Filter.gte('location_accuracy', ee.Number(25)))
+
+print ('size', events.size())
+Map.addLayer(events, {color: 'blue'}, 'landslide point')
+
+
+
+ //-----------------------------------//---------------------------//---------------------------------------
+
+//(4)function to calculate the statistics:
+
+var calStats_W1 = function (image,buffer) {
+  // var listVar= [25,75]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  // reducer: ee.Reducer.mean().unweighted(),
+  // reducer: ee.Reducer.median().unweighted(),
+    reducer: ee.Reducer.mean(),// calculate max
+    
+  geometry: buffer_processed.geometry(),
+  scale: 30,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+var calStats_UNW1 = function (image,buffer) {
+  // var listVar= [25,75]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  // reducer: ee.Reducer.mean().unweighted(),
+  // reducer: ee.Reducer.median().unweighted(),
+    reducer: ee.Reducer.mean().unweighted(),// 
+    
+  geometry: buffer_processed.geometry(),
+  scale: 30,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+var calStats_W2 = function (image,buffer) {
+  // var listVar= [25,75]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  // reducer: ee.Reducer.mean().unweighted(),
+  // reducer: ee.Reducer.median().unweighted(),
+    reducer: ee.Reducer.median(),
+    
+  geometry: buffer_processed.geometry(),
+  scale: 30,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+
+var calStats_UNW2 = function (image,buffer) {
+  // var listVar= [25,75]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  // reducer: ee.Reducer.mean().unweighted(),
+  // reducer: ee.Reducer.median().unweighted(),
+    reducer: ee.Reducer.median().unweighted(),// 
+    
+  geometry: buffer_processed.geometry(),
+  scale: 30,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+//(5) function to calculate buffer
+
+var calcBuffer = function(landslide){
+  var location_accuracy= landslide.get('location_accuracy')
+  
+  // var buffer_radius=  ee.Number.parse(location_accuracy).multiply(1000) //buffer radius in meters 
+    var buffer_radius=100
+    // var buffer_radius=1000
+    return buffer_radius
+  }
+
+
+// (6) Function to calculate values 10 previous days before landslide ocurrence
+
+var setStats_rainfall = function (landslide,dem) {
+
+     var event_date =ee.Date(landslide.get('t')) 
+
+//calculate stats  by day using the buffer
+ 
+ //meanW
+  var elevation_2000_srtm_W1 = calStats_W1(ee.Image(dem_srtm30),landslide.geometry().buffer(calcBuffer(landslide))) 
+  var elevation_2006_alos_W1 = calStats_W1(ee.Image(dem_alos_ave),landslide.geometry().buffer(calcBuffer(landslide)))
+  var slope_2000_srtm_W1 = calStats_W1(ee.Image(slope_srtm30),landslide.geometry().buffer(calcBuffer(landslide)))
+  var slope_2006_alos_W1 = calStats_W1(ee.Image(slope_alos),landslide.geometry().buffer(calcBuffer(landslide)))
+  var aspect_2000_srtm_W1 = calStats_W1(ee.Image(aspect_srtm30),landslide.geometry().buffer(calcBuffer(landslide)))
+  var aspect_2006_alos_W1 = calStats_W1(ee.Image(aspect_alos),landslide.geometry().buffer(calcBuffer(landslide)))
+  
+  //mean_unw
+  var elevation_2000_srtm_UW1 = calStats_UNW1(ee.Image(dem_srtm30),landslide.geometry().buffer(calcBuffer(landslide))) 
+  var elevation_2006_alos_UW1 = calStats_UNW1(ee.Image(dem_alos_ave),landslide.geometry().buffer(calcBuffer(landslide)))
+  var slope_2000_srtm_UW1 = calStats_UNW1(ee.Image(slope_srtm30),landslide.geometry().buffer(calcBuffer(landslide)))
+  var slope_2006_alos_UW1 = calStats_UNW1(ee.Image(slope_alos),landslide.geometry().buffer(calcBuffer(landslide)))
+  var aspect_2000_srtm_UW1 = calStats_UNW1(ee.Image(aspect_srtm30),landslide.geometry().buffer(calcBuffer(landslide)))
+  var aspect_2006_alos_UW1 = calStats_UNW1(ee.Image(aspect_alos),landslide.geometry().buffer(calcBuffer(landslide)))
+  
+  //medianW
+  var elevation_2000_srtm_W2 = calStats_W2(ee.Image(dem_srtm30),landslide.geometry().buffer(calcBuffer(landslide))) 
+  var elevation_2006_alos_W2 = calStats_W2(ee.Image(dem_alos_ave),landslide.geometry().buffer(calcBuffer(landslide)))
+  var slope_2000_srtm_W2 = calStats_W2(ee.Image(slope_srtm30),landslide.geometry().buffer(calcBuffer(landslide)))
+  var slope_2006_alos_W2 = calStats_W2(ee.Image(slope_alos),landslide.geometry().buffer(calcBuffer(landslide)))
+  var aspect_2000_srtm_W2 = calStats_W2(ee.Image(aspect_srtm30),landslide.geometry().buffer(calcBuffer(landslide)))
+  var aspect_2006_alos_W2 = calStats_W2(ee.Image(aspect_alos),landslide.geometry().buffer(calcBuffer(landslide)))
+  
+  
+  //median unw
+  var elevation_2000_srtm_UW2 = calStats_UNW2(ee.Image(dem_srtm30),landslide.geometry().buffer(calcBuffer(landslide))) 
+  var elevation_2006_alos_UW2 = calStats_UNW2(ee.Image(dem_alos_ave),landslide.geometry().buffer(calcBuffer(landslide)))
+  var slope_2000_srtm_UW2 = calStats_UNW2(ee.Image(slope_srtm30),landslide.geometry().buffer(calcBuffer(landslide)))
+  var slope_2006_alos_UW2 = calStats_UNW2(ee.Image(slope_alos),landslide.geometry().buffer(calcBuffer(landslide)))
+  var aspect_2000_srtm_UW2 = calStats_UNW2(ee.Image(aspect_srtm30),landslide.geometry().buffer(calcBuffer(landslide)))
+  var aspect_2006_alos_UW2 = calStats_UNW2(ee.Image(aspect_alos),landslide.geometry().buffer(calcBuffer(landslide)))
+  
+
+  
+  
+  return  landslide.set({ //elevation
+                          elev_srtm_meanW: elevation_2000_srtm_W1,
+                          elev_srtm_meanUW: elevation_2000_srtm_UW1,
+                          elev_alos_meanW: elevation_2006_alos_W1,
+                          elev_alos_meanUW: elevation_2006_alos_UW1,
+                          
+                          
+                          elev_srtm_medianW: elevation_2000_srtm_W2,
+                          elev_srtm_medianUW: elevation_2000_srtm_UW2,
+                          elev_alos_medianW: elevation_2006_alos_W2,
+                          elev_alos_medianUW: elevation_2006_alos_UW2,
+          
+                          
+                          //slope
+                
+                          slope_srtm_meanW: slope_2000_srtm_W1,
+                          slope_srtm_meanUW: slope_2000_srtm_UW1,
+                          slope_alos_meanW: slope_2006_alos_W1,
+                          slope_alos_meanUW: slope_2006_alos_UW1,
+                          
+                          
+                          slope_srtm_medianW: slope_2000_srtm_W2,
+                          slope_srtm_medianUW: slope_2000_srtm_UW2,
+                          slope_alos_medianW: slope_2006_alos_W2,
+                          slope_alos_medianUW: slope_2006_alos_UW2,
+                          
+                          
+                          //aspect 
+                           
+                          aspect_srtm_meanW: aspect_2000_srtm_W1,
+                          aspect_srtm_meanUW: aspect_2000_srtm_UW1,
+                          aspect_alos_meanW: aspect_2006_alos_W1,
+                          aspect_alos_meanUW: aspect_2006_alos_UW1,
+                          
+                          aspect_srtm_medianW: aspect_2000_srtm_W2,
+                          aspect_srtm_medianUW: aspect_2000_srtm_UW2,
+                          aspect_alos_medianW: aspect_2006_alos_W2,
+                          aspect_alos_medianW: aspect_2006_alos_UW2,
+                          
+                          buffer_radius:calcBuffer(landslide)
+                       
+    
+  })
+  
+  }
+  
+  
+  events = events.map(setStats_rainfall)
+  
+  print (events.limit(1))
+
+// (7)export the file 
+
+Export.table.toDrive({
+  collection: events, 
+  description: 'DEM_elevation_mean_median_30', 
+  fileFormat: 'CSV',
+  selectors:(["landslide_id","date_landslide","country_code", "longitude", "location_accuracy","buffer_radius",
+  "elev_srtm_meanW", "elev_srtm_meanUW","elev_alos_meanW","elev_alos_meanUW", "elev_srtm_medianW","elev_srtm_medianUW","elev_alos_medianW", "elev_alos_medianUW",
+]),
+
+});
+
+// Export.table.toDrive({
+//   collection: events, 
+//   description: 'DEM_slope_mean_median_acc2', 
+//   fileFormat: 'CSV',
+//   selectors:(["landslide_id","date_landslide","country_code", "longitude", "location_accuracy","buffer_radius",
+//   "slope_srtm_meanW", "slope_srtm_meanUW","slope_alos_meanW","slope_alos_meanUW", "slope_srtm_medianW","slope_srtm_medianUW","slope_alos_medianW", "slope_alos_medianUW",
+// ]),
+
+// });
+
+
+// Export.table.toDrive({
+//   collection: events, 
+//   description: 'DEM_aspect_mean_median_acc2', 
+//   fileFormat: 'CSV',
+//   selectors:(["landslide_id","date_landslide","country_code", "longitude", "location_accuracy","buffer_radius",
+//   "aspect_srtm_meanW", "aspect_srtm_meanUW","aspect_alos_meanW","aspect_alos_meanUW", "aspect_srtm_medianW",
+//   "aspect_srtm_medianUW","aspect_alos_medianW", "aspect_alos_medianUW",
+// ]),
+
+// });
+
+
+
+
+
+
+
+

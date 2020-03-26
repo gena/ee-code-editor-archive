@@ -1,0 +1,180 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var Rainfall_TRMM3B42 = ee.ImageCollection("TRMM/3B42");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+
+//(2)--------------------------------visualization------------------------------------------//
+
+// // Create temporal filter
+
+// var temporalFilter= Rainfall_TRMM3B42.filterDate('2015-06-22', '2015-06-23')
+// print ('temporal',temporalFilter)
+// Map.addLayer(temporalFilter.select('precipitation'), {}, 'precipitation_pers',false)
+
+// var temporalFilter= persiann.filterDate('2010-08-04', '2010-08-13')
+// print ('temporal',temporalFilter)
+// Map.addLayer(temporalFilter.select('precipitation'), {}, 'precipitation_per',false)
+
+
+//------------------------------visualization----------------------------------------------//
+
+//  (3) Add  landslides ocurrences 
+
+// var events = ee.FeatureCollection('ft:1B6LxrrIRytfR_HOoTCVEeRD5luO-Op2WIB7xJKhV', 'latitude')
+var events = ee.FeatureCollection('ft:1Md4KIpfOIw2hjI5Fzhl2UNbRhHypDqDzjpyEfrHl', 'latitude')  //landslides_ocurrences_2019
+
+// add readable date/time
+events = events.map(function(f) {
+    return f.set({t: ee.Date(f.get('event_date'))}) 
+    .set({event_date: ee.Number(f.get('event_date'))})
+  })
+
+// add events depending on the location accuracy:
+
+//location accuracy values: 25 = 25Km, 1=1Km, 5=5km, 2=unknown, 0.1= exact
+
+events = events.filter(ee.Filter.lte('location_accuracy', ee.Number(25)))   // location accuracy lower and equals  to 25, the buffer= data resolution
+
+// events = events.filter(ee.Filter.equals('location_accuracy', ee.Number(2)) // location accuracy is unknown the buffer = data resolution *4
+
+// events = events.filter(ee.Filter.gt('location_accuracy', ee.Number(25))) //accuracy is greater then 25, then buffer= location accuracy * 1000
+
+//check a particular landslide 
+// events = events.filter(ee.Filter.inList('landslide_id', [336]))//filter by landslide_id
+
+print ('size', events.size())
+Map.addLayer(events, {color: 'blue'}, 'landslide point')
+
+
+ //-----------------------------------//---------------------------//---------------------------------------
+
+//(4)function to calculate the mean:
+
+var calStats = function (image,buffer) {
+  // var listVar= [25,75]
+  var buffer_processed= ee.Feature (buffer)
+  var stats_values = image.reduceRegion({
+  // reducer: ee.Reducer.percentile(listVar),
+  // reducer: ee.Reducer.mean().unweighted(), 
+  // reducer: ee.Reducer.median().unweighted(),
+    reducer: ee.Reducer.min(),// calculate max
+    
+  geometry: buffer_processed.geometry(),
+  scale: 25000,
+  maxPixels: 1e9 ,
+  })
+  var values = stats_values
+  return  values
+}
+
+
+
+var dateRange= function (landslide) {
+
+    var event_date = ee.Date(landslide.get('event_date')) //convert date to milliseconds 
+  // var diavento= ee.Date(events.first().get('event_date'))
+  
+    var event_date= ee.Date.fromYMD (event_date.get ('Year'), 
+    event_date.get ('Month'), event_date.get ('Day')).millis() //initialize timezone to cero
+    
+    var ten_days=864000000  // 10 days in miliseconds 
+    
+    var date_minus_10days = event_date.subtract (ten_days)
+    var recorded_date= ee.Date (date_minus_10days) // get new date in miliseconds 
+
+return recorded_date}
+
+
+
+//(5) function to calculate buffer
+
+var calcBuffer = function(landslide){
+  var location_accuracy= landslide.get('location_accuracy')
+  
+  var buffer_radius=  ee.Number.parse(location_accuracy).multiply(1000) //buffer radius in meters 
+  // var buffer_radius= 25000
+    return buffer_radius
+  }
+
+
+// (6) Function to calculate values 10 previous days before landslide ocurrence
+
+var setMean_rainfall = function (landslide) {
+
+    var event_date1 =ee.Date(landslide.get('t')) 
+    var previous_tenDays= dateRange(landslide)
+
+
+//   function to calculated values per day
+
+    var day_mean = ee.List.sequence(0, 10).map(function(n) { // .sequence: number of days from 10 days before landslide occurrence 
+    var start = previous_tenDays.advance(n, 'day'); // Starting date
+    var end = start.advance(1, 'day'); // Step by each iteration
+
+  return Rainfall_TRMM3B42.select ('precipitation').filterDate(start, end).sum().multiply(3).set('system:time_start', start)
+    })
+    
+  var collection = ee.ImageCollection(day_mean)
+  
+  
+
+  
+//calculate the mean by day using the buffer
+ 
+  var collectionTolist= collection.toList(collection.size())
+
+  var day_minus10 = calStats(ee.Image(collectionTolist.get(0)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus9 = calStats(ee.Image(collectionTolist.get(1)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus8 = calStats(ee.Image(collectionTolist.get(2)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus7 = calStats(ee.Image(collectionTolist.get(3)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus6 = calStats(ee.Image(collectionTolist.get(4)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus5 = calStats(ee.Image(collectionTolist.get(5)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus4= calStats(ee.Image(collectionTolist.get(6)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus3 = calStats(ee.Image(collectionTolist.get(7)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus2 = calStats(ee.Image(collectionTolist.get(8)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_minus1 = calStats(ee.Image(collectionTolist.get(9)),landslide.geometry().buffer(calcBuffer(landslide)))
+  var day_0 = calStats(ee.Image(collectionTolist.get(10)),landslide.geometry().buffer(calcBuffer(landslide)))  
+    
+  return  landslide.set({ day_minus10: day_minus10, date_minus10:ee.Date(ee.Image(collectionTolist.get(0)).get('system:time_start')),
+                          day_minus9: day_minus9,date_minus9:ee.Date(ee.Image(collectionTolist.get(1)).get('system:time_start')),
+                          day_minus8: day_minus8,date_minus8:ee.Date(ee.Image(collectionTolist.get(2)).get('system:time_start')), 
+                          day_minus7: day_minus7,date_minus7:ee.Date(ee.Image(collectionTolist.get(3)).get('system:time_start')),
+                          day_minus6: day_minus6,date_minus6:ee.Date(ee.Image(collectionTolist.get(4)).get('system:time_start')),
+                          day_minus5: day_minus5,date_minus5:ee.Date(ee.Image(collectionTolist.get(5)).get('system:time_start')),
+                          day_minus4: day_minus4,date_minus4:ee.Date(ee.Image(collectionTolist.get(6)).get('system:time_start')),
+                          day_minus3: day_minus3,date_minus3:ee.Date(ee.Image(collectionTolist.get(7)).get('system:time_start')),
+                          day_minus2: day_minus2,date_minus2:ee.Date(ee.Image(collectionTolist.get(8)).get('system:time_start')),
+                          day_minus1: day_minus1,date_minus1:ee.Date(ee.Image(collectionTolist.get(9)).get('system:time_start')),
+                          day_0: day_0,date_0:ee.Date(ee.Image(collectionTolist.get(10)).get('system:time_start')),
+                          date_landslide: event_date1,
+                          buffer_radius:calcBuffer(landslide)
+                          
+    
+  })
+  
+  }
+    
+  events = events.map(setMean_rainfall)
+  
+  // print (events.limit(100))
+  
+
+ //(7)export the file 
+
+Export.table.toDrive({
+  collection: events, 
+  description: 'Rainfall_TRMM3B42_min_buff_acc', 
+  fileFormat: 'CSV',
+  selectors:(["landslide_id","date_landslide","country_code", "longitude", "location_accuracy","buffer_radius",
+  "date_0", "day_0","date_minus1","day_minus1", "date_minus2","day_minus2","date_minus3", "day_minus3", "date_minus4","day_minus4", 
+  "date_minus5", "day_minus5","date_minus6", "day_minus6","date_minus7","day_minus7", "date_minus8", "day_minus8", "date_minus9",
+  "day_minus9","date_minus10","day_minus10"]),
+});
+
+
+
+
+
+
+
+

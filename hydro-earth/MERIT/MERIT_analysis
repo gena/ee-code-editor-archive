@@ -1,0 +1,161 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var merit_cuts = ee.ImageCollection("users/hcwinsemius/MERIT/merit_cuts"),
+    image = ee.Image("users/dirkeilander/LiDAR_DTM_EastSumatra_UTM48SDeltares25Mar2016"),
+    fl_footprint = /* color: #d63000 */ee.Geometry.LinearRing(
+        [[-82.90283203125, 27.897349229684263],
+         [-80.66162109375, 28.748396571187406],
+         [-79.91455078125, 26.80446076654616],
+         [-80.31005859375, 25.025884063244828],
+         [-81.123046875, 24.94621907436008],
+         [-82.02392578125, 26.2145910237943],
+         [-82.90283203125, 27.897349229684263]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// DEM stitch MERIT
+
+/* TODO:
+- Dirk: prepare Sumatra DEM as an asset in GEE
+- Import SRTM90 (v4)
+- Import NED, AUS DEM, AHN, resampled to SRTM resolution, where necessary, correct for difference M.S.L. and EGM 96
+
+- Stitch all 3rd party DEMs together into one asset
+- run a comparison (SRTM - MERIT, 3rd party - MERIT)
+*/
+
+
+
+// get geometry from current map and print, 
+// then use printed to get the same map extent always
+
+// print(ee.Geometry(Map.getBounds(true)).centroid(1e-3))
+
+var azimuth = 90;
+var zenith = 60;
+
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+// DEM Hillshade function - Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+//intervals
+var style_dem = '\
+<RasterSymbolizer>\
+  <ColorMap  type="graduated" extended="false" >\
+    <ColorMapEntry color="#cef2ff" quantity="-20" label="-200m"/>\
+    <ColorMapEntry color="#9cd1a4" quantity="0" label="0m"/>\
+    <ColorMapEntry color="#7fc089" quantity="5" label="5m" />\
+    <ColorMapEntry color="#9cc78d" quantity="10" label="10m" />\
+    <ColorMapEntry color="#b8cd95" quantity="25" label="25m" />\
+    <ColorMapEntry color="#d0d8aa" quantity="50" label="50m" />\
+    <ColorMapEntry color="#e1e5b4" quantity="75" label="75m" />\
+    <ColorMapEntry color="#f1ecbf" quantity="100" label="100m" />\
+    <ColorMapEntry color="#e2d7a2" quantity="125" label="125m" />\
+    <ColorMapEntry color="#d1ba80" quantity="150" label="150m" />\
+    <ColorMapEntry color="#d1ba80" quantity="1000" label="1000m" />\
+  </ColorMap>\
+</RasterSymbolizer>';
+
+function get_footprint(x) { 
+    var img = ee.Image(x);
+    return ee.Geometry(img.geometry());
+}
+function im_from_collection(collection, name) {
+    return ee.Image(ee.ImageCollection(collection).filterMetadata('system:index', 'equals', name).first());
+}
+var colors_diff = ['5977e3', '7b9ff9', '9ebeff', 'c0d4f5', 'dddcdc', 'f2cbb7', 'f7ac8e', 'ee8468', 'd65244'];
+
+
+// create dictionary to setup comparisons
+var merit_dict = ee.Dictionary(['florida',  'na1',
+                                'sumatra',  'as2',
+                                'sa', 'sa'
+                                ]);
+var dem_dict = ee.Dictionary(['florida', ee.Image('USGS/NED'),
+                              'sumatra', ee.Image('users/dirkeilander/DTMs/EastSumatra_UTM48SDeltares25Mar2016')]);
+var geoid_dict = ee.Dictionary(['florida', ee.Image('users/dirkeilander/geoids/g2003_NAD83'),
+                                'sumatra', ee.Image('users/dirkeilander/geoids/EGM08_NAD83').add(0.706)]);
+var footprint_dict = ee.Dictionary(['florida', fl_footprint,
+                                'sumatra', get_footprint(dem_dict.get('sumatra'))]);                     
+print(geoid_dict);
+// Load the SRTM 30 meter data and geoid
+var srtm = ee.Image('CGIAR/SRTM90_V4');
+var egm96_height = ee.Image('users/dirkeilander/geoids/EGM96_NAD83');
+var info = srtm.getInfo().bands[0];
+print(info);
+var merit = ee.ImageCollection('users/dirkeilander/MERIT'); //.mosaic() //.reproject(info.crs, null, 90);
+print(merit);
+
+// setup comparison
+var key = 'sumatra';
+var merit_key = merit_dict.get(key);
+var res = 300; 
+
+// get merit dem data and info;
+var srtm_resampled = srtm.resample('bilinear').reproject(info.crs, null, res);
+var merit_resampled = im_from_collection(merit, merit_key).resample('bilinear').reproject(info.crs, null, res);
+// srtm - merit diff
+var srtm_merit_diff = srtm_resampled.subtract(merit_resampled);
+
+// // get local dem data
+var local_dem = ee.Image(dem_dict.get(key)).resample('bilinear').reproject(info.crs, null, res);
+var footprint = ee.Geometry(footprint_dict.get(key));
+var local_geoid = ee.Image(geoid_dict.get(key)) //.resample('bilinear').reproject(info.crs, null, res);
+
+// // correct local dem for MSL offset
+var vdatum_diff = egm96_height.subtract(local_geoid).resample('bilinear').reproject(info.crs, null, res);
+var merit_err = merit_resampled.subtract(local_dem).add(vdatum_diff);
+var srtm_err = srtm_resampled.subtract(local_dem).add(vdatum_diff);
+
+
+// plot
+// Map.centerObject(footprint);
+Map.addLayer(hillshadeit(srtm_resampled.sldStyle(style_dem), srtm_resampled, 1.5, 4.0), {}, 'SRTM', false);
+Map.addLayer(hillshadeit(merit_resampled.sldStyle(style_dem), merit_resampled, 1.5, 4.0), {}, 'MERIT', false);
+Map.addLayer(srtm_merit_diff, {min: -20, max:20, palette:colors_diff}, 'srtm - merit', false);
+Map.addLayer(hillshadeit(local_dem.sldStyle(style_dem), local_dem, 1.5, 4.0), {}, 'local dem', false);
+Map.addLayer(vdatum_diff, {min: -2, max:2, palette:colors_diff}, 'vdatum diff', false);
+Map.addLayer(merit_err, {min: -20, max:20, palette:colors_diff}, 'merit error', true);
+Map.addLayer(srtm_err, {min: -20, max:20, palette:colors_diff}, 'srtm error', true);
+Map.addLayer(footprint, {}, 'footprint', false);
+
+
+// Pre-define some customization options.
+var options = {
+  title: 'SRTM vs MERIT accuracy',
+  fontSize: 20,
+  hAxis: {title: 'elevation difference'},
+  vAxis: {title: 'count of DN'},
+  series: {
+    0: {color: 'blue'},
+    1: {color: 'green'}},
+  histogram: {
+    minValue: -10.0,
+    maxValue: 30.0,
+    bucketSize: 2.0,
+    },
+};
+
+// Make the histogram, set the options.
+var histogram = ui.Chart.image.histogram(merit_err.addBands(srtm_err), footprint, res)
+    .setSeriesNames(['MERIT','SRTM'])
+    .setOptions(options);
+
+// Display the histogram.
+print(histogram);

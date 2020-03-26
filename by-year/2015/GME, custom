@@ -1,0 +1,67 @@
+// GME, custom
+
+var azimuth = 90;
+var zenith = 60;
+
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+// DEM Hillshade function - Compute hillshade for the given illumination az, el.
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+// starting from level 02
+var au = [
+  null, // 0
+  null, // 1
+  ee.FeatureCollection('ft:1Dq_Q2JvvYkYO-kFX7L4E4Nzycwc50j9hfhSsBQJW'), // 2
+  ee.FeatureCollection('ft:1778IyIZLZKSKVgko9X3aIV94E7jcm28uniyD6ycp'), // 3
+  ee.FeatureCollection('ft:1WZ4Utbbatdl3vFVK7kTmAyHDyRjhMVfXeJeJTnBa'), // 4
+  ee.FeatureCollection('ft:1rrk-yEOb8ILSolV_kSVD1qGxszHcy0cSL9UnUxIh'), // 5
+  ee.FeatureCollection('ft:1-aMEhsi4usdxVUSSjKkJGC8pir3duCi_5oItnxtT'), // 6
+  ee.FeatureCollection('ft:1YDeXF2LN8gDeJAOJTX0Kwp9QwV_-ZFI2llKilTGu') // 7
+];
+
+var aoi_features = au[3];
+var aoi = aoi_features.filter(ee.Filter.eq('HYBAS_ID', 5030073410));
+var not_aoi = aoi_features.filter(ee.Filter.neq('HYBAS_ID', 5030073410));
+
+Map.addLayer(not_aoi)
+
+// var gme = ee.Image('GME/images/05889347502198831302-03475931059984535143');
+
+// var gme = ee.ImageCollection('GME/layers/02769936315533645832-18217876338472823932'); // HAND, M&D
+
+var colors_hand = ['023858', '006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027'];
+var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+
+//var images = ee.List(ee.ImageCollection('GME/layers/02769936315533645832-18217876338472823932').toList(100, 0)); // HAND, M&D
+//var image = ee.Image(images.get(35))
+//Map.addLayer(hillshadeit(image.visualize({min:-1, max:30, palette:colors_hand}), image, 2.0, 2), {}, 'hand', false)
+
+var hand = ee.ImageCollection('GME/layers/02769936315533645832-01676697048325678532'); // HAND, M&D
+var dem = ee.Image('USGS/SRTMGL1_003')
+
+Map.addLayer(hillshadeit(dem.clip(aoi).visualize({min:-1, max:1500, palette:colors_dem}), dem, 2.0, 2), {}, 'dem', true)
+
+Map.addLayer(hillshadeit(hand.mosaic().visualize({min:-1, max:30, palette:colors_hand}), dem, 2.0, 2), {}, 'hand', true)
+
+
+// Map.centerObject(hand, 11)

@@ -1,0 +1,364 @@
+//L7 L8 Regression
+//Code written by:
+//Ian Housman, Kim McCallum, and Carson Stam
+//RedCastle Resources, Inc.
+
+//Working onsite at:
+//USDA Forest Service
+//Remote Sensing Applications Center (RSAC)
+//2222 West 2300 South
+//Salt Lake City, UT 84119
+//Office: (801) 975-3366
+//Email: ihousman@fs.fed.us
+//RSAC FS Intranet website: http://fsweb.rsac.fs.fed.us/
+//RSAC FS Internet website: http://www.fs.fed.us/eng/rsac/
+/////////////////////////////////////////////////////////////////
+//Basic functions
+/////////////////////////////////////////////////////////////////
+var range = function(start, stop, step){
+  start = parseInt(start);
+  stop = parseInt(stop);
+    if (typeof stop=='undefined'){
+        // one param defined
+        stop = start;
+        start = 0;
+    };
+    if (typeof step=='undefined'){
+        step = 1;
+    };
+    if ((step>0 && start>=stop) || (step<0 && start<=stop)){
+        return [];
+    };
+    var result = [];
+    for (var i=start; step>0 ? i<stop : i>stop; i+=step){
+        result.push(i);
+    };
+    return result;
+};
+var stringify = function(in_no){
+  return in_no.toString();
+}
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
+//Bust out using the simpleCloudScore function
+var cloud_thresh = 20;
+var bust_clouds = function(image) {
+  image = ee.Algorithms.Landsat.simpleCloudScore(image);
+  var quality = image.select('cloud').gt(cloud_thresh);
+ 
+  var maskedImage = image.mask().and(quality.not());
+  image = image.mask(maskedImage);
+  return image;
+};
+/////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////
+//
+//   SIMPLE NORMALIZATION FUNCTIONS
+//
+var percentileTH = 80;
+//var zone = 18;
+// FUNCTION - ID 'UNCHANGED'/PIF PIXELS
+var getPIFs = function(stack, bandsPIF, percentileTH, region,zone)
+  {
+  //Mask out any pixels not in the mask in any image
+  var startMask = stack.map(function(img){
+    return img.mask().reduce(ee.Reducer.min());
+  }).min();
+  addToMap(startMask,{},'startPIFMask',false);
+  
+    //Percentile reducer params
+    var calcParamsPercentile = 
+        {     
+          'reducer': ee.Reducer.percentile([percentileTH]),
+          'geometry': region, 
+          'scale': 90, 
+          'bestEffort': true,
+          'maxPixels': 500000000,
+          'tileScale': 8,
+          'crs':  'EPSG:326' + zone.toString()
+        }
+  //compute the standard deviation to find unchanged pixels 
+  var all_bandsStdDev = stack.select(bandsPIF).reduce(ee.Reducer.std_dev());
+  //Use reduceRegion function to get the nth percentile std dev values in the region
+  var percentileReducer = ee.Reducer.percentile([percentileTH]);
+  //Initialize an empty image
+  var masked = ee.Image.constant(0);
+  //loop through the bands and get statistics  
+  for(var i in bandsPIF)
+    {
+      //initialize a new empty image for each band PIF selection
+      var masked2 = ee.Image.constant(0);
+      var bandname = bandsPIF[i] + "_stdDev";
+      //compute the specified percentile value for the band
+      var THval = ee.Image.constant(all_bandsStdDev.select(bandname).reduceRegion(calcParamsPercentile).get(bandname));
+      //where the stand deviation value is less than the threshold, add a 1
+      var maskedTemp = masked2.where(all_bandsStdDev.select(bandname).lt(THval),1);
+      //add up the values in the the specified bands
+      masked = masked.add(maskedTemp);
+    }
+  //Find the pixels that are have low variance in all the given bands and clip this image to the region to avoid extrapolation 
+  var potentialPIFs = masked.eq(bandsPIF.length).clip(region);
+  //Return these locations -Value of 1 with non PIFs masked out
+  return potentialPIFs.mask(potentialPIFs.and(startMask))
+  };
+
+// FUNCTION TO GET CORRECTION COEFFICIENTS AND CORRECT IMAGE
+
+// This function will return a corrected image and can be mapped across the stack
+// to return a corrected stack
+var imgNormalizer = function(slave, master, PIFpixels,region,zone)
+    {
+    var calcParamsLF = 
+        {     
+          'reducer': ee.Reducer.linearFit(),
+          'geometry': region, 
+          'scale': 90, 
+          'bestEffort': true,
+          'maxPixels': 500000000,
+          'tileScale': 8,
+          'crs':  'EPSG:326' + zone.toString()
+        }
+    var PIFslave = slave.mask(PIFpixels);
+    var PIFmaster = master.mask(PIFpixels);
+    var slopeOut = '';
+    var interceptOut = '';
+    //Get the statistics and make them constant images to be used in band math correction
+    //Empty array to hold corrected bands
+    var contArray = []
+    //Loop through bands, get regression coeffs and correct
+    for (var band in STD_NAMES){
+      //Make a 2 band image for regression
+      var regImg = ee.Image([PIFslave.select([STD_NAMES[band]]),PIFmaster.select([STD_NAMES[band]])]);
+      //Get the intercept
+      var intercept = regImg.reduceRegion(calcParamsLF).get('offset'); 
+      //Get the slope
+      var slope = regImg.reduceRegion(calcParamsLF).get('scale');
+      //Use the coefficients to create constant images that could then be used for the band math correction functions. 
+      var SlopeImg = ee.Image.constant(slope);
+      var IntImg = ee.Image.constant(intercept);
+      
+      if(slopeOut === ''){slopeOut = SlopeImg; interceptOut = IntImg}
+      else{slopeOut = slopeOut.addBands(SlopeImg);
+        interceptOut = interceptOut.addBands(IntImg);
+      };
+      //Select the corresponding band to correct
+      var band2Correct = slave.select([STD_NAMES[band]])
+      //Linear correction = y = int + slope*x
+      var corrBand = band2Correct.multiply(SlopeImg).add(IntImg);
+      contArray.push(corrBand)
+      print(STD_NAMES[parseInt(band)] + ' slope/offset:',slope,intercept);
+    }
+   
+    slopeOut = slopeOut.select(range(0,STD_NAMES.length), STD_NAMES.map(function(nm){return 'Slope_' + nm}));
+    interceptOut = interceptOut.select(range(0,STD_NAMES.length), STD_NAMES.map(function(nm){return 'Intercept_' + nm}));
+    
+    //addToMap(slopeOut,{'min':0.7,'max':0.99,'bands':'Slope_swir1,Slope_red,Slope_nir'},'SlopeStack');
+    //addToMap(interceptOut,{},'InterceptStack');
+   
+    var predicted =ee.Image.cat(contArray)
+    var d = slave.subtract(predicted);
+    var vd = d.reduce(ee.Reducer.stdDev());
+    //addToMap(d,{'min':-0.001,'max': 0.05,'bands': 'nir'},'CorrectionDiff',false)
+    //addToMap(vd,{'min':-0.001,'max': 0.08,},'StdCorrectionDiff',false)
+    
+    return predicted.addBands(slopeOut).addBands(interceptOut); 
+    };
+
+ 
+////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////
+//Globals
+//Dictionary of sensor collection names
+  var collection_dict = {L8: 'LC8_L1T_TOA',
+                         L7: 'LE7_L1T_TOA',
+                         L5: 'LT5_L1T_TOA',
+                         L4: 'LT4_L1T_TOA'
+  };
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//Band combinations for each sensor corresponding to final selected corresponding bands                        
+  var sensor_band_dict ={L8 : [1,2,3,4,5,6],
+                        L7 : [0,1,2,3,4,7],
+                        L5 : [0,1,2,3,4,6],
+                        L4 : [0,1,2,3,4,6]
+  };
+
+
+var vizParamsCO3 = {'min': 0.05,'max': [.3,0.4,.4],   'bands':'swir1,nir,red', 'gamma':1.6};
+var vizParams = vizParamsCO3;
+//Band names to be used for the spectral data
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1','swir2'];
+//Dictionary corresponding to spacecraft id in the metadata
+var spacecraft_dict = {'Landsat4': 'L4','Landsat5': 'L5','Landsat7': 'L7', 'LANDSAT_8': 'L8'};
+//////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
+//Function to compare band-wise correction differences
+var chartCorrection = function(preImage,postImage,regressImage,mask,region,zone){
+  preImage = preImage.select(STD_NAMES).mask(mask).set('label', 'pre');
+  postImage = postImage.select(STD_NAMES).mask(mask).set('label', 'post');
+  regressImage = regressImage.select(STD_NAMES).mask(mask).set('label', 'regress');
+  var ic = ee.ImageCollection([preImage, postImage, regressImage]);
+  var bands = ic.map(function(image) {
+    var dict = image.reduceRegion(ee.Reducer.mean(), null, 900);
+    dict = dict.set('label', image.get('label'));
+    return ee.Feature(null, dict);
+  });
+  print(bands);
+  print(Chart.feature.byProperty(bands, null, 'label').setChartType('LineChart'));
+};
+//////////////////////////////////////////////////////////////////////////
+//Functions for applying date-based composite filter
+//Author: Ian Housman
+//////////////////////////////////////////////////////////////////////////
+//Convert epoch to float date
+var dateToYearProp = function(d){
+  return d.getTime()/365/3600/24/1000;
+};
+//////////////////////////////////////////////////////////////////////////
+//Add date band- only the date without the year
+//Year is taken away to allow for multi-year compositing
+var addDateBand = function(inImg){
+  var i =inImg.metadata('system:time_start').divide(365).divide(3600).divide(24).divide(1000);
+  i = i.subtract(i.int16());
+  return inImg.addBands(i.select([0],['Date']));
+};
+//////////////////////////////////////////////////////////////////////////
+//Function to add inverse abs diff from specified date 
+var absFromDate = function(inCollect, bestDate){
+  var bestDateImg = ee.Image(dateToYearProp(bestDate)).select([0], ['Date']);
+  bestDateImg = bestDateImg.subtract(bestDateImg.int16());
+  var dateCollect = inCollect.map(addDateBand);
+  var absDiffCollect = dateCollect.map(function(img){
+    var absD = img.select(['Date']).subtract(bestDateImg).abs().multiply(-1);
+    return img.addBands(absD.select([0], ['absDiff']));
+    
+  });
+  return absDiffCollect;
+};
+//////////////////////////////////////////////////
+//Function to correct L8 to equivalent L7 or visa versa
+var L7L8_Regression = function(image){
+  //Get rid of clouds
+  if(maskClouds === true){image = bust_clouds(image)};
+  
+  Map.centerObject(image,9);
+  
+  //Get some info
+  var info = image.getInfo();
+  var id = info.properties['system:index']
+  info = info.properties;
+  var dts = info.DATE_ACQUIRED
+  var path =info.WRS_PATH;
+  var row = info.WRS_ROW;
+  var zone =info.UTM_ZONE;
+  var year = parseInt(dts.split("-",1)[0]);
+  var region = image.geometry();
+  
+  
+  
+  //Helper functions to convert date objects to float year/date equivalent and visa versa
+  var dateToProp = function(dt){return dt.valueOf()/365/3600/24/1000 + 1970};
+  var propToDate = function(prop){return new Date((prop-1970)*365*3600*24*1000)};
+  //Set up days of year
+
+  var dtsd = new Date(dts);
+  var dtFloat = dateToProp(dtsd);
+  
+  //Get dates to look for the other sensors available images
+  var lookBack = 16;
+  var lookForward = 100
+  var startDate = propToDate(dtFloat-lookBack/365);
+  var endDate = propToDate(dtFloat+lookForward/365);
+  
+ 
+  //More info
+  var spacecraft = info.SPACECRAFT_ID;
+  var sensor = spacecraft_dict[spacecraft];
+  var collection_name = collection_dict[sensor];
+  var bands = sensor_band_dict[sensor];
+  
+  
+  //Get the other image
+  if(sensor === 'L8'){var otherSensor = 'L7'}
+  else{var otherSensor = 'L8'};
+  var otherCollectionName = collection_dict[otherSensor];
+  var otherBands = sensor_band_dict[otherSensor];
+  var otherImages = ee.ImageCollection(otherCollectionName)
+                  .filterDate(startDate,endDate)
+                  .filterMetadata('WRS_PATH', 'EQUALS', path)
+                  .filterMetadata('WRS_ROW', 'EQUALS', row)
+                  .filterMetadata('CLOUD_COVER', 'less_than', 50)
+                  //.map(addDateBand)
+                  ;
+                  
+  //Trying to enhance the ability to choose the closest image with
+  //minimal clouds according to the metadata
+  var setAbsDate = function(inImage, refDate){
+    
+    var info = inImage.getInfo().properties;
+    var refD = dateToProp(refDate);
+    var iD = dateToProp(new Date(info.DATE_ACQUIRED))
+    var d = Math.abs(iD-refD);
+    return inImage.set({'DateDiff': d})
+  }
+  // otherImages = otherImages.map(function(img){
+  //   return setAbsDate(img,dtsd)
+  // }).sort('DateDiff')
+  
+  //var oi = setAbsDate(ee.Image(otherImages.first()),dtsd);
+
+ 
+  // //print(otherImages);
+  // addToMap(otherImages.select(['absDiff']),{},'ois');
+  var otherImage = ee.Image(otherImages.first()).select(otherBands,STD_NAMES);
+  var info2 =otherImage.getInfo();
+  var id2 = info2.properties['system:index']
+  // //print(dateToProp(new Date(info2.properties.DATE_ACQUIRED)))
+
+  
+  addToMap(otherImage,vizParams,'RegressImage: ' +id2);
+  var origImage = image.select(bands,STD_NAMES)
+  addToMap(origImage,vizParams,'OrigImage: ' +id);
+  
+  //Find stable, non-changing pixels between both images
+  var pifCollect = ee.ImageCollection([origImage,otherImage]);
+  //addToMap(pifCollect.mean(),vizParams,'pifCollect');
+  var PIFpixels = getPIFs(pifCollect, STD_NAMES,percentileTH, region,zone);
+  addToMap(PIFpixels,{'palette': '000000,FFFF00'},'StablePixels',false);
+  
+  //Perform a linear fit between the images within the stable pixels
+  //And apply it
+  var normalizedImage = imgNormalizer( origImage, otherImage,PIFpixels,region,zone)
+  //normalizedImage = normalizedImage.mask(ee.Image(1))
+  addToMap(normalizedImage,vizParams,'normalizedInput: ' + id)
+  
+  
+  //Trying to chart the correction differences
+  chartCorrection(origImage,normalizedImage,otherImage,PIFpixels,region,zone)
+  
+  exportImage(normalizedImage.multiply(10000).int16(), id + '_NormalizedTo_' +id2, 
+         {'scale': 30,
+          'maxPixels': 3e9,
+          
+          'crs':  'EPSG:326' + zone.toString()})
+  return normalizedImage
+  
+  
+}
+
+/////////////////////////////////
+//Test it
+var maskClouds = false;
+//var img = ee.Image('LC8_L1T_TOA/LC80060622013240LGN00');//Amazon
+//var img = ee.Image('LC8_L1T_TOA/LC80410262013197LGN00');//Montana
+//var img = ee.Image('LC8_L1T_TOA/LC80980632013245LGN00');//PNG
+//var img = ee.Image('LC8_L1T_TOA/LC80380342013176LGN00');//Utah
+//var img = ee.Image('LC8_L1T_TOA/LC80610182014212LGN00');//Alaska/BC/Yukon
+//var img = ee.Image('LC8_L1T_TOA/LC81950282014255LGN00');//Alps
+//var img = ee.Image('LC8_L1T_TOA/LC81780602014184LGN00');//DRC
+//var img = ee.Image('LC8_L1T_TOA/LC82310932014011LGN00');//Patagonia
+var img = ee.Image('LC8_L1T_TOA/LC81690702014169LGN00');
+L7L8_Regression(img)
+
+

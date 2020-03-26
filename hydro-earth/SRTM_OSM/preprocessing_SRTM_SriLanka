@@ -1,0 +1,181 @@
+// Copyright (C) 2016 Delaters
+// This file is part of PARTERRA_GEE.
+//
+// PARTERRA_GEE is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// PARTERRA_GEE is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+// This script does the preprocessing of SRTM data before being fused with OSM data. The script
+// a) smooths SRTM with PM filter and resample to 0.5 m (this step could be done beforehand and saved as a new asset)
+// b) straighten DEM for roads
+// TODO (more elaborate function that corrects SRTM for (high) build-up area)
+
+// ***** some plot functionality ******
+function radians(img) { return img.toFloat().multiply(3.1415927).divide(180); }
+
+function hillshade(az, ze, slope, aspect) {
+  var azimuth = radians(ee.Image(az));
+  var zenith = radians(ee.Image(ze));
+  return azimuth.subtract(aspect).cos().multiply(slope.sin()).multiply(zenith.sin())
+      .add(zenith.cos().multiply(slope.cos()));
+}
+
+function hillshadeit(image, elevation, weight, height_multiplier) {
+  var hsv  = image.unitScale(0, 255).rgbtohsv();
+
+  var terrain = ee.call('Terrain', elevation.multiply(height_multiplier));
+  var slope = radians(terrain.select(['slope']));
+  var aspect = radians(terrain.select(['aspect']));
+  var hs = hillshade(azimuth, zenith, slope, aspect);
+
+  var intensity = hs.multiply(weight).multiply(hsv.select('value'));
+  var huesat = hsv.select('hue', 'saturation');
+  
+  return ee.Image.cat(huesat, intensity).hsvtorgb();
+}
+
+var azimuth = 90;
+var zenith = 60;
+
+// visualization settings (elevation)
+// function to visualize the specific DEM
+var colors_dem = ['006837', '1a9850', '66bd63', 'a6d96a', 'd9ef8b', 'ffffbf', 'fee08b', 'fdae61', 'f46d43', 'd73027', 'a50026', 'ffffff']
+var dem_min = 700;
+var dem_max = 1200;
+
+var addDem = function(dem, name, visible) {
+  var im = dem.visualize({palette:colors_dem, min:dem_min, max:dem_max, opacity: 1.0});
+  var hillshade_im = hillshadeit(im, dem, 2.0, 2.0);
+  Map.addLayer(hillshade_im, {}, name, visible);
+  return hillshade_im;
+};
+
+
+// resamle and smooth dem
+/***
+ * Perona malik filter
+ * I(n+1, i, j) = I(n, i, j) + lambda * (cN * dN(I) + cS * dS(I) + cE * dE(I), cW * dW(I))
+ */
+var peronaMalikFilter = function(I, iter, K, method) {
+    var dxW = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 1, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dxE = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  1],
+                            [ 0,  0,  0]]);
+  
+  var dyN = ee.Kernel.fixed(3, 3,
+                           [[ 0,  1,  0],
+                            [ 0, -1,  0],
+                            [ 0,  0,  0]]);
+  
+  var dyS = ee.Kernel.fixed(3, 3,
+                           [[ 0,  0,  0],
+                            [ 0, -1,  0],
+                            [ 0,  1,  0]]);
+
+  var lambda = 0.2;
+
+  var k1 = ee.Image(-1.0/K);
+  var k2 = ee.Image(K).multiply(ee.Image(K));
+
+  for(var i = 0; i < iter; i++) {
+    var dI_W = I.convolve(dxW)
+    var dI_E = I.convolve(dxE)
+    var dI_N = I.convolve(dyN)
+    var dI_S = I.convolve(dyS)
+
+    switch(method) {
+      case 1:
+        var cW = dI_W.multiply(dI_W).multiply(k1).exp();
+        var cE = dI_E.multiply(dI_E).multiply(k1).exp();
+        var cN = dI_N.multiply(dI_N).multiply(k1).exp();
+        var cS = dI_S.multiply(dI_S).multiply(k1).exp();
+    
+        I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))))
+        break;
+      case 2:
+        var cW = ee.Image(1.0).divide(ee.Image(1.0).add(dI_W.multiply(dI_W).divide(k2)));
+        var cE = ee.Image(1.0).divide(ee.Image(1.0).add(dI_E.multiply(dI_E).divide(k2)));
+        var cN = ee.Image(1.0).divide(ee.Image(1.0).add(dI_N.multiply(dI_N).divide(k2)));
+        var cS = ee.Image(1.0).divide(ee.Image(1.0).add(dI_S.multiply(dI_S).divide(k2)));
+    
+        I = I.add(ee.Image(lambda).multiply(cN.multiply(dI_N).add(cS.multiply(dI_S)).add(cE.multiply(dI_E)).add(cW.multiply(dI_W))));
+        break;
+    }
+  }
+
+  return I;
+};
+
+// ********* ALL INPUTS START HERE! *********************************
+Map.setCenter(101.9,20.7, 14);
+
+// get elev data
+var srtm_30 =       ee.Image("USGS/SRTMGL1_003");
+var info = srtm_30.getInfo().bands[0];
+var bbox = ee.FeatureCollection("ft:1svqot9tpL-bChoJ_A-p6r7CigsJLcPPJdet14xCR")
+
+
+// resolution in meters
+var res = 1; 
+
+// get project shape data
+var buffer = 300
+var ymin = 2270500-buffer;
+var ymax = 2314000+buffer;
+var xmin = 792000-buffer;
+var xmax = 817500+buffer;
+var w = (xmax-xmin)/res;
+var h = (ymax-ymin)/res;
+print(w,h)
+var dim_str = w + 'x' + h;
+var crs_transform = JSON.stringify([res, 0, xmin, 0, -res, ymax]);
+var region = ee.List([[xmin,ymin],[xmax,ymin],[xmax,ymax],[xmin, ymax], [xmin, ymin]]);
+var bounds = ee.Geometry.Polygon(region, 'EPSG:32647', null, null, false);
+var boundsWGS84 = bounds.transform(info.crs); // reproject to filter latlon fc from OSM
+var exportInfoUTM = {'crs': 'EPSG:32647', 'crs_transform': crs_transform, 'dimensions': dim_str, 'driveFolder': 'EarthEngineTemp', 'maxPixels': 350000000};
+
+
+// smooth for higher res.
+// apply gaus filter with small kernel
+var dem_gaus = srtm_30.convolve(ee.Kernel.gaussian(30, 5, 'meters'));
+// apply PM filter
+var dem_pm = peronaMalikFilter(dem_gaus, 5, 5, 2);
+// resample to resolution        
+var dem_res = dem_pm.resample('bicubic').reproject(info.crs,null,res);
+var dem_org_res = srtm_30.resample('bicubic').reproject(info.crs,null,res);
+var dem_diff = dem_org_res.subtract(dem_pm);
+
+// visualize
+addDem(srtm_30, 'srtm_30', false);
+addDem(dem_gaus, 'step1. gaus smoothing', false);
+addDem(dem_pm, 'step2. pm smoothing', false);
+addDem(dem_res, 'step3. bicubic resampling', true);
+addDem(dem_org_res, 'bicubic resampling org srtm', true);
+Map.addLayer(dem_diff, {}, 'dem_diff', true);
+Map.addLayer(bounds, {color: 'FF0000'}, 'bounding box', false);
+Map.addLayer(bbox, {color: 'BB4400'}, 'bbox', false);
+
+// download data
+var name = ee.String('srtm_smoothed_').cat(ee.Number(res).format('%03d')).cat('m_UTM47N').getInfo();
+Export.image(dem_res, name, exportInfoUTM);
+
+// var name = ee.String('srtm_resampled_').cat(ee.Number(res).format('%03d')).cat('m_UTM47N').getInfo();
+// Export.image(dem_org_res, name, exportInfoUTM);
+
+var name = ee.String('srtm_org_').cat(ee.Number(res).format('%03d')).cat('m_UTM47N').getInfo();
+Export.image(dem_org_res, name, exportInfoUTM);

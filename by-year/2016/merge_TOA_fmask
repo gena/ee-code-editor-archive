@@ -1,0 +1,42 @@
+//Load data collection (cloudy)
+var cloudyScene = ee.ImageCollection("LANDSAT/LE7_L1T")
+    .filter(ee.Filter.eq('WRS_PATH', 144))
+    .filter(ee.Filter.eq('WRS_ROW', 51));
+print(cloudyScene);
+//Map.addLayer(ee.Image(cloudyScene.first()));
+Map.setCenter(77.40, 13.14, 8);
+
+//Load Fmask data
+//where pixel values are 0=clear, 1=water, 2=shadow, 3=snow, 4=cloud
+var fmask = ee.ImageCollection('LANDSAT/LE7_L1T_TOA_FMASK')
+    .filter(ee.Filter.eq('WRS_PATH', 144))
+    .filter(ee.Filter.eq('WRS_ROW', 51));
+//Map.addLayer(ee.Image(fmask.first()));
+
+//Create mask with clear areas
+var cloudMask = function(mask) {
+  var cloudArea = mask.select('fmask');
+  return cloudArea.eq(0);
+};
+
+var clearMask = fmask.map(cloudMask);
+
+// Use an equals filter to specify how the collections match.
+var idFilter = ee.Filter.equals({leftField: 'LANDSAT_SCENE_ID', rightField: 'LANDSAT_SCENE_ID'});
+
+// Define the join.
+var innerJoin = ee.Join.inner('primary', 'secondary');
+
+// Apply the join.
+var combined = innerJoin.apply(fmask, cloudyScene, idFilter);
+print(combined.first());
+
+// merge images
+var combinedImages = combined.map(function(f) {
+  var toa = ee.Image(f.get('secondary'))
+  var fmask = ee.Image(f.get('primary')).select('fmask')
+  
+  return toa.addBands(fmask)
+})
+
+print(combinedImages.first())

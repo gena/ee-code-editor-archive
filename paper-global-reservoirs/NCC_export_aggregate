@@ -1,0 +1,272 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var jrcYearly = ee.ImageCollection("JRC/GSW1_0/YearlyHistory"),
+    jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var utils = require('users/gena/packages:utils')
+var hydro = require('users/gena/packages:hydro')
+
+var rivers = ee.FeatureCollection('ft:1yMXz_cItkAJFvmeXNcsuW2i7kK5i1iJ0QcYK3g')
+var limpopoRiver = rivers.filter(ee.Filter.eq('name', 'Limpopo'))
+var outlet = ee.Geometry.Point(limpopoRiver.geometry().coordinates().get(-5))
+var limpopoBasins5 = hydro.getCatchmments({level: 5, outlet: outlet})
+var limpopoBasins6 = hydro.getCatchmments({level: 6})
+limpopoBasins6 = limpopoBasins6.filterBounds(limpopoBasins5.geometry().simplify(5000).buffer(-10000, 5000))
+utils.Map.addAsImage(limpopoBasins6, 'Limpopo (basins, L6)', {outline: true, fill: false, opacity: 0.9, palette: ['000000', 'ffffff']})
+
+// speed-up
+print(limpopoBasins5.aggregate_array('hybas_id'))
+print(limpopoBasins6.aggregate_array('hybas_id'))
+
+var ids5 = [
+  1050012590,
+  1051584690,
+  1051584780,
+  1051576130,
+  1051576090,
+  1051548260,
+  1051548220,
+  1051548760,
+  1051548750,
+  1051552540,
+  1051552590,
+  1051569210,
+  1051569100,
+  1051571680,
+  1051571670,
+  1051577000,
+  1051576990
+]
+var ids6 = [
+  1061548150,
+  1061577000,
+  1061586860,
+  1061586850,
+  1061571670,
+  1061569100,
+  1061556110,
+  1061567610,
+  1061563470,
+  1061556200,
+  1061548750,
+  1061548220,
+  1061552540,
+  1061561320,
+  1061552590,
+  1061561400,
+  1061563540,
+  1061569210,
+  1061567790,
+  1061571680,
+  1061576990,
+  1061580710,
+  1061574230,
+  1061580860,
+  1061574470,
+  1061555620,
+  1061573320,
+  1061576090,
+  1061555630,
+  1061550360,
+  1061549880,
+  1061548760,
+  1061548260,
+  1061548230,
+  1061549800,
+  1061550240,
+  1061555160,
+  1061555240,
+  1061555170,
+  1061555850,
+  1061555840,
+  1060045000,
+  1061570450,
+  1061570440,
+  1061555260,
+  1061576130,
+  1061584690,
+  1061584780,
+  1061573310,
+  1060012590,
+  7060061520,
+  2060031970,
+  6060039730,
+  6060033230,
+  6060024360,
+  5060054140,
+  7060066090,
+  7060038990,
+  8060010210,
+  2060031750,
+  5060053800,
+  5060060430,
+  5060052710,
+  4060022360,
+  7060059780,
+  2060068350,
+  2060082670,
+  4060004110,
+  7060030670,
+  4060045700,
+  7060068580,
+  2060012310,
+  2060031500,
+  6060006790,
+  8060003230,
+  7060060320,
+  7060032810,
+  4060014260,
+  7060063060,
+  7060028080,
+  7060030620,
+  7060043870,
+  2060033330,
+  5060020120,
+  5060040360,
+  8060019080,
+  2060033780,
+  5060052550,
+  6060037950,
+  4060017650,
+  4060025880,
+  1060031300,
+  7060040000,
+  2060067580,
+  4060050150,
+  7060061880,
+  6060038660,
+  6060022920,
+  2060054790,
+  4060011110,
+  7060066750,
+  5060043480,
+  6060024120,
+  8060016580,
+  7060020790,
+  7060011230,
+  6060032620,
+  7060070800,
+  7060057510,
+  2060051160,
+  4060048900,
+  8060019790,
+  7060032080,
+  7060041060,
+  4060026260,
+  3060021630,
+  8060013050,
+  6060007660,
+  4060026100,
+  4060012780,
+  5060040040,
+  5060034790,
+  7060069860,
+  6060038060,
+  6060036010,
+  4060011550,
+  4060039740,
+  4060005720,
+  5060071140,
+  4060004510,
+  4060048470,
+  2060033900,
+  7060057190,
+  7060064920,
+  8060039140,
+  7060067080,
+  2060021040,
+  5060043320,
+  7060062940,
+  5060082520,
+  4060023230
+]
+
+limpopoBasins5 = hydro.getCatchmments({level: 5}).filter(ee.Filter.inList('hybas_id', ids5))//.toList(7, 0)
+limpopoBasins6 = hydro.getCatchmments({level: 6}).filter(ee.Filter.inList('hybas_id', ids6))//.toList(30, 0)
+
+function aggregate(images, features) {
+  var aggregated = images.map(function(image) {
+    // aggregate spatially
+    var scale = {from: 90, to: 300}
+    var maxPixels = 100
+    var bestEffort = true
+    var imageAggregated = image.multiply(ee.Image.pixelArea())
+      .reproject(ee.Projection('EPSG:3857').atScale(scale.from))
+      .reduceResolution(ee.Reducer.sum(), bestEffort, maxPixels)
+      .reproject(ee.Projection('EPSG:3857').atScale(scale.to))
+
+    // aggregate per feature
+    var properties = ee.List(['hybas_id']).cat(image.bandNames())
+    var results = imageAggregated.reduceRegions({
+        collection: features, 
+        reducer: ee.Reducer.sum(), 
+        scale: scale.to,
+        crs: 'EPSG:3857',
+        tileScale: 2
+    }).select(properties)
+    
+    // strip geometry and add date
+    results = results.map(function(f) { 
+      // drop geometry
+      f = ee.Feature(null).copyProperties(f) 
+      
+      // add date
+      f = f.set({date: image.date().format('YYYY-MM-dd')}) 
+
+      return f
+    })
+  
+    return results
+  })
+  
+  aggregated = ee.FeatureCollection(aggregated).flatten()
+  
+  return aggregated
+}
+
+jrcYearly = jrcYearly.map(function(i) {
+  var seasonal = i.eq([2]).rename('seasonal')
+  var permanent = i.eq([3]).rename('permanent')
+  
+  return ee.Image([seasonal, permanent]).copyProperties(i, ['system:time_start'])
+})
+
+jrcMonthly = jrcMonthly.map(function(i) {
+  return i.eq([2]).rename('water').copyProperties(i, ['system:time_start'])
+})
+
+/*
+var yearlyPerBasin6 = aggregate(jrcYearly, limpopoBasins6)
+print('yearly, L6', yearlyPerBasin6.first())
+Export.table.toDrive(yearlyPerBasin6, 'yearly_per_basin6', 'Limpopo', 'yearly_per_basin6', 'CSV')
+
+var yearlyPerBasin5 = aggregate(jrcYearly, limpopoBasins5)
+print('yearly, L5', yearlyPerBasin5.first())
+Export.table.toDrive(yearlyPerBasin5, 'yearly_per_basin5', 'Limpopo', 'yearly_per_basin5', 'CSV')
+*/
+
+
+var monthlyPerBasin6 = aggregate(jrcMonthly, limpopoBasins6)
+print('monthly, L6', monthlyPerBasin6.first())
+Export.table.toDrive(monthlyPerBasin6, 'monthly_per_basin6', 'Limpopo', 'monthly_per_basin6', 'CSV')
+
+var monthlyPerBasin5 = aggregate(jrcMonthly, limpopoBasins5)
+print('monthly, L5', monthlyPerBasin5.first())
+Export.table.toDrive(monthlyPerBasin5, 'monthly_per_basin5', 'Limpopo', 'monthly_per_basin5', 'CSV')
+
+
+// aggregate to 6-month moving average
+var jrcMonthlyMA = jrcMonthly.map(function(i) {
+  var t0 = ee.Date(i.get('system:time_start'))
+  var t1 = t0.advance(3, 'month')
+  
+  return jrcMonthly.filterDate(t0, t1).max().copyProperties(i, ['system:time_start'])
+})
+
+var monthlyPerBasin6 = aggregate(jrcMonthlyMA, limpopoBasins6)
+print('monthly, L6', monthlyPerBasin6.first())
+Export.table.toDrive(monthlyPerBasin6, 'monthly_per_basin6_MA', 'Limpopo', 'monthly_per_basin6_MA', 'CSV')
+
+var monthlyPerBasin5 = aggregate(jrcMonthlyMA, limpopoBasins5)
+print('monthly, L5', monthlyPerBasin5.first())
+Export.table.toDrive(monthlyPerBasin5, 'monthly_per_basin5_MA', 'Limpopo', 'monthly_per_basin5_MA', 'CSV')
+

@@ -1,0 +1,93 @@
+var assets = require('users/gena/packages:assets')
+var animation = require('users/gena/packages:animation')
+
+var bounds = Map.getCenter()
+
+var images = ee.ImageCollection('COPERNICUS/S2')
+  .filterBounds(bounds) 
+  .distinct(['system:time_start'])
+  
+images = ee.ImageCollection(images)  
+  
+images = assets.getMostlyCleanImages(images, Map.getBounds(true), { 
+  qualityBand: 'B4',
+  cloudFrequencyThresholdDelta: 0.2
+})
+
+images = ee.ImageCollection(images)  
+  .map(function(i) { return i.resample('bicubic').set({ label: i.date().format() }) })
+
+// var b = ['B2', 'B4']
+var b = [
+  'B2', 
+  'B3', 
+  'B4', 
+  // 'B8A', 
+  // 'B12'
+]
+
+/*
+var images = assets.getImages(bounds, { 
+  mission: ['S2'], 
+  filter: ee.Filter.date('2018-01-01', '2020-01-01') 
+})
+
+images = assets.getMostlyCleanImages(images, Map.getBounds(true))
+
+var b = ['blue', 'swir']
+*/  
+images = images
+  .sort('system:time_start')
+
+images = images  
+  .map(function(i) {
+    var b0 = i.select(b[0])
+    var b1 = i.select(b[1])
+    var b2 = i.select(b[2])
+    // var b3 = i.select(b[3])
+    // var b4 = i.select(b[4])
+    
+    var mean = i.select(b).reduceRegion(ee.Reducer.mean(), Map.getBounds(true), Map.getScale() * 4)
+    var sigma = i.select(b).reduceRegion(ee.Reducer.stdDev(), Map.getBounds(true), Map.getScale() * 4)
+
+    var min = [
+      ee.Number(mean.get(b[0])).subtract(ee.Number(sigma.get(b[0])).multiply(1)),
+      ee.Number(mean.get(b[1])).subtract(ee.Number(sigma.get(b[1])).multiply(1)),
+      ee.Number(mean.get(b[2])).subtract(ee.Number(sigma.get(b[2])).multiply(1)),
+      // ee.Number(mean.get(b[3])).subtract(ee.Number(sigma.get(b[3])).multiply(1)),
+      // ee.Number(mean.get(b[4])).subtract(ee.Number(sigma.get(b[4])).multiply(1)),
+    ]
+    
+    var max = [
+      ee.Number(mean.get(b[0])).add(ee.Number(sigma.get(b[0])).multiply(1)).add(0.0001), 
+      ee.Number(mean.get(b[1])).add(ee.Number(sigma.get(b[1])).multiply(1)).add(0.0001), 
+      ee.Number(mean.get(b[2])).add(ee.Number(sigma.get(b[2])).multiply(1)).add(0.0001), 
+      // ee.Number(mean.get(b[3])).add(ee.Number(sigma.get(b[3])).multiply(1)), 
+      // ee.Number(mean.get(b[4])).add(ee.Number(sigma.get(b[4])).multiply(1)), 
+    ]
+
+    // var np = [2, 98]
+    // var p = i.select(b).reduceRegion(ee.Reducer.percentile(np), Map.getBounds(true), Map.getScale() * 4)
+    
+    // var min = [
+    //   p.get(b[0] + '_p' + np[0]), 
+    //   p.get(b[1] + '_p' + np[0])
+    // ]
+    
+    // var max = [
+    //   ee.Number(p.get(b[0] + '_p' + np[1])).add(0.00001), 
+    //   ee.Number(p.get(b[1] + '_p' + np[1])).add(0.00001)
+    // ]
+    
+    return ee.ImageCollection([
+      b0.unitScale(min[0], max[0]).copyProperties(i), 
+      b1.unitScale(min[1], max[1]).copyProperties(i),
+      b2.unitScale(min[2], max[2]).copyProperties(i),
+      // b3.unitScale(min[3], max[3]).copyProperties(i),
+      // b4.unitScale(min[4], max[4]).copyProperties(i)
+    ])
+  }).flatten()
+  
+print(images.first())  
+  
+animation.animate(images, { maxFrames: 100, label: 'label' })

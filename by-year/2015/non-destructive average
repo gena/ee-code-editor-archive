@@ -1,0 +1,310 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var line = /* color: d63000 */ee.Geometry.LineString(
+        [[-91.48075103759766, 31.3864682695423],
+         [-91.44916534423828, 31.387933686346706]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// non-destructive average
+
+// image collection mean() processes every band/pixel independently, here we try to keep different band values per pixel together.
+
+print(Map.getCenter())
+//Map.setCenter(148.84, -34.96, 13);
+
+var mapBounds = Map.getBounds(true);
+
+var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8',  'B7'];
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+var images = 
+    // ee.ImageCollection('LE7_L1T_TOA') 
+    // .select(LC7_BANDS, STD_NAMES)
+    //.filterDate('2010-01-01','2012-01-01')
+    ee.ImageCollection('LC8_L1T_TOA') 
+    .filterDate('2013-06-01', '2015-06-01')
+    .select(LC8_BANDS, STD_NAMES)
+    .filterBounds(mapBounds);
+
+print(images)
+
+var info = ee.Image(images.first()).getInfo();
+var max_value = info.properties['REFLECTANCE_MAXIMUM_BAND_1'];
+// var max_value = 1;
+var params = {'gamma' : 1.3, min: 0.05 * max_value, max: 0.8 * max_value};
+
+Map.addLayer(images, {}, 'images', false)
+
+var maskBadPixels = function(img) {
+   var bad = img.select('BQA').eq([61440,59424,57344,56320,53248,52256,52224,49184,49152]).reduce('max');
+   return img.mask(bad.not());
+};
+
+//images = images.map(maskBadPixels);
+
+var addPansharpened = function(img, pan, name, opt_visible) {
+  var visible = opt_visible || false;
+  var rgb = img.select(0,1,2).unitScale(0, max_value);
+  var pan = pan.unitScale(0, max_value);
+  var hsv  = rgb.rgbtohsv();
+  var huesat = hsv.select('hue', 'saturation');
+  var upres = ee.Image.cat(huesat, pan).hsvtorgb();
+
+  var params = {'gamma' : 1.0, min: 0.02, max: 0.2};
+  Map.addLayer(upres, params, name, visible)
+}
+
+var im =  ee.ImageCollection( 
+      'LANDSAT/LC8_L1T_TOA')
+
+/*
+      'LANDSAT/LE7_L1T_TOA') 
+      .select(LC7_BANDS, STD_NAMES)
+
+*/      .filterBounds(mapBounds)
+        .filterMetadata('CLOUD_COVER', 'less_than', 20)
+      //.filterMetadata('DATE_ACQUIRED', 'equals', '2014-05-19')
+      ;
+      
+print(ee.List(images.getInfo().features).size())
+var real = ee.Image(im.toList(1, 0).get(0));
+var id = real.getInfo().id;
+
+//var id = 'LC8_L1T_TOA/LC80910852013179LGN00';
+//var real = ee.Image(id);
+
+var real_ir = real.select(['B7', 'B5', 'B3', 'B8']);
+Map.addLayer(real_ir, params, id + '753')
+
+var real_rgb = real.select(['B4', 'B3', 'B2', 'B8']);
+var params = {'gamma' : 1.3, min: 0.05 * max_value, max: 0.4 * max_value};
+Map.addLayer(real_rgb, params, id, false)
+
+Map.addLayer(real.select('B8'), {min:0.05, max:0.2}, real.getInfo().id + '-B8', false)
+addPansharpened(real_rgb, real.select('B8'), id + '-pan');
+addPansharpened(real_ir, real.select('B8'), id + '-pan753');
+
+var mndwi = real.expression("(b('B3') - b('B6'))/(b('B3') + b('B6'))");
+Map.addLayer(mndwi, {}, 'MNDWI', false);
+Map.addLayer(mndwi.mask(mndwi.gt(-0.06)), {palette:'404060,2020FF'}, 'MNDWI < 0.5');
+print(mapBounds)
+print(Chart.image.histogram(mndwi, ee.Geometry(mapBounds), 30).setOptions({title: 'MNDWI'}));
+
+var ndwi = real.expression("(b('B3') - b('B5'))/(b('B3') + b('B5'))");
+Map.addLayer(ndwi, {}, 'NDWI', false);
+Map.addLayer(ndwi.mask(ndwi.gt(-0.15)), {palette:'404060,2020FF'}, 'NDWI < 0', false);
+print(Chart.image.histogram(ndwi, ee.Geometry(mapBounds), 30).setOptions({title: 'NDWI'}));
+
+function radians(img) { return img.toFloat().multiply(Math.PI).divide(180); }
+var dem = ee.Image('CGIAR/SRTM90_V4');
+var terrain = ee.Algorithms.Terrain(dem);
+var slope = radians(terrain.select('slope'));
+var aspect = radians(terrain.select('aspect'));
+var h = terrain.select('hillshade');
+
+//Map.addLayer(slope.mask(slope.gt(0.1)))
+    
+var radius = 90;
+var sigma = 60;
+var units = "meters";
+var normalize = false;
+var magnitude = 1;
+var k = ee.Kernel.gaussian(radius, sigma, units, normalize, magnitude)
+
+var analysis_bands = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp']
+
+images = images.map(function(img) {
+  return img
+    //.addBands(img.select(analysis_bands)
+    //.convolve(k)
+    .clip(mapBounds)
+});
+
+
+
+// print(ee.List(images.getInfo().features).length())
+//    
+// var bounds = ee.Geometry(Map.getBounds(true)).centroid(); 
+// print(bounds)
+
+// adds a new band and use it for sort along the time axis
+var addSort = function(img) {
+    //var b = img.expression("b('green_1')");
+    //var b = img.expression("b('blue_1') + b('green_1') + b('red_1') + b('nir_1') + b('swir1_1') + b('swir2_1')");
+    //var b = img.expression("b('green') + b('swir1') + b('swir2')");
+    //var b = img.normalizedDifference(['swir1', 'green']);
+    
+    var b = img.expression("b('green') + b('nir')");
+    
+
+    //var b = img.expression("b('blue') + b('green') + b('red') + b('nir') + b('swir1') + b('swir2') + b('pan')")
+    
+    //var b = img.expression("b('green_1') + b('red_1') + 2 * b('nir_1') + 2 * b('swir2_1')")
+    //var b = ee.Image.constant(img.reduceRegion(ee.Reducer.sum(), line).get('nir_1')).toFloat();
+    
+    return img.addBands(b);
+};
+
+// Map.addLayer(ee.Image(ee.Image(images.first()).reduceRegion(ee.Reducer.sum(), line).get('nir_1')))
+
+images = images.map(addSort);
+
+// turn all bands into a 2D array per pixel
+var array = images.toArray(); 
+
+// sort array using new band as a sort key thus keeping actual band values per pixel together
+var imageAxis = 0;
+var bandAxis = 1;
+var sort_key = array.arraySlice(bandAxis,-1);
+var sorted = array.arraySort(sort_key);
+
+Map.addLayer(sorted, {}, 'sorted', false)
+Map.addLayer(sorted.arrayLengths().arrayGet(imageAxis), {}, 'count', false);
+
+
+var snowThresh = 0.04;//Lower number masks more out (0-1)
+
+function rescale(img, exp, thresholds) {
+    return img.expression(exp, {img: img})
+      .subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+};
+
+function snowScore(img){
+    // Compute several indicators of snowyness and take the minimum of them.
+    var score = ee.Image(1.0);
+    // Snow is reasonably bright in the blue band.
+    score = score.min(rescale(img, 'img.blue', [0.1, 0.3]));
+  
+    // Snow is reasonably bright in all visible bands.
+    score = score.min(rescale(img, 'img.red + img.green + img.blue', [0.2, 0.8]));
+  
+    // // Excluded this for snow reasonably bright in all infrared bands.
+    // score = score.min(
+    //     rescale(img, 'img.nir + img.swir1 + img.swir2', [0.3, 0.8]));
+  
+    // Snow is reasonably cool in temperature.
+    //Changed from [300,290] to [290,275] for AK
+    score = score.min(rescale(img, 'img.temp', [300, 285]));
+    
+    
+     // Snow is high in ndsi.
+    var ndsi = img.normalizedDifference(['green', 'swir1']);
+    ndsi = rescale(ndsi, 'img', [0.5, 0.7]);
+    score = score.min(ndsi);
+    
+    return score.clamp(0,1).toFloat()
+}
+
+function maskSnow(img){
+  var ss = snowScore(img)
+  return img.mask(img.mask().and(ss.lt(snowThresh)))
+}
+
+function getSimpleEdge(i) {
+  var canny = ee.Algorithms.CannyEdgeDetector(i, 0.99, 0);
+  canny = canny.mask(canny)
+  return canny;
+}
+
+function addSnowLayers(image, name) {
+  var score = snowScore(image);
+  var snowMask = score.gt(snowThresh).focal_max(90, 'square', 'meters').focal_min(120, 'square', 'meters').focal_max(30, 'square', 'meters')
+  Map.addLayer(snowMask.mask(snowMask), {min: 0, max: 1, palette: '000000, FF0000', opacity:0.6}, name + ' snow', false);
+  Map.addLayer(getSimpleEdge(snowMask), {min: 0, max: 1, palette: 'FF0000'}, name + ' snow (edge)', false);
+}
+
+
+var show = function(index, visible) {
+  // Then we just scale the length of the 'images' axis by the percentile you want, and get values at that index. 
+  // This won't blend adjacent values, since it just directly accesses the elements you specify.
+
+  var imageCount = sorted.arrayLengths().arrayGet(imageAxis);
+  var imageIndex = imageCount.multiply(index/100.0).toInt();
+
+  // var imageIndex = ee.Image(index)
+
+  var result = sorted.arrayGet(imageIndex.addBands(0))
+    .addBands(sorted.arrayGet(imageIndex.addBands(1)))
+    .addBands(sorted.arrayGet(imageIndex.addBands(2)))
+    .addBands(sorted.arrayGet(imageIndex.addBands(3)))
+    .addBands(sorted.arrayGet(imageIndex.addBands(4)))
+    .addBands(sorted.arrayGet(imageIndex.addBands(5)))
+    .addBands(sorted.arrayGet(imageIndex.addBands(6)))
+    .addBands(sorted.arrayGet(imageIndex.addBands(7)))
+    .addBands(sorted.arrayGet(imageIndex.addBands(8)));
+  
+  //var pan = result.select(3);
+  //addPansharpend(result, pan);
+
+  // addToMap(images.reduce(ee.Reducer.intervalMean(20, 21)), params, 'simple');
+  Map.addLayer(result.select(4,3,1), params, index.toString(), visible);
+
+  // var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+  // var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+  
+  var image = result.select([0,1,2,3,4,5,6,7], ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp'])
+  addSnowLayers(image, index.toString());
+
+  var ndwi = result.expression("(b('array_5') - b('array_2'))/(b('array_5') + b('array_2'))");
+  Map.addLayer(ndwi.mask(ndwi.gt(-0.15)), {palette:'40B060,20B0FF'}, 'NDWI < -0.15', false);
+}
+
+
+/*show(0, false)
+show(1, false)
+show(2, false)
+show(3, false)
+show(4, false)
+show(5, false)
+*/
+//show(10, false)
+//show(50, false)
+
+// show(15, false)
+// show(25, false)
+// show(35, false)
+//show(45, false)
+// show(55, false)
+
+
+// analyse differences between percentile image computed using two methods
+var p = 55;
+show(55, false)
+var image = images
+  .reduce(ee.Reducer.percentile([p]))
+  .select([0,1,2,3,4,5,6,7], ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp'])
+Map.addLayer(image.select(['swir1', 'nir', 'green']), params, p + '% (reduce percentile)', false);
+addSnowLayers(image, p + '% (reduce percentile)');
+
+
+
+
+
+/*var sng = images.select(['swir2', 'nir', 'green']);
+Map.addLayer(sng.reduce(ee.Reducer.intervalMean(10, 11)), params, '10% (reduce)', false);
+Map.addLayer(sng.reduce(ee.Reducer.intervalMean(50, 51)), params, '50% (reduce)', false);
+Map.addLayer(sng.reduce(ee.Reducer.median()), params, 'median (reduce)', false);
+Map.addLayer(sng.reduce(ee.Reducer.variance()), params, 'variance (reduce)', false);
+*/
+
+// histogram
+var bins = [];
+var binsCount = 100;
+var maxValue = 1.0;
+var step = maxValue / binsCount;
+for (var i = 1; i < binsCount; i += 1) {
+  bins.push(ee.Image.constant(step * i).select([0], [i.toString()]));
+}
+
+// Combine all the bins into 1 image.
+bins = ee.Image(bins);
+
+// Compute the normalized counts.
+var computeHistogram = function(ic, bandName) {
+  var total = ic.select(0).reduce('count')
+  
+  return ic.select(bandName).map(function(img) {
+    return img.lte(bins);
+  }).reduce('sum').divide(total)
+}
+
+Map.addLayer(computeHistogram(images, 'nir'), {}, 'historgam (nir)', false);

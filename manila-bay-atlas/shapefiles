@@ -1,0 +1,76 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var settlement_points = ee.FeatureCollection("users/fre_d_g/settlement-points"),
+    red_cross = ee.FeatureCollection("users/fre_d_g/red_cross_data"),
+    manila_bay_spatial = ee.FeatureCollection("users/fre_d_g/manila_bay_spatial");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// settlement points from: http://sedac.ciesin.columbia.edu/data/set/grump-v1-settlement-points-rev01/data-download
+// red_cross from: https://dashboard.510.global/#!/community_risk
+// manila_bay_spatial from manila bay masterplan project
+
+// Map.addLayer(settlement_points, {color: '#FF0000'});
+
+var palettes = require('users/gena/packages:palettes')
+
+// Create an empty image into which to paint the features, cast to byte.
+var palette = ee.List(palettes.cb.RdYlGn[6]);
+
+function getStyle(features, property) {
+  var minMax =  features.reduceColumns(ee.Reducer.percentile([2, 98], ['min', 'max']), [property])
+  var min = ee.Number(minMax.get('min'))
+  var max = ee.Number(minMax.get('max'))
+
+  var range = max.subtract(min)
+
+  return function(value) {
+    var ratio = ee.Number(value).subtract(min).divide(range) // compute ratio
+      .max(min).min(max) // clamp to [0, 1]
+      
+    var index = ratio.multiply(palette.length()).floor()
+    
+    var color = palette.get(index)
+    
+    return { fillColor: color }
+  }
+}
+
+// Poverty style
+var stylePoverty = getStyle(red_cross, 'poverty_in')
+
+red_cross = red_cross.filter(ee.Filter.neq('poverty_in', null)).map(function(f) {
+  var style = stylePoverty(ee.Number(f.get('poverty_in')))
+  
+  return f.set({ style: style })
+})
+
+var red_cross_poverty = red_cross.style({ styleProperty: 'style' })
+
+Map.addLayer(red_cross_poverty, {}, 'Poverty incidence')
+
+// HDI style
+var styleHdi = getStyle(red_cross, 'hdi')
+
+red_cross = red_cross.filter(ee.Filter.neq('hdi', null)).map(function(f) {
+  var style = styleHdi(ee.Number(f.get('hdi')))
+  
+  return f.set({ style: style })
+})
+
+var red_cross_hdi = red_cross.style({ styleProperty: 'style' })
+
+Map.addLayer(red_cross_hdi, {}, 'HDI')
+
+// Flood style
+var styleFlood = getStyle(red_cross, 'flood_phys')
+
+red_cross = red_cross.filter(ee.Filter.neq('flood_phys', null)).map(function(f) {
+  var style = styleFlood(ee.Number(f.get('flood_phys')))
+  
+  return f.set({ style: style })
+})
+
+var red_cross_flood = red_cross.style({ styleProperty: 'style' })
+
+Map.addLayer(red_cross_flood, {}, 'Flood exposure')
+
+
+// print(red_cross.first())

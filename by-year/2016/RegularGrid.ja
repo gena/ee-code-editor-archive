@@ -1,0 +1,41 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var srtm30 = ee.Image("USGS/SRTMGL1_003");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/***
+ * Generates a regular grid using given bounds.
+ */
+var generateGrid = function(xmin, ymin, xmax, ymax, dx, dy) {
+  var xx = ee.List.sequence(xmin, ee.Number(xmax).subtract(dx), dx)
+  var yy = ee.List.sequence(ymin, ee.Number(ymax).subtract(dy), dy)
+  
+  var cells = xx.map(function(x) {
+    return yy.map(function(y) {
+      var x1 = ee.Number(x)
+      var x2 = ee.Number(x).add(ee.Number(dx))
+      var y1 = ee.Number(y)
+      var y2 = ee.Number(y).add(ee.Number(dy))
+      
+      var coords = ee.List([x1, y1, x2, y2]);
+      var rect = ee.Algorithms.GeometryConstructors.Rectangle(coords,  'EPSG:4326', false);
+      return ee.Feature(rect)
+    })
+  }).flatten();
+
+  return ee.FeatureCollection(cells);
+}
+
+// var grid = generateGrid(-180, 60, 180, 90, 5, 5) // 90m
+// var grid = generateGrid(-180, -90, 180, 60, 5, 5) // 30m
+
+var grid = generateGrid(-180.0001388888889, -56.00013888888889, 180.0001388888889, 60.00013888888889, 2, 2) // 30m
+
+// var grid = generateGrid(-180, -90, 180, 90, 5, 5) // global
+
+print(grid.size())
+
+Map.addLayer(srtm30)
+
+Map.addLayer(grid, {}, 'grid')
+
+Export.table(grid)
+

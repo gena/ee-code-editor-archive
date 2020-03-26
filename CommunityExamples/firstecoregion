@@ -1,0 +1,46 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var ecoL3 = ee.FeatureCollection("EPA/Ecoregions/2013/L3"),
+    table2 = ee.FeatureCollection("TIGER/2016/Counties");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+var counties=ee.FeatureCollection('TIGER/2016/Counties') 
+var goat=ee.Feature(counties.filter(ee.Filter.eq('STATEFP','6')).first())
+var CAcounties=counties.filter(ee.Filter.eq('StateName','California')) 
+
+var resolve = ee.FeatureCollection('RESOLVE/ECOREGIONS/2017').filterBounds(ee.Geometry.Rectangle(-127.18, 19.39, -62.75, 51.29));
+var visParams = {
+  palette: [
+    '0080D4', ' D88000', ' 7A32C1', ' A2007F', ' ffc0e8', ' f5ff64', ' b5ffb4',
+    ' beeaff', ' ffc0e8', ' 8e8dff', ' A2FF7F', ' 36807F', ' E5E8E6', ' cyan',
+    ' blue', ' orange', ' yellow', ' gray'
+  ],
+  min: 0.0,
+  max: 500.0,
+  opacity: 0.8,
+};
+var resolveimage = resolve.reduceToImage(['BIOME_NUM'], ee.Reducer.first());
+//print(resolve)
+print(resolveimage)
+ //Map.addLayer(resolveimage, visParams, 'RESOLVE/ECOREGIONS/2017');
+// Map.addLayer(counties)
+
+var clipresolve=resolveimage.clip(counties)
+ 
+ 
+ print (clipresolve)
+ 
+ 
+ var countyresolvehist=resolveimage.reduceRegions({
+      collection: CAcounties,
+   reducer:ee.Reducer.histogram(),
+   scale: 30
+ })
+  var countyresolvemode=resolveimage.reduceRegions({
+      collection: CAcounties,
+   reducer:ee.Reducer.mode(),
+   scale: 30
+ })
+ Map.addLayer(countyresolvemode.select('mode'))
+ print(countyresolvemode.select('mode'))
+ 
+ //print(ee.Feature(countyresolve.first().select(resolveimage.bandNames,())))

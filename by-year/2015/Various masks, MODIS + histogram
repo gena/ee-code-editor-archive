@@ -1,0 +1,268 @@
+// Histogram Testing
+
+/*          Table Of Contents
+ *
+ *  Section 1: Map Definitions
+ *    DEM and color palette definitions
+ *
+ *  Section 2: Function Definitions
+ *    Bit extractor
+ *    Cloud Mask
+ *    Snow Mask
+ *    Quality Mask
+ *    Zenith Mask
+ *    Single Mask Function
+ *    MODIS definition and SCF generator
+ *    Degrees of Freedom function
+ *
+ *  Section 3: Map generation
+ *  
+ *  Section 4: Built in EE functions
+ *     Mean SCF
+ *     Standard Deviation
+ *     Sample Variance
+ *     Image Count
+ *     Degrees of Freedom
+ *     Linear fit
+ *
+ */
+
+ 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// 
+ 
+//================================================================================================================================================================================
+//================================================================================================================================================================================
+//================================================================================================================================================================================
+// https://lpdaac.usgs.gov/products/modis_products_table/mod09ga   (documentation)
+// http://www.perbang.dk/rgbgradient/    (color gradient generator)
+
+/*
+Notes on .mask
+  Gets or sets an image's mask. THE OUTPUT IMAGE RETAINS THE METADATA AND FOOTPRINT OF THE INPUT IMAGE.
+  Arguments:
+    -this:image (Image):
+     The input image.
+     
+    -mask (Image, default: null):
+     The mask image. If specified, the input image is copied to the output but given the mask by the 
+     values of this image. If this is a single band, it is used for all bands in the input image. If not 
+     specified, returns an image created from the mask the input image, scaled to the range [0:1] (invalid = 0, valid = 1.0).
+  Returns: Image
+*/
+var TestRect = ee.Geometry.Rectangle(-109.05, 41, -108.05, 40);
+Map.addLayer(TestRect);
+Map.setCenter(-109, 40, 7);
+
+var RedToBlue = ['0000FF', '0071FF', '00E2FF', '00FFA9', '38FF00', 'AAFF00', 'FFE200', 'FF7100', 'FF0000'];
+var BlueToBrown = ['005099', '054E90', '0A4C88', '104B80', '154978', '1A4870', '204668', '254560', '2A4358', '304250', '354048', '3B3F40', '403D38', '453C30', '4B3A28', '503920', '553718', '5B3610', '603408', '663300'];
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//======= returns ??? ====================================================
+//========================================================================
+// https://groups.google.com/forum/?utm_source=digest&utm_medium=email/#!topic/google-earth-engine-developers/MvU5BR_xKic
+
+var GetQABits = function(image, start, end, newName) {
+    // Compute the bits we need to extract.
+    var pattern = 0;
+    for (var i = start; i <= end; i++) {
+       pattern += Math.pow(2, i);
+    }  
+    return image.select([0], [newName])
+                .bitwiseAnd(pattern)  
+                .rightShift(start);
+};
+
+
+//======= Function to mask out the pixels flagged as clouds ==============
+//========================================================================
+var MaskClouds = function(image) {
+  var QA = image.select('state_1km');
+  var Cloud = GetQABits(QA, 10, 10, 'internal cloud algorithm flag');
+  return image.mask(Cloud.eq(0));
+};
+
+
+//======= Function to mask out the pixles flagged as no snow =============
+//========================================================================
+var MaskSnow = function(image) {
+  var QA = image.select('state_1km');
+  var SnowInternal = GetQABits(QA, 15, 15, 'internal snow mask');        
+  return image.mask(SnowInternal.eq(1));
+};
+
+
+//======= Function to mask out pixels that have a 0 quality score ========
+//========================================================================
+var MaskBadPixels = function(image) {
+  var withObs = image.select('num_observations_1km')
+                     .gt(0);
+  return image.mask(withObs);
+};
+
+
+//======= Function to mask out pixels have a zenith angle > 25  ==========  
+//========================================================================
+var SensorCorrectPixels = function(image) {
+  var LT25 = image.select('SensorZenith').lte(2500); // Angle is *.01 
+  return image.mask(LT25);
+};
+
+
+//======= Function that ties all the masks together  =====================  
+//========================================================================
+var CreateSnowMap = function(image) {
+  return image.map(SensorCorrectPixels)
+              .map(MaskBadPixels)
+              .map(MaskClouds);
+};
+
+
+//======= Function that ties SCF to a single function  ===================  
+//========================================================================
+var GenerateWaterYear = function(StartDate, EndDate) {
+  var BaseMap = ee.ImageCollection('MOD09GA')
+                  .filterDate(StartDate, EndDate);
+  var ProcessedWaterYear = CreateSnowMap(BaseMap);
+  var TotalCount = ProcessedWaterYear.select('num_observations_1km')
+                                     .count();
+  var SnowCount = ProcessedWaterYear.map(MaskSnow)
+                                    .select('num_observations_1km')
+                                    .count()
+                                    .mask(1);  
+  var SCF = (SnowCount.toFloat().divide(TotalCount));
+  return ee.Image(new Date(EndDate).getFullYear())
+           .addBands(SCF).toDouble();
+};
+
+//======= Function that calculates the degrees of freedom for each pixal ====  
+//===========================================================================
+var GenerateDOF = function(StartDate, EndDate) {
+  var BaseMap = ee.ImageCollection('MOD09GA')
+                  .filterDate(StartDate, EndDate);
+  var ProcessedWaterYear = CreateSnowMap(BaseMap);
+  var DOF = ProcessedWaterYear.select('num_observations_1km')
+                              .count()  
+                              .subtract(1);
+  return DOF;
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//========================================================================================
+//---------------------  SCF map definitions and generation-------------------------------
+//========================================================================================
+// Water year as defined by the calender year on which it ends
+var WaterYear2003 = GenerateWaterYear('2002-10-01', '2003-09-30');
+var WaterYear2004 = GenerateWaterYear('2003-10-01', '2004-09-30');
+var WaterYear2005 = GenerateWaterYear('2004-10-01', '2005-09-30');
+var WaterYear2006 = GenerateWaterYear('2005-10-01', '2006-09-30');
+var WaterYear2007 = GenerateWaterYear('2006-10-01', '2007-09-30');
+var WaterYear2008 = GenerateWaterYear('2007-10-01', '2008-09-30');
+var WaterYear2009 = GenerateWaterYear('2008-10-01', '2009-09-30');
+var WaterYear2010 = GenerateWaterYear('2009-10-01', '2010-09-30');
+var WaterYear2011 = GenerateWaterYear('2010-10-01', '2011-09-30');
+var WaterYear2012 = GenerateWaterYear('2011-10-01', '2012-09-30');
+
+
+//========================================================================================
+//========================================================================================
+//----------------------  Yearly SCF -----------------------------------------------------
+var SCFYearCollection = ee.ImageCollection([WaterYear2003, WaterYear2004, WaterYear2005, WaterYear2006, WaterYear2007, 
+                                            WaterYear2008, WaterYear2009, WaterYear2010, WaterYear2011, WaterYear2012]);
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+//========================================================================================
+//========================================================================================
+//---------------------  EE functions ----------------------------------------------------
+//========================================================================================
+//========================================================================================
+
+//.mask(AOI), 
+
+Map.addLayer(SCFYearCollection.select('num_observations_1km'), 
+  {min:0, max:1},
+  'SCF array',
+  false);
+
+
+//----- Mean SCF ---------------------------------------------------------------
+//==============================================================================
+var meanSCF = SCFYearCollection.select('num_observations_1km')
+                               .mean();
+var meanSCF = meanSCF.mask(meanSCF.neq(0)); 
+Map.addLayer(meanSCF, //.mask(AOI),
+  {min:0, max:1, palette: RedToBlue},
+  'Mean Snow Cover Frequency',
+  false);
+
+
+//----- Standard deviation ----------------------------------------------------
+//==============================================================================
+var stddevImage = SCFYearCollection.select('num_observations_1km').reduce(ee.Reducer.sampleStdDev());
+Map.addLayer(stddevImage.mask(stddevImage.neq(0)), 
+  {min: 0, max: 0.3}, 
+  'stddev',
+  false);
+
+
+//----- Sample Variance --------------------------------------------------------
+//==============================================================================
+var Variance = SCFYearCollection.select('num_observations_1km').reduce(ee.Reducer.sampleVariance());
+Map.addLayer(Variance, 
+  {min:-1, max:1, palette: RedToBlue},
+  'Variance',
+  false);
+
+
+//----- Image Count ------------------------------------------------------------
+//==============================================================================
+var ImageCount = SCFYearCollection.select('num_observations_1km').count();
+Map.addLayer(ImageCount, 
+  {min:0, max:500, palette: RedToBlue},
+  'Image Count',
+  false);
+
+
+//----- Degrees of Freedom -----------------------------------------------------
+//==============================================================================
+var yearlyDOF = GenerateDOF('2002-10-01', '2012-09-30');
+Map.addLayer(yearlyDOF,
+  {min:-10, max:10, palette: RedToBlue},
+  'yearlyDOF',
+  false);
+
+
+//----- Linear Fit -------------------------------------------------------------
+//==============================================================================
+var LinearFit = SCFYearCollection.reduce(ee.Reducer.linearFit());
+Map.addLayer(LinearFit.select([0]).mask(LinearFit.select([0]).neq(0)).clip(TestRect), 
+  {min:-0.025, max:0.03, palette:RedToBlue}, 
+  'Linear Trend',
+  true);
+
+//==============================================================================
+//==============================================================================
+//==============================================================================
+
+var Histogram1 = Chart.image.histogram(LinearFit.select([0]), TestRect, 500, null);
+print(Histogram1);
+
+var Histogram2 = Chart.image.histogram(LinearFit.select([0]).reduceRegion({
+   reducer: ee.Reducer.frequencyHistogram(),
+   geometry: TestRect, // null??
+   scale: 500,
+   bestEffort: true,
+   maxPixels: 9323372036854775807 // How do I incorporate this correctly?
+   })
+   );
+print(Histogram2);
+
+
+
+   

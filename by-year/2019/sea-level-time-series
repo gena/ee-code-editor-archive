@@ -1,0 +1,20 @@
+var url = 'gs://slr/psmsl/a884f376-d590-3f42-98b8-cd7c87ce28aa.json'
+
+var blob = ee.Blob(url)
+
+var str = blob.string().replace('NaN', '-9999', 'g')
+
+print(str)
+
+str.evaluate(function(str) {
+  var j = JSON.parse(str)
+  print(j)
+  
+  var pt = ee.Geometry.Point(j.location.geometry.coordinates)
+  Map.addLayer(pt)
+  
+  var times = j.events.map(function(o) { return Date.parse(o.timeStamp) })
+  var values = j.events.map(function(o) { return Date.parse(o.value) })
+  
+  print(ui.Chart.array.values(values, 0, times).setOptions({pointSize: 1}))
+})

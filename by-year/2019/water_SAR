@@ -1,0 +1,282 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var poly1 = /* color: #98ff00 */ee.Geometry.Polygon(
+        [[[121.76215758141439, 31.447634893345686],
+          [121.03705992516439, 31.905764952386637],
+          [119.42206969078939, 32.32449806249332],
+          [118.22455992516439, 32.026929495069965],
+          [117.22480406578939, 30.902450603856224],
+          [115.98334898766439, 30.240313807101774],
+          [114.75288023766439, 30.930726649537437],
+          [113.93989195641439, 30.760945140873602],
+          [113.44550719078939, 30.235568034617906],
+          [112.88520445641439, 30.069321805243852],
+          [111.31415953453939, 30.982544352481273],
+          [110.62751402672689, 31.137828611341295],
+          [109.78156676110189, 31.151932785934758],
+          [108.44123472985189, 30.991962732259438],
+          [107.96882262047689, 30.61923136192892],
+          [107.66669859703939, 30.069321805243852],
+          [107.30414976891439, 29.89803384429611],
+          [107.55683531578939, 29.554574142439144],
+          [108.42475523766439, 30.349403287407313],
+          [108.99055113610189, 30.69956138043044],
+          [110.13312926110189, 30.671217233302112],
+          [111.77558531578939, 30.059813562400777],
+          [112.36884703453939, 29.621449978747407],
+          [112.17109312828939, 29.348893127907335],
+          [111.77009215172689, 28.868959610210016],
+          [112.33039488610189, 28.526853727668858],
+          [112.93464293297689, 28.406128295843107],
+          [113.87946715172689, 29.372830934134658],
+          [114.79133238610189, 29.592794333329124],
+          [115.49445738610189, 29.420689660523404],
+          [115.89545836266439, 28.444775437471645],
+          [116.85676207360189, 28.647441048810478],
+          [117.00507750328939, 29.214737546386186],
+          [117.32917418297689, 29.50677856772693],
+          [117.82905211266439, 29.654871268683475]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+//---------------------------------------------------------------------
+/**
+ * Synthetic green band is the average of VV and VH
+ * See https://sentinel.esa.int/web/sentinel/user-guides/sentinel-1-sar/product-overview/polarimetry
+ * @param img image
+ **/
+
+//**Map.addLayer(ds1, {min:[-20, -25, -30], max:[0, -2, -5]}, 'Nov 12');
+var addDate = function(image){
+   var date = image.date().format('YYYYMMdd');
+   return image.set('date', ee.Number.parse(date));
+};
+
+function waterextraction1(image) {
+var sv=image.select('VH').lt(100)
+var region = sv.reduceToVectors({scale: 1000});
+//--------------------------------
+var gsw = ee.Image('JRC/GSW1_0/GlobalSurfaceWater');
+var maxtent = gsw.select('max_extent');
+var occurrence = gsw.select('occurrence');
+var occurrence1=occurrence.unmask(0)
+var water_mask1 = occurrence1.gt(98).clip(region);
+//**Map.addLayer(water_mask1.updateMask(water_mask1), {min:0,max:1, palette:"blue"}, 'water-alltime')
+
+var hand = ee.Image("users/gena/GlobalHAND/30m/hand-5000")
+var occurrence2=occurrence1.lt(20)
+var hand1=hand.multiply(occurrence2)
+var handMask = hand1.lt(30)
+
+//-----------------------------------------------
+var landmask = occurrence1.eq(0).multiply(-1)
+var water11=landmask.add(water_mask1).clip(region)
+//---land=-1;water=1,other=0==================
+// Make a training dataset by sampling the stacked images.
+var samples = image.addBands(water11).stratifiedSample({
+  numPoints: 500,
+  classBand: "occurrence",
+  region: region, 
+  scale: 30,
+  tileScale: 2,
+  geometries: true
+})
+//------delte watersample outlier---------------------------------------
+var watersample = samples.filter(ee.Filter.eq('occurrence', 1));
+var nwatersample = samples.filter(ee.Filter.eq('occurrence', -1));
+
+var thred1=watersample.reduceColumns({
+  reducer: ee.Reducer.mean(),
+  selectors: ['VH']})
+var th1=thred1.get('mean')
+
+var thred2=watersample.reduceColumns({
+  reducer: ee.Reducer.stdDev(),
+  selectors: ['VH']})
+//print(thred1)
+var th2=thred2.get('stdDev')
+//print(th2)
+var ss1=ee.Number(th1).subtract(ee.Number(th2).multiply(2.0))
+//print(ss1)
+var ss2=ee.Number(th1).add(ee.Number(th2).multiply(2.0))
+//print(ss2)
+//Delete outlier
+var wtraining = watersample.filter(ee.Filter.gt('VH', ss1)).filter(ee.Filter.lt('VH', ss2))
+var training = wtraining.merge(nwatersample)   //Trainning samples for classification
+//print(training)
+//-----------------------Threshold 1--------------------------------
+var wsamples = training.filter(ee.Filter.eq('occurrence', 1));
+var thred3=wsamples.reduceColumns({
+  reducer: ee.Reducer.max(),
+  selectors: ['VH']})
+//print(thred1)
+var th4=thred3.get('max')
+//print(th1)
+var seg=image.select('VH')
+var waterseg1=seg.select('VH').clip(region).lt(ee.Image(ee.Number(th4))).rename('occurrence')
+
+//--------------------------First-Step----------------------------------
+var seeds = ee.Algorithms.Image.Segmentation.seedGrid(10);
+var snic0 = ee.Algorithms.Image.Segmentation.SNIC({
+  image: image,
+  compactness: 3,
+  connectivity: 4,
+  neighborhoodSize: 256,
+  seeds: seeds//.multiply(water0)
+});
+//print(snic)
+var clusters1 = snic0.select('clusters');
+Map.addLayer(clusters.randomVisualizer(), {}, 'clusters');
+var clustermean0=image.addBands(clusters1)
+.reduceConnectedComponents(ee.Reducer.mean(), 'clusters', 512);
+var ws1=clustermean0.select('VH')
+var waters1=ws1.select('VH').clip(region).lt(ee.Image(ee.Number(th4))).rename('occurrence')
+var waterp1=waters1.add(water_mask1)
+var water1=waterp1.gt(0.0)
+Map.addLayer(water1.updateMask(water1), {}, 'waters-segement1');
+//--------------------------------Classification method--------------------------------
+var watersegment1=water1
+var water11=landmask.add(watersegment1).clip(region)
+//---land=-1;water=1,other=0==================
+// Make a training dataset by sampling the stacked images.
+var samples0 = image.addBands(water11).stratifiedSample({
+  numPoints: 500,
+  classBand: "occurrence",
+  region: region, 
+  scale: 30,
+  tileScale: 2,
+  geometries: true
+})
+//------delte watersample outlier---------------------------------------
+var watersample0 = samples0.filter(ee.Filter.eq('occurrence', 1));
+var nwatersample0 = samples0.filter(ee.Filter.eq('occurrence', -1));
+
+var thd1=watersample0.reduceColumns({
+  reducer: ee.Reducer.mean(),
+  selectors: ['VH']})
+var thm1=thd1.get('mean')
+
+var thd2=watersample0.reduceColumns({
+  reducer: ee.Reducer.stdDev(),
+  selectors: ['VH']})
+//print(thred1)
+var thstd=thd2.get('stdDev')
+//print(th2)
+var svs1=ee.Number(thm1).subtract(ee.Number(thstd).multiply(2.0))
+//print(ss1)
+var svs2=ee.Number(thm1).add(ee.Number(thstd).multiply(2.0))
+//print(ss2)
+//Delete outlier
+var wtraining0 = watersample.filter(ee.Filter.gt('VH', svs1)).filter(ee.Filter.lt('VH', svs2))
+var training0 = wtraining0.merge(nwatersample0)   //Trainning samples for classification
+//print(training)
+//-----------------------Threshold 2--------------------------------
+var wsamples0 = training0.filter(ee.Filter.eq('occurrence', 1));
+var cth1=wsamples.reduceColumns({
+  reducer: ee.Reducer.max(),
+  selectors: ['VH']})
+//print(thred1)
+var cth1max=cth1.get('max')
+//print(th1)
+
+//var seg=image.select('VH')
+var waterseg2=seg.select('VH').clip(region).lt(ee.Image(ee.Number(cth1max))).rename('occurrence')
+//**Map.addLayer(water1.updateMask(water1), {}, 'waters-pixels-2')
+var waterseg2=waterseg2.updateMask(waterseg2)
+
+// Train a classifier using the training data.
+//var training = ee.FeatureCollection(training)
+//    .remap([0, 1], [0, 1], 'occurrence');
+var bands = ['VV','VV_1','VH']
+var classifier = ee.Classifier.randomForest().train({
+  features: training0, 
+  classProperty: 'occurrence', 
+  inputProperties: bands
+});
+//print('Is that OK?')
+
+// Apply the classifier to the original composite.
+var upsampled = image.classify(classifier);
+// Draw the upsampled landcover image.
+// Compute standard deviation (SD) as texture of the NDVI.
+var texture = upsampled.reduceNeighborhood({
+  reducer: ee.Reducer.count(),
+  kernel: ee.Kernel.rectangle(7,7),
+});
+//-------------------------------------------------------------------
+var waterclass=upsampled.eq(1).rename('waterclassify')
+
+var upsampled1=upsampled
+var upsampled2=upsampled.updateMask(water_mask1).updateMask(handMask).updateMask(maxtent)
+
+
+var seeds0 = ee.Algorithms.Image.Segmentation.seedGrid(1);
+var seed11=seeds0.updateMask(waterclass).updateMask(waterseg2)
+
+// Run SNIC on the regular square grid.
+var snic11 = ee.Algorithms.Image.Segmentation.SNIC({
+  image: image,
+  compactness: 3,
+  connectivity: 4,
+  neighborhoodSize: 256,
+  seeds: seed11
+});
+
+var clusters11 = snic11.select('clusters');
+//Map.addLayer(clusters.randomVisualizer(), {}, 'clusters');
+var imgclus=image.addBands(clusters11)
+.reduceConnectedComponents(ee.Reducer.mean(), 'clusters', 512);
+var imgcluVH=imgclus.select('VH')
+//print(ws)
+var waterclus1=imgcluVH.select('VH').clip(region).lt(ee.Image(ee.Number(cth1max)))
+//**Map.addLayer(waters1.updateMask(waters1), {}, 'waters-th1');
+//----------TESST--------------------------------------------------------
+
+//------------------------Classification water---------------------------------
+var upsampled11 = upsampled1.eq(1)
+// Draw the upsampled landcover image.
+//**Map.addLayer(upsampled1.updateMask(upsampled11), {min:0,max:1, palette:"green"}, 'waters--dd');
+var watersuf=waterclus1.unmask(0).add(upsampled11)
+var warea5=watersuf.gt(0)
+//**Map.addLayer(water2.updateMask(warea).updateMask(handMask).updateMask(maxtent), {min:0,max:1, palette:"blue"}, 'waters--last');
+//---------------------------------------------------------------------------------------------------
+var waterarea1= watersuf.updateMask(warea5).updateMask(handMask).updateMask(maxtent).rename('watersurface')
+
+//var waterarea1= water2.updateMask(warea).updateMask(handMask).updateMask(maxtent).rename('watersurface')
+    
+//*--------------------------------------------- 
+var maxtt=maxtent.unmask(0)
+var water3=watersuf.multiply(handMask).multiply(maxtt).rename('watersurface')
+
+ return image.addBands(water3)
+}
+
+//---------------------------------------------------------------------
+// Map a collection and apply the function - Why does this fail?
+//var collection = ee.ImageCollection('LANDSAT/LC08/C01/T1_TOA')
+var collection =  ee.ImageCollection('COPERNICUS/S1_GRD').filterBounds(poly1)
+.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VH'))
+.filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'VV'))
+var before1 = collection.filterDate('2019-3-1', '2019-3-10')
+//print("data")
+print(before1)
+var before=before1//.first()
+//print(before)
+
+function rgb(img) {
+      var vv = img.select('VV');
+      var vh = img.select('VH');
+      return ee.Image.cat(vv, vv.add(vh).divide(2), vh);
+}
+var ds=before.map(rgb)
+print(ds)
+
+
+var dswater = ds.map(waterextraction1);
+print(dswater)
+
+var dswater1=dswater.mean()
+var bands = ['VV','VV_1','VH']
+Map.addLayer(dswater1.select(bands), {min:[-20, -25, -30], max:[0, -2, -5]}, 'SAR-img');
+//var ndwiViz = {min: 0.5, max: 2, palette: ['00FFFF', '0000FF']};
+var water=dswater.select('watersurface')
+var waters=water.mosaic()
+var ifwater=waters.gt(0.0)
+Map.addLayer(waters.updateMask(ifwater),{min:0,max:1, palette:"blue"}, 'waters');

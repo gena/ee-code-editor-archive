@@ -1,0 +1,25 @@
+// MODIS mask clouds and shadows
+
+var getQABits = function(image, start, end, newName){var pattern = 0;
+    for (var i = start; i <= end; i++){
+       pattern += Math.pow(2, i)}
+    return image.select([0], [newName]).bitwiseAnd(pattern).rightShift(start)};
+
+var quality_mask = function(image) {
+  var BQA = image.select('StateQA');
+  var internal_cloud = getQABits(BQA, 10, 10, 'internal_cloud');
+  var cloud_shadow = getQABits(BQA, 2, 2, 'cloud_shadow');
+
+  return internal_cloud.addBands(ee.Image(1).select([0], ['count']));  
+/*
+return collection.mask(internal_cloud.neq(1))
+					.mask(cloud_shadow.neq(1))
+*/};
+
+var my_collection = ee.ImageCollection('MODIS/MOD09A1')
+	.filterDate('2012-01-01', '2016-01-01')
+	.map(quality_mask);  
+
+print (my_collection);
+
+Map.addLayer(my_collection.sum().select(0), {min:0, max:154})

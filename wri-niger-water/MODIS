@@ -1,0 +1,50 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var g = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[-5.174814735311088, 14.659147290218735],
+          [-5.210924994543461, 13.753460209739034],
+          [-4.432049954375657, 13.625181125320188],
+          [-4.033212052951058, 14.413359892495022],
+          [-3.6480113878166094, 15.285038927323884],
+          [-3.9447335822014793, 15.565379938793647],
+          [-4.598900322044642, 15.460094217502913]]]),
+    ndwi = ee.ImageCollection("MODIS/MCD43A4_NDWI"),
+    ndvi = ee.ImageCollection("MODIS/MCD43A4_NDVI");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+
+ndwi = ndwi.filter(ee.Filter.calendarRange(2015, 2018, 'year'))
+ndvi = ndvi.filter(ee.Filter.calendarRange(2015, 2018, 'year'))
+
+var chart = ui.Chart.image.seriesByRegion(ndvi, g,  ee.Reducer.mean(), 'NDVI', 500, 'system:time_start')
+  .setOptions({
+    title: 'NDVI Long-Term Time Series',
+    vAxis: {title: 'NDVI'},
+  });
+
+print(chart);
+
+var chart = ui.Chart.image.seriesByRegion(ndwi, g,  ee.Reducer.percentile([85]), 'NDWI', 500, 'system:time_start')
+  .setOptions({
+    title: 'NDWI Long-Term Time Series',
+    vAxis: {title: 'NDWI'},
+  });
+
+print(chart);
+
+
+var visNDVI = {
+  min: 0, 
+  max: 1, 
+  palette: ['FFFFFF','CC9966','CC9900', '996600', '33CC00', '009900','006600','000000']
+}
+
+Map.addLayer(ndvi.mean(), visNDVI, 'NDVI', false);
+
+var visNDWI = {
+  min: -0.15, 
+  max: 0.15, 
+  palette: ['ffffff', '000000', '0000FF']
+}
+
+animation.animate(ndwi, { vis: visNDWI, maxFrames: 60 })
+// animation.animate(ndwi, { vis: visNDVI, position: 'bottom-center', preload: false })

@@ -1,0 +1,120 @@
+// image fusion
+/* 
+Input: two pairs of Landsat and MODIS reflectance, 
+one MODIS reflectance at simulated date
+
+Created Dec. 17, 2014
+By Dongjie Fu (fudongjie#gmail.com)
+
+*/
+
+// Parameter initialized
+var halfwindowsize=25; // set the half window size, 25*2+1=51
+var num_similar_pixel=20; //set number of similar pixels
+var num_class=4.0; // set number of classes
+var DN_min=0;
+var DN_max=10000;
+var patch_long=500; // set the size of block, if process whole TM/ETM/OLI, set 500
+var uncertain=(DN_max*0.002)*(2^0.5);
+
+// Set the boundary
+//var myRegion = ee.Geometry.Rectangle(-104.5,53.5,-103.5,54.5);
+var myRegion = ee.Geometry.Point(-104,54);
+
+// 1. Data reading 
+// 1.1 Landsat
+// LEDAPS/L7_L1T_SR
+//'LEDAPS/LT5_L1T_SR';
+var landsatProduct = 'LEDAPS/L7_L1T_SR';
+var dateStart = '2001-05-23';
+var dateEnd = '2001-05-25';
+var landsatSR_start = ee.ImageCollection(landsatProduct).filterDate(dateStart,dateEnd);
+//landsatSR=landsatSR.toFloat().multiply(0.0001);
+landsatSR_start=landsatSR_start.filterBounds(myRegion);
+landsatSR_start=landsatSR_start.select(0,1,2,3,4,5,7); // band1,2,3,4,5,7,QA
+console.log(landsatSR_start);
+
+var dateStart = '2001-08-11';
+var dateEnd = '2001-08-13';
+var landsatSR_end = ee.ImageCollection(landsatProduct).filterDate(dateStart,dateEnd);
+landsatSR_end=landsatSR_end.filterBounds(myRegion);
+landsatSR_end=landsatSR_end.select(0,1,2,3,4,5,7); // band1,2,3,4,5,7,QA
+console.log(landsatSR_end);
+
+//Map.addLayer(landsatSR_start,{'bands': ['B4', 'B3', 'B2'],'min': 0, 'max': 10000},'Landsat_start');
+//Map.addLayer(landsatSR_end,{'bands': ['B4', 'B3', 'B2'],'min': 0, 'max': 10000},'Landsat_end');
+Map.setCenter(-104.9084, 54.3486, 7);
+
+// 1.2 MODIS
+var modisSR_start = ee.Image('MOD09GA/MOD09GA_005_2001_05_24').multiply(0.0001);
+modisSR_start=modisSR_start.select(12,13,10,11,15,16,17); //band3,4,1,2,6,7,QC_500m
+var modisSR_end = ee.Image('MOD09GA/MOD09GA_005_2001_08_12').multiply(0.0001);
+modisSR_end=modisSR_end.select(12,13,10,11,15,16,17); //band3,4,1,2,6,7,QC_500m
+var fc = ee.FeatureCollection('ft:1kSWksPYW7NM6QsC_wnCuuXO7giU-5ycxJb2EUt8');
+var fc = fc.filterMetadata('name', 'equals', '37_22');
+Map.addLayer(fc)  
+console.log(fc)
+var modisSR_start = modisSR_start.clip(fc.geometry());
+var modisSR_end=modisSR_end.clip(fc.geometry());
+
+// 2. Reprojection, resample of MODIS
+
+modisSR_start=modisSR_start.reproject('EPSG:32613',[30,0,384285,0,-30,6153615]);
+modisSR_end=modisSR_end.reproject('EPSG:32613',[30,0,384285,0,-30,6153615]);
+console.log(modisSR_start);
+console.log(modisSR_end);
+//Map.addLayer(modisSR_start,{'bands': ['sur_refl_b02', 'sur_refl_b01', 'sur_refl_b04'],'min': 0, 'max': 1},'MODIS_start')
+//Map.addLayer(modisSR_end,{'bands': ['sur_refl_b02', 'sur_refl_b01', 'sur_refl_b04'],'min': 0, 'max': 1},'MODIS_end')
+
+// 3. Simulation
+var test=landsatSR_start.select(0);//.size;
+//print(landsatSR_start.select(0).reduceRegion(ee.Reducer.stdDev()))
+var myStddev=landsatSR_start.select(0).reduceRegion(ee.Reducer.stdDev())
+
+//Map.addLayer(test);
+/*var mytest=test.toArray()
+console.log(mytest.get([0,0]))
+//var similar_th=ee.Array([0,0,0,0,0,0],[0,0,0,0,0,0]);
+var myMatrixStdDev = function(mymatrix) {
+  var total=0;
+  for(var i=0;i<8441*7601;++i) total=total+mymatrix(i);
+  var mean=total/(8441*7601);
+  total=0;
+  for(var j=0;j<8441*7601;j++){
+    var deviation=data[j]-mean;
+    total+=deviation*deviation;
+  }
+  var stddev=Math.sqrt(total/(8441*7601-1));
+}
+var myStddev=myMatrixStdDev(mytest); */
+//console.log(myStddev)
+
+//var landsatSR_start_stddev=landsatSR_start.reduce(ee.Reducer.std_dev());
+//print(landsatSR_start_stddev);
+
+//for (var iband=0;iband<7;++iband){
+//  similar_th[iband,0]=landsatSR_start.reduce(ee.Reducer.std_dev());
+//}
+
+// 1. processing MODIS to Landsat extent, projection, and resolution
+/*
+var img = ee.Image('MOD09GA/MOD09GA_005_2012_03_09').multiply(0.0001);
+
+var evi = img.expression(
+    '2.5 * (nir - red) / (nir + 6 * red - 7.5 * blue + 1)',
+    {
+        red: img.select('sur_refl_b01'),    // 620-670nm, RED
+        nir: img.select('sur_refl_b02'),    // 841-876nm, NIR
+        blue: img.select('sur_refl_b03')    // 459-479nm, BLUE
+    });
+
+*/
+
+
+
+
+
+
+
+
+

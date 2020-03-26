@@ -1,0 +1,14 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var no2 = ee.ImageCollection("COPERNICUS/S5P/NRTI/L3_NO2");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var vis = { palette: ['#ffffff', '#f5ff62', '#ff051c'], min: 0.00007645609477412158, max: 0.00018517833130767653}
+
+no2 = no2.select('NO2_column_number_density')
+
+Map.addLayer(no2.mean(), vis, 'mean')
+
+function show(p) {
+  Map.addLayer(no2.reduce(ee.Reducer.percentile([p])), vis, p + '%', true, 0.9)
+}
+
+[0, 25, 50, 75, 100].map(show)

@@ -1,0 +1,79 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var S2_IC = ee.ImageCollection("COPERNICUS/S2_SR"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([-117.03382170340876, 32.80036916800418]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+//
+// CONFIG
+//
+var START='2019-01-01'
+var END='2019-03-01'
+var CRS="EPSG:4326"
+var EXPORT_CRS="EPSG:32611"
+var COORDS=[[[-117.03374096392949, 32.80057332210864],
+             [-116.97958900648932, 32.80057620411772],
+             [-116.97957854438016, 32.84631081284336],
+             [-117.03375825860924, 32.8463079258077],
+             [-117.03374096392949, 32.80057332210864]]]
+             
+
+//
+// GET IMAGE
+//
+S2_IC=S2_IC.filterDate(START,END).filterBounds(geometry).sort('CLOUDY_PIXEL_PERCENTAGE').select(['B4','B3','B2'])
+var s2=ee.Image(S2_IC.reduce(ee.Reducer.firstNonNull()))
+
+// snep to the nearest image coordinate
+var coords = ee.Image.pixelCoordinates(ee.Projection(EXPORT_CRS)).reduceRegion(ee.Reducer.toList(), geometry, 10)
+print(coords)
+
+// compute nearest snapped S2 pixel
+var xmin = ee.Number(ee.List(coords.get('x')).get(0)).subtract(5)
+var ymin = ee.Number(ee.List(coords.get('y')).get(0)).add(5)
+var xmax = xmin.add(10 * 510)
+var ymax = ymin.add(10 * 510)
+
+Map.addLayer(ee.Geometry.Point([xmin, ymin], EXPORT_CRS), { color: 'red' }, 'snapped point')
+
+
+  
+  
+//
+// GEOM
+//
+//var geom=ee.Geometry.Polygon(COORDS,CRS,false)
+var geom = ee.Geometry.Rectangle([xmin, ymin, xmax, ymax], EXPORT_CRS, false)
+
+Map.addLayer(geom)
+//Map.centerObject(geom,12)
+
+
+Map.addLayer(s2.clip(geom),{min: 0, max: 2500},'S2')
+
+print(s2.clip(geom).reproject(ee.Projection(EXPORT_CRS).atScale(10)).projection())
+
+var pt = geometry.transform(EXPORT_CRS).coordinates()
+
+Map.addLayer(s2.clip(geom).reproject(ee.Projection(EXPORT_CRS).atScale(10)),{min: 0, max: 2500},'S2 10m')
+Map.addLayer(s2.clip(geom).reproject(ee.Projection(EXPORT_CRS).atScale(30)),{min: 0, max: 2500},'S2 30m', true, 0.5)
+
+
+//
+// EXPORT AT scale=10,30
+//
+var export_test=function(im,res, buffer){
+  var name='s2_export_test-'+res
+  Export.image.toCloudStorage({
+    image: im.toInt16(), 
+    description: name, 
+    bucket: 'hydro-engine', 
+    fileNamePrefix: 'data/dev/testing/'+name, 
+    region: geom, 
+    crs: EXPORT_CRS, 
+    scale: res,
+    maxPixels: 1e9 })
+} 
+  
+export_test(s2,30)
+export_test(s2,10)
+

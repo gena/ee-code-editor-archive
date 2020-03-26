@@ -1,0 +1,382 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var eucalyptus = /* color: 98ff00 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-47.05714702606201, -22.089020000136706],
+              [-47.05585956573486, -22.089815305667468],
+              [-47.048821449279785, -22.089974366235996],
+              [-47.04225540161133, -22.089059765519657],
+              [-47.04221248626709, -22.086435226221035],
+              [-47.040581703186035, -22.080907627836556],
+              [-47.04568862915039, -22.075101428230624],
+              [-47.049851417541504, -22.073272028230882],
+              [-47.05761909484863, -22.088463283599456]]]),
+        {
+          "label": "Eucalyptus",
+          "system:index": "0"
+        }),
+    sugarcane = /* color: 0B4A8B */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-47.212886810302734, -22.402299953617632],
+              [-47.208852767944336, -22.40110965187719],
+              [-47.206621170043945, -22.39825288611411],
+              [-47.194175720214844, -22.394761203792633],
+              [-47.18979835510254, -22.397538685500475],
+              [-47.185935974121094, -22.39047583746711],
+              [-47.18722343444824, -22.382936446589866],
+              [-47.19520568847656, -22.381428519380695],
+              [-47.1998405456543, -22.374047376763706],
+              [-47.22078323364258, -22.387063321691752],
+              [-47.22696304321289, -22.391190074358704],
+              [-47.22644805908203, -22.398729017818198],
+              [-47.221384048461914, -22.40468052651825]]]),
+        {
+          "label": "Sugarcane",
+          "system:index": "0"
+        }),
+    citrus = /* color: ffc82d */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-47.07770347595215, -22.302120295538383],
+              [-47.07366943359375, -22.30466139824198],
+              [-47.06791877746582, -22.30410553597585],
+              [-47.06671714782715, -22.3052966666944],
+              [-47.06242561340332, -22.30243793590448],
+              [-47.05624580383301, -22.301246780807336],
+              [-47.05564498901367, -22.284172441814743],
+              [-47.05899238586426, -22.284093021411152],
+              [-47.06422805786133, -22.286952127517235],
+              [-47.06439971923828, -22.283934180468613],
+              [-47.0680046081543, -22.283775339345624],
+              [-47.072553634643555, -22.28131327886386],
+              [-47.074012756347656, -22.27956598383525],
+              [-47.08491325378418, -22.27901002174767],
+              [-47.084312438964844, -22.28885816576901],
+              [-47.081050872802734, -22.29147892592712],
+              [-47.07796096801758, -22.2916377582967],
+              [-47.07710266113281, -22.294179051660386],
+              [-47.07461357116699, -22.295529094963047],
+              [-47.07572937011719, -22.298705615987014]]]),
+        {
+          "label": "Citrus",
+          "system:index": "0"
+        }),
+    annual_crop = /* color: 00ffff */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-47.10812918034128, -22.159026482634157],
+              [-47.107915428285196, -22.159105418285858],
+              [-47.107830722282245, -22.159264331202788],
+              [-47.10753128954326, -22.159185256750778],
+              [-47.106501505733604, -22.159503635122128],
+              [-47.10517132032942, -22.159583545416798],
+              [-47.104914202862915, -22.15831272569268],
+              [-47.10508578907553, -22.156246829178784],
+              [-47.106458480364495, -22.154657657222756],
+              [-47.10851751751085, -22.153704145384975],
+              [-47.11126290046042, -22.153704145398525],
+              [-47.11383669685898, -22.154975493106324],
+              [-47.11482344969863, -22.15612696510148],
+              [-47.11542426417873, -22.156920503494916],
+              [-47.113418125556166, -22.15754634923937],
+              [-47.11046782371028, -22.158410680929972]]]),
+        {
+          "label": "Annual crop",
+          "system:index": "0"
+        }),
+    native_forest = /* color: bf04c2 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-47.527456283569336, -22.39999869438989],
+              [-47.51767158508301, -22.427849305581052],
+              [-47.5023078918457, -22.424517047945287],
+              [-47.5019645690918, -22.414678487381398],
+              [-47.501792907714844, -22.383174538865745],
+              [-47.5048828125, -22.384285630765714],
+              [-47.506513595581055, -22.387698214687024],
+              [-47.51157760620117, -22.389444155481346],
+              [-47.51689910888672, -22.388888631242267],
+              [-47.51852989196777, -22.387380768551626],
+              [-47.528228759765625, -22.39769739706502]]]),
+        {
+          "label": "Native Forest",
+          "system:index": "0"
+        }),
+    pasture = /* color: ff0000 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-46.77154541015625, -22.53507348402533],
+              [-46.76931381225586, -22.53618335889338],
+              [-46.767940521240234, -22.539037281874414],
+              [-46.76150321960449, -22.536738292981973],
+              [-46.75772666931152, -22.533884322481615],
+              [-46.756954193115234, -22.529365415227527],
+              [-46.76098823547363, -22.528096923457273],
+              [-46.76261901855469, -22.526828420038186],
+              [-46.764936447143555, -22.527541954644743],
+              [-46.76776885986328, -22.525639187503707],
+              [-46.77163124084473, -22.52579775243314],
+              [-46.77326202392578, -22.53221947911682]]]),
+        {
+          "label": "Pasture",
+          "system:index": "0"
+        }),
+    urban = /* color: 00ff00 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-46.93960189819336, -22.36039519991424],
+              [-46.93891525268555, -22.357061325504738],
+              [-46.93702697753906, -22.353409847698753],
+              [-46.93702697753906, -22.350869632782814],
+              [-46.93857192993164, -22.348805674066394],
+              [-46.94303512573242, -22.35245727253212],
+              [-46.94578170776367, -22.362300235178513]]]),
+        {
+          "label": "Urban",
+          "system:index": "0"
+        }),
+    water = /* color: 0000ff */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-47.231336430282454, -22.732528085386537],
+              [-47.22987718784361, -22.732607126342497],
+              [-47.22689429231099, -22.733735245549045],
+              [-47.224769694266115, -22.730984305382137],
+              [-47.22320328129945, -22.727777852556084],
+              [-47.22446927224087, -22.726629728541457],
+              [-47.22558363863186, -22.724251694934438],
+              [-47.22781727198685, -22.72314624265545],
+              [-47.23200177678433, -22.723067039950813],
+              [-47.23601458964288, -22.722908614962822],
+              [-47.24039231697486, -22.726590220389756],
+              [-47.24148651738528, -22.728470655437867],
+              [-47.23631501506395, -22.731617721147906]]]),
+        {
+          "label": "Water",
+          "system:index": "0"
+        }),
+    areaofinterest = /* color: 009999 */ee.Geometry.Point([-47.32086181640625, -22.228090416784486]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.centerObject(areaofinterest,11);
+
+// ->check the polygons of the different land cover types
+
+// define the regions of interest for plotting
+var landcovers1 = new ee.FeatureCollection([sugarcane, annual_crop, eucalyptus]);
+var landcovers2 = new ee.FeatureCollection([native_forest, citrus, pasture]);
+var landcovers3 = new ee.FeatureCollection([urban, water]);
+
+// import the HV S1 collection and filter to geometry and show image
+var collection_S1_EW = ee.ImageCollection('COPERNICUS/S1_GRD').filterBounds(areaofinterest.buffer(100000))
+  .filterMetadata('instrumentMode', 'equals', 'EW')
+  .filter(ee.Filter.listContains('transmitterReceiverPolarisation', 'HV'))
+  .select(['HV','HH'].sort('system:time_start',false))
+print('S1 EW mode images',collection_S1_EW)
+Map.addLayer(collection_S1_EW, {'bands': 'HH,HV,HH', min: [-15, -25, -15],max: [0, -5, 0]}, 'Sentinel-1 HV time series',false);
+var collection_S1_EW_first=ee.Image(collection_S1_EW.first());
+print('S1 EW latest acquired image',collection_S1_EW_first)
+Map.addLayer(collection_S1_EW_first, {'bands': 'HH,HV,HH', min: [-15, -25, -15],max: [0, -5, 0]}, 'Sentinel-1 HV latest image');
+
+// define the colors of the lines in the chart
+var COLOR = {
+  Cov1: 'ff0000',
+  Cov2: '0000ff',
+  Cov3: '00ff00', 
+  Cov4: "000000", 
+  Cov5: "000000",
+  Cov6: "000FF0"
+};
+
+// ->first use the 'Inspector' to visualize time series of individual pixels
+
+// show the S1-HV time series chart for each vegetation type
+var sfTimeSeries1 =
+    Chart.image.seriesByRegion(collection_S1_EW, landcovers1, ee.Reducer.mean(),'HV', 30, 'system:time_start', 'label')
+.setChartType('LineChart')
+.setOptions({
+  title: 'S1 HV averages over sugarcane, annual crop and eucalyptus',
+          vAxis: {title: 'HV [dB]',
+          viewWindowMode:'explicit',
+          viewWindow:{
+            min:  -33, 
+            max:  -10
+          },
+          },
+          lineWidth: 4,
+          pointSize: 10,
+          series: {
+              0: {color: COLOR.Cov1},
+              1: {color: COLOR.Cov2},
+              2: {color: COLOR.Cov3},
+              3: {color: COLOR.Cov4}
+}});
+var sfTimeSeries2 =
+    Chart.image.seriesByRegion(collection_S1_EW, landcovers2, ee.Reducer.mean(),'HV', 30, 'system:time_start', 'label')
+.setChartType('LineChart')
+.setOptions({
+  title: 'S1 HV averages over native forest, citrus and pasture',
+          vAxis: {title: 'HV [dB]',
+          viewWindowMode:'explicit',
+          viewWindow:{
+            min:  -33, 
+            max:  -10
+          },
+          },
+          lineWidth: 4,
+          pointSize: 10,
+          series: {
+              0: {color: COLOR.Cov1},
+              1: {color: COLOR.Cov2},
+              2: {color: COLOR.Cov3},
+              3: {color: COLOR.Cov4}
+}});
+var sfTimeSeries3 =
+    Chart.image.seriesByRegion(collection_S1_EW, landcovers3, ee.Reducer.mean(),'HV', 30, 'system:time_start', 'label')
+.setChartType('LineChart')
+.setOptions({
+  title: 'S1 HV averages over urban and water',
+          vAxis: {title: 'HV [dB]',
+          viewWindowMode:'explicit',
+          viewWindow:{
+            min:  -33, 
+            max:  -10
+          },
+          },
+          lineWidth: 4,
+          pointSize: 10,
+          series: {
+              0: {color: COLOR.Cov1},
+              1: {color: COLOR.Cov2},
+              2: {color: COLOR.Cov3},
+              3: {color: COLOR.Cov4}
+}});
+print(sfTimeSeries1);
+print(sfTimeSeries2);
+print(sfTimeSeries3);
+// ->check the time series and observe the harvest and growth of crops and eucalyptus
+// ->also check the differences in signal magnitude
+
+// import optical data (Landsat-8 and Sentinel-2)
+var collection_LS8 = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+  .filterBounds(areaofinterest.buffer(100000))
+  .filterDate('2014-10-01', '2016-05-31').sort('system:time_start',false);
+var collection_S2 = ee.ImageCollection('COPERNICUS/S2')
+  .filterBounds(areaofinterest.buffer(100000))
+  .filterDate('2014-10-01', '2016-05-31').sort('system:time_start',false);
+print(collection_S2)
+
+// use this function to mask clouds in Landsat 8 imagery
+var maskClouds_LS8=function(image){var quality=image.select('BQA');
+  var cloud01=quality.eq(61440);var cloud02=quality.eq(53248);
+  var cloud03=quality.eq(28672);
+  var mask=cloud01.or(cloud02).or(cloud03).not();
+  return image.updateMask(mask);};
+  
+// use this function to add band for NDVI in Landsat 8 imagery
+var addNDVI_LS8=function(image){
+  return image
+    //Add an NDVI band
+    .addBands(image.normalizedDifference(['B5','B4']).rename('NDVI'))};
+
+// apply the cloud mask and select the most cloud free image from the collection to show
+var collection_LS8_NDVI_cloud_free = collection_LS8.map(maskClouds_LS8).map(addNDVI_LS8);
+var collection_LS8_NDVI_cloud_free_first = ee.Image(collection_LS8_NDVI_cloud_free.sort('CLOUD_COVER').first());
+
+// show LS8 RGB
+var vizParams_LS8_RGB = {'bands': 'B4,B3,B2',
+               'min': 0,
+               'max': 0.2};
+Map.addLayer(collection_LS8_NDVI_cloud_free_first, vizParams_LS8_RGB, 'Landsat-8 TOA RGB image',false);
+// show LS8 NDVI
+var paletteNDVI = ['FFFFFF', 'CE7E45', 'DF923D', 'F1B555', 'FCD163', '99B718',
+             '74A901', '66A000', '529400', '3E8601', '207401', '056201',
+             '004C00', '023B01', '012E01', '011D01', '011301'];
+var vizParams_NDVI = {'bands': 'NDVI',
+               'min': 0,
+               'max': 1, palette:paletteNDVI};
+Map.addLayer(collection_LS8_NDVI_cloud_free, vizParams_NDVI, 'Landsat-8 TOA NDVI time series',false);
+Map.addLayer(collection_LS8_NDVI_cloud_free_first, vizParams_NDVI, 'Landsat-8 TOA NDVI image',false);
+
+
+// use this function to mask clouds in Sentinel-2 imagery
+function maskClouds_S2(im) {
+  // Opaque and cirrus cloud masks cause bits 10 and 11 in QA60 to be set,
+  // so values less than 1024 are cloud-free
+  var mask = ee.Image(0).where(im.select('QA60').gte(1024), 1).not();
+  return im.updateMask(mask);
+}
+// use this function to add band for NDVI in Sentinel-2 imagery
+var addNDVI_S2=function(image){
+  return image
+    //Add an NDVI band
+    .addBands(image.normalizedDifference(['B8','B4']).rename('NDVI'))};
+
+//make a mosaic of cloud free images from the S2 collection to show
+var collection_S2_NDVI_cloud_free = collection_S2.map(maskClouds_S2).map(addNDVI_S2)
+var collection_S2_NDVI_cloud_free_image = collection_S2_NDVI_cloud_free
+  .filterDate('2016-03-21', '2016-03-22'); //.sort('CLOUDY_PIXEL_PERCENTAGE',false).
+Map.addLayer(collection_S2_NDVI_cloud_free, vizParams_NDVI, 'Sentinel-2 NDVI time series',false);
+Map.addLayer(collection_S2_NDVI_cloud_free_image, vizParams_NDVI, 'Sentinel-2 NDVI image',false);
+
+// ->observe the differences in NDVI values between fields and other land cover types
+// ->use 'Inspector' as well to visualize some Landsat-8 NDVI time series
+
+// show the LS8-NDVI time series chart for each vegetation type
+var sfTimeSeriesNDVI1_LS8 =
+  Chart.image.seriesByRegion(collection_LS8_NDVI_cloud_free, landcovers1, ee.Reducer.mean(),'NDVI', 30, 'system:time_start', 'label')
+  .setChartType('LineChart')
+  .setOptions({
+  title: 'LS8 NDVI averages over sugarcane, annual crop and eucalyptus',
+        vAxis: {title: 'NDVI [-]',
+        viewWindowMode:'explicit',
+        viewWindow:{
+          min:  0, 
+          max:  1
+        },
+        },
+        lineWidth: 4,
+        pointSize: 10,
+        series: {
+            0: {color: COLOR.Cov1},
+            1: {color: COLOR.Cov2},
+            2: {color: COLOR.Cov3},
+            3: {color: COLOR.Cov4}
+}});
+var sfTimeSeriesNDVI2_LS8 =
+  Chart.image.seriesByRegion(collection_LS8_NDVI_cloud_free, landcovers2, ee.Reducer.mean(),'NDVI', 30, 'system:time_start', 'label')
+  .setChartType('LineChart')
+  .setOptions({
+  title: 'LS8 NDVI averages over native forest, citrus and pasture',
+        vAxis: {title: 'NDVI [-]',
+        viewWindowMode:'explicit',
+        viewWindow:{
+          min:  0, 
+          max:  1
+        },
+        },
+        lineWidth: 4,
+        pointSize: 10,
+        series: {
+            0: {color: COLOR.Cov1},
+            1: {color: COLOR.Cov2},
+            2: {color: COLOR.Cov3},
+            3: {color: COLOR.Cov4}
+}});
+var sfTimeSeriesNDVI3_LS8 =
+  Chart.image.seriesByRegion(collection_LS8_NDVI_cloud_free, landcovers3, ee.Reducer.mean(),'NDVI', 30, 'system:time_start', 'label')
+  .setChartType('LineChart')
+  .setOptions({
+  title: 'LS8 NDVI averages over native urban and water',
+        vAxis: {title: 'NDVI [-]',
+        viewWindowMode:'explicit',
+        viewWindow:{
+          min:  0, 
+          max:  1
+        },
+        },
+        lineWidth: 4,
+        pointSize: 10,
+        series: {
+            0: {color: COLOR.Cov1},
+            1: {color: COLOR.Cov2},
+            2: {color: COLOR.Cov3},
+            3: {color: COLOR.Cov4}
+}});
+print(sfTimeSeriesNDVI1_LS8)
+print(sfTimeSeriesNDVI2_LS8)
+print(sfTimeSeriesNDVI3_LS8)
+
+// ->notice the LS8 NDVI profiles over time over the different land cover types

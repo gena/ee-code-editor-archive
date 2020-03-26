@@ -1,0 +1,109 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+//var smoothing = false
+var smoothing = true
+
+var style = require('users/gena/packages:style')
+var utils = require('users/gena/packages:utils')
+var grid = require('users/gena/packages:grid')
+var hydro = require('users/gena/packages:hydro')
+
+var catchment = hydro.getCatchmentsByRiverName('Limpopo')
+Map.addLayer(catchment, {}, 'catchments (Limpopo)', true, 0.5)
+
+var catchment3 = hydro.getCatchments({ level: 3 })
+Map.addLayer(catchment3, {}, 'catchments (L3)', false, 0.5)
+
+Map.addLayer(ee.Image(1), {palette:['000000']}, 'black', false, 0.5)
+
+// 1984-2015
+var occurrence = jrc.select('occurrence')
+occurrence = occurrence.divide(100).clamp(0, 0.95)
+Map.addLayer(occurrence, {palette: style.Palettes.Water}, 'water (JRC), original', true)
+
+if(smoothing) {
+  occurrence = occurrence.resample('bicubic')
+}
+
+
+// 2005-2015
+/*
+var occurrence = jrcMonthly.filterDate('2005-01-01', '2015-01-01').map(function(i) {
+  i = i.resample('bicubic')
+  return i.eq(2).rename('water').addBands(i.eq([1,2]).reduce(ee.Reducer.max()).rename('has_value'))
+})
+occurrence = occurrence.select('water').sum().divide(occurrence.select('has_value').sum())
+*/
+
+var mask = occurrence.mask()
+
+if(smoothing) {
+  mask = mask.focal_mode(35, 'circle', 'meters', 3)
+}
+
+occurrence = occurrence.mask(mask)
+
+// JRC layrs
+Map.addLayer(occurrence, {palette: style.Palettes.Water}, 'water (JRC)', false)
+
+utils.addIsolines(occurrence, ee.List.sequence(0, 1, 0.1))
+
+var center = Map.getCenter()
+// get a single large cell
+var cell = grid.getGlobalGridCells(center, 1)
+Map.addLayer(cell, {}, 'grid', false)
+var id = ee.String(utils.pad(ee.Feature(cell.first()).get('id').getInfo(), 3))
+
+print(id)
+
+//var aoi = grid.getGlobalGridCells(center, 1)
+//var aoi = grid.getGlobalGridCells(center, 5)
+//var aoi = ee.FeatureCollection([Map.getBounds(true)])
+
+var aoi = catchment3.filterBounds(ee.Feature(catchment.first()).geometry().centroid()) // query level 3 catchment 
+var id = ee.String(utils.pad(ee.Feature(aoi.first()).get('hybas_id').getInfo(), 3))
+print(aoi)
+
+Map.addLayer(aoi, {color: 'green'}, 'aoi', false, 0.5)
+
+var vector = aoi.map(function(cell) { 
+  var results = ee.Image(1).mask(occurrence.mask())
+  
+  if(smoothing) {
+    var r1 = 15
+    var r2 = 40
+    
+    results = results
+      .reduceToVectors({ geometry: cell.geometry(), scale: r1, tileScale: 16, maxPixels: 1e13 }).map(function(g) { return g.simplify(r2) })
+  } else {
+    results = results
+      .reduceToVectors({ geometry: cell.geometry(), scale: 30, tileScale: 16, maxPixels: 1e13 }).map(function(g) { return g.simplify(60) })
+  }
+  
+  return results
+}).flatten()
+
+Map.addLayer(vector, {color:'lightblue'}, 'water (vector)')
+
+var points = ee.Geometry.MultiPoint(vector.geometry().coordinates().flatten())
+Map.addLayer(ee.Image().paint(points, 1, 1).focal_max(0.5), {palette: ['ffffff']}, 'water (vector), points')
+
+id.evaluate(function(id) {
+  var name = 'waterbodies_' + id
+  Export.table.toDrive(vector, name, 'Limpopo', name, 'GeoJSON')  
+})
+
+// after Export, in QGIS:
+// 1. Fix geometries
+// 2. Buffer 0.00001
+
+
+var exported = [ 4988,5131,5059,4987,4915,4984,4914,4986,5058,5130,5129,5057,4985,4913 ]
+var globalGrid = grid.getGlobalGrid()
+print(globalGrid.limit(10))
+var exportedCells = globalGrid.filter(ee.Filter.inList('id', exported))
+print(exportedCells.limit(10))
+
+Map.addLayer(exportedCells, {color: 'lightyellow'}, 'exported', true, 0.5)

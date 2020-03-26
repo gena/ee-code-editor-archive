@@ -1,0 +1,69 @@
+
+var boudnib = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["boudnib"]));
+  
+ var errachidia = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["errachidia"])); 
+  
+ var zouala = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["zouala"])); 
+  
+  var erfoud = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["erfoud"]));
+  
+var geometry = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["figuig"]));
+  
+ var zagora = ee.FeatureCollection("users/mahyouh/palmier").
+  filter(ee.Filter.inList("nom", ["zagora"]));
+
+
+
+
+// #############################################################################
+
+var vis = {min:-5, max: 40,"palette":["0000ff","32cd32","ffff00","ff8c00","ff0000"]};
+
+// Import LST image collection.
+var MODIS_LST = ee.ImageCollection("MODIS/006/MOD11A2")
+.filterDate('2000-01-01', '2019-01-01');
+
+
+
+// #############################################################################
+
+// Scale to Kelvin and convert to Celsius, set image acquisition time.
+var modLSTc = MODIS_LST.map(function(img) {
+  return img
+    .multiply(0.02)
+    .subtract(273.15)
+    .copyProperties(img, ['system:time_start']);
+});
+
+
+/////////////////////////////////////////////////////////////
+
+// Select only the 1km day and night LST data band.
+var modLSTday = modLSTc.select('LST_Day_1km');
+var modLSTnight = modLSTc.select('LST_Night_1km');
+
+// #############################################################################
+
+var stack_LST = modLSTday.merge(modLSTnight)
+
+
+// Create and print charts.
+
+print(ui.Chart.image.series(stack_LST, geometry, ee.Reducer.mean(), 1000)
+.setChartType('ColumnChart')
+.setOptions({
+      title: 'Evolution de la température diurne et nocture',
+      lineWidth: 1,
+      pointSize: 3,
+            vAxis: {title: 'Température (°C)'},
+            hAxis: {title: 'Temps'},
+      
+     }));
+
+
+

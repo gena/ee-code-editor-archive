@@ -1,0 +1,194 @@
+
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D1_site");
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D1_site_Buffer");
+var cereal = ee.FeatureCollection("users/mahyouh/N_D2_site");
+//var cereal = ee.FeatureCollection("users/mahyouh/N_D2_site_Buffer");
+
+
+//var cereal = ee.FeatureCollection("users/mahyouh/nitrog_mars");
+//var cereal = ee.FeatureCollection("users/mahyouh/Nitrogen_mars_B25");
+
+
+//var cereal = ee.FeatureCollection("users/mahyouh/N_BUF_25");
+
+// Définir le Maroc dans la liste des pays du Monde
+
+var Maroc = ee.FeatureCollection("users/mahyouh/MAROC_COV_AMS");
+
+//Map.addLayer(Maroc)
+
+Map.centerObject(Maroc, 5);
+
+// Sentinel-2 cloud mask function
+
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+
+  // Bits 10 and 11 are clouds and cirrus, respectively.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  // Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return image.updateMask(mask).divide(10000);}
+
+ 
+ 
+  // Définir une table de couleurs (du rouge au vert)
+ 
+var color =  ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850'];
+
+var vis = {"opacity":1,"bands":["B8","B4","B3"],"min":0.01140000019222498,"max":0.590399980545044,"gamma":1};
+
+var S2 = ee.ImageCollection("COPERNICUS/S2")
+.filterDate('2020-02-08','2020-02-16')
+//.filterDate('2020-02-20','2020-02-28')
+//.filterDate('2020-01-28','2020-02-05')
+.filterBounds(Maroc)
+.filter(ee.Filter.lte('CLOUDY_PIXEL_PERCENTAGE', 20))
+.map(maskS2clouds)
+.median();
+
+var B = S2.select ('B2');
+var G= S2.select ('B3');
+var R = S2.select ('B4');
+var VRD1 = S2.select ('B5');
+var VRD2 = S2.select ('B6');
+var VRD3 = S2.select ('B7');
+var NIR = S2.select ('B8');
+
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+// Calculate MTCI (Meris Terrestrial Chlorophyll Index)= (B6 - B5)/(B5 - B4)
+
+var MTCI = S2.expression(
+ '(B6 - B5) / (B5 - B4)',{
+ 'B4': R,
+ 'B5': VRD1,
+ 'B6': VRD2
+ });
+
+ 
+// calcul de Modified Chlorophyll Absorption Ratio Index (MCARI)
+ 
+var MCARI = S2.expression(
+ '((B5 - B4) - 0.2 * (B5 - B3)) * (B5 - B4)',{
+ 'B3': G,  
+ 'B4': R,
+ 'B5': VRD1,
+ 'B6': VRD2
+ });
+
+//calcul  Red-Edge Inflection Point Index REIP
+
+var REIP = S2.expression(
+ '(700 + 40 * ((B4 + B7)/2 - B5) / (B6 - B5))',{
+   
+ 'B4': R,
+ 'B5': VRD1,
+ 'B6': VRD2,
+ 'B7': VRD2,
+ });
+// Calcul Sentinel-2 Red-Edge Position Index S2REP
+
+var S2REP = S2.expression(
+ '(705 + 35 * ((B4 + B7)/2 - B5) / (B6 - B5))',{
+   
+ 'B4': R,
+ 'B5': VRD1,
+ 'B6': VRD2,
+ 'B7': VRD2,
+ });
+
+// Calcul Inverted Red-Edge Chlorophyll Index IRECI
+
+var IRECI = S2.expression(
+ '(B7 - B4) / (B5 / B6)',{
+   
+ 'B4': R,
+ 'B5': VRD1,
+ 'B6': VRD2,
+ 'B7': VRD2,
+ });
+
+
+// Calculate NDVI = (B8 - B4)/(B8+ B4)
+//var NDVI= année_courante.normalizedDifference(['B8','B4']);
+var NDVI = S2.expression(
+ '(B8 - B4)/(B8+ B4)',{
+   
+ 'B4': R,
+ 'B8': NIR,
+ });
+
+//cartographie de MTCI Année_courante, année de référence, LTA
+
+Map.addLayer(S2.clip(Maroc), vis, 'optique'); 
+Map.addLayer(MTCI.clip(Maroc) ,{min: -1, max: 6, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'mtci', false);
+Map.addLayer(NDVI.clip(Maroc),{min: -0.2, max: 0.8, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'ndvi', false);
+Map.addLayer(MCARI.clip(Maroc) ,{min: -1, max: 0.002, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'mcari', false);
+Map.addLayer(REIP.clip(Maroc),{min: 705, max: 721, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'REIP', false);
+Map.addLayer(S2REP.clip(Maroc) ,{min: 705, max: 721, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'S2REP', false);
+Map.addLayer(IRECI.clip(Maroc),{min: 0, max: 0.3, palette: ['d73027','f46d43','fdae61','fee08b','ffffbf','91cf60','27e87a', '1a9850']}, 'IRECI', false);
+
+
+
+
+
+Map.addLayer(cereal);
+
+
+
+//Map.addLayer(cereal_p, {color: 'FF0000'}, 'cereal');
+
+// création d'une image multibande
+  
+  var N_stack = MTCI.addBands(NDVI).addBands(MCARI).addBands(REIP)
+  .addBands(S2REP).addBands(IRECI);
+  
+ 
+// Renommer les noms des bandes
+var N_indices = N_stack.select(N_stack.bandNames(), ['MTCI', 'NDVI', 'MCARI', 'REIP', 'S2REP',
+'IRECI']);
+
+
+var Nitogen = N_indices.expression(
+'186.43 - (1.67 * IRE) + (541.42 * MCA)+ (0.9*MTC) - (0.29*NDV)+ (0.26*REI)', 
+     { 'IRE': N_indices.select('IRECI'),
+      'MCA': N_indices.select('MCARI'),
+      'MTC': N_indices.select('MTCI'),
+       'NDV': N_indices.select('NDVI'),
+      'REI': N_indices.select('REIP')
+});
+print(N_indices)
+  print(Nitogen)
+ //Province
+
+var N_cereal = N_indices.reduceRegions({collection: cereal, reducer: ee.Reducer.median(),  scale: 20}); 
+
+// Export ---------------------------------------------------------------------
+// NDVIp_2003
+Export.table.toDrive({
+  collection: N_cereal,
+  description: 'N_D2_site1',
+  folder: 'modis_ndvi',
+  fileFormat: 'CSV'
+});        
+
+
+// Export the FeatureCollection to a KML file.
+//Export.table.toDrive({
+//  collection: site_poly,
+//  description:'site_poly',
+//  fileFormat: 'SHP'});
+
+
+
+
+
+
+
+

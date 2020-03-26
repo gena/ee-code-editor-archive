@@ -1,0 +1,20 @@
+// array struggles
+
+var image = new ee.Image(new ee.ImageCollection("LANDSAT/LC8_L1T")
+  .select(['B7', 'B6', 'B3'])
+  .first());
+
+Map.centerObject(image, 14);
+Map.addLayer(image);
+
+var g = image.geometry();
+
+var max = image.reduceRegion('max', g, 120).values();
+var min = image.reduceRegion('min', g, 120).values();
+
+min = min.get(0); print(min); 
+max = max.get(0); print(max);
+
+Map.addLayer(image, {'min':min, 'max':max});
+
+

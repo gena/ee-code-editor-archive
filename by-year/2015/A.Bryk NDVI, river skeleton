@@ -1,0 +1,119 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var poly = /* color: d63000 */ee.Geometry.Polygon(
+        [[[-74.34456977162478, -4.346361178608136],
+          [-74.33977116414815, -4.682082585892563],
+          [-74.0987658587718, -4.894665898942713],
+          [-74.03583904322534, -5.0079532804235685],
+          [-73.73395737624628, -5.014384680526403],
+          [-73.41741814169887, -4.6718161977692],
+          [-73.30549992502961, -4.340197498422167]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// A.Bryk: NDVI, river skeleton
+
+// NDVI_class_add_CL
+// Alex Bryk
+// UC Berkeley
+// 4/23/2015
+Map.setCenter(-73.7361, -4.6339,11)
+
+function NDVI_calc(input_image1) {
+      input_image1 = input_image1.select(LC8_BANDS, STD_NAMES);
+  var NDVI_calculated = input_image1.expression("(b('nir')-b('red'))/(b('nir')+b('red'))"); //d
+  var new_im = input_image1.addBands(NDVI_calculated.select([0],['NDVI']));
+ return new_im;
+}
+
+//==============================================================================//
+// Quickly get image good enough to make a channel mask from
+
+var START_DATES = '2014-01-01';                    // Collection start date
+var END_DATES = '2015-01-01';                      // Collection end date
+var INITIAL_CLOUD_INDEX = 40;                      // initial cloud index
+var NDVI_PERCENTILE = 50;                          // percent to NDVI reducer
+var NDVI_P_CONCAT = '_p'.concat(NDVI_PERCENTILE.toString());
+var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',   'B6',    'B7',    'B10'];
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'temp'];
+
+
+var L8col1 = ee.ImageCollection('LC8_L1T_TOA') //LT4_L1T; LT5_L1T; LE7_L1T; LC8_L1T
+               .filterDate(new Date(START_DATES), new Date(END_DATES)) 
+               .filterMetadata('CLOUD_COVER', 'less_than', INITIAL_CLOUD_INDEX)
+
+var processed_collection = L8col1.map(NDVI_calc);
+var NDVI_mosaic = processed_collection.reduce(ee.Reducer.percentile([NDVI_PERCENTILE])).select('NDVI'.concat(NDVI_P_CONCAT));
+
+//======================================================================================// 
+        // Mask  NDVI mosaic using an arbitrary cutoff //
+var Channel_mask = NDVI_mosaic.lt(0.28).int();
+
+// Define a minimum segement size to consider. Anything smaller than this is ignored
+var max_Seg_size = 64;
+var Channel_mask_filtered = Channel_mask.connectedPixelCount(max_Seg_size, true)
+                          .eq(max_Seg_size).and(Channel_mask);
+                          
+// generate an input mask to compute centerlines from (inverse of Channel_mask_filtered)                          
+var Channel_mask_input = Channel_mask_filtered.subtract(1).abs();
+
+//======================================================================================// 
+        // Generate Centerline Pixels //
+
+var smooth = function(img) { return img.focal_mode(2, "square") };
+var pixels = ee.Kernel.euclidean(100, "pixels")
+
+// Clean up the input a bit.
+var input = smooth(smooth(Channel_mask_input))
+
+// Compute the distance from the edge.
+var dist = input.distance(pixels).multiply(10000).int();
+
+Map.addLayer(dist, {min: 0, max:1000000}, 'dist')
+
+// Find the gradient of the distance image, and compute its magnitude.
+var kernel = ee.Kernel.fixed(3, 1, [[1, 1, 1]])
+var xgrad = dist.neighborhoodToBands(kernel).expression("(b(2) - b(0)) / 2")
+var ygrad = dist.neighborhoodToBands(kernel.rotate(1)).expression("(b(2) - b(0)) / 2")
+var mag = ee.Image().expression("sqrt(x*x + y*y)", {x: xgrad, y: ygrad})
+
+Map.addLayer(mag, {min: 0, max:1}, 'mag')
+
+// Empirically found threhold.
+var center = mag.lt(7000).and(dist);
+
+// The minimum segement size.  Anything smaller than this is ignored.
+var maxDist = 128
+var CL = center.connectedPixelCount(maxDist, true).eq(maxDist).and(center);
+CL = CL.mask(CL);
+
+
+// Convert CL to a fc of points
+
+var CL_centroids = CL.reduceToVectors({   
+geometry: poly, 
+scale: 30,                 // <-- Important greatly affects point spacing
+geometryType: 'centroid',
+eightConnected: false,      // <-- Important that this be set to false for centroids
+bestEffort: false,
+maxPixels : 1e9,
+geometryInNativeProjection: false
+  }); 
+var BLANK1 = ee.Image(0).mask(0).toByte();                                // create a blank image,
+ 
+// randomly filter out CUTOFF % of the points --> It would be great to do this in a way that is not random. 
+// i.e. optomize the filter so it eliminates points so the product is more evenly distributed.
+var filtered_feats = CL_centroids.randomColumn('rand');                         
+var present = ee.FeatureCollection(filtered_feats.filter(ee.Filter.eq('label', 1)));  
+var CUTOFF = 0.25;                                                                         
+var feats_kept = present.filter(ee.Filter.lte("rand",CUTOFF));                            
+var feats_eliminated = present.filter(ee.Filter.gt("rand",CUTOFF));                       
+    filtered_feats = feats_kept;                                                      
+
+
+Map.addLayer(NDVI_mosaic, {}, 'NDVI_mosaic');
+Map.addLayer(Channel_mask_input, {}, 'Channel_mask_input',false);
+Map.addLayer(CL, {palette: "FF0000"}, 'CL');
+Map.addLayer(CL_centroids.draw('00ff00', 3, 2),{},'CentroidsFC_all',true);
+Map.addLayer(filtered_feats.draw('0000ff', 3, 2),{},'CentroidsFC_kept',true);
+
+
+Map.addLayer(poly,{},'poly',false);
+

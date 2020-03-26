@@ -1,0 +1,59 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var l8 = ee.ImageCollection("LANDSAT/LC8_L1T_TOA");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+Map.setOptions('SATELLITE')
+print(Map.getCenter())
+//Map.setCenter(-7.03, 21.67)
+var center = Map.getCenter()
+
+var index = 0
+
+var image = ee.Image(l8.filterMetadata('CLOUD_COVER','greater_than', 20).filterBounds(center)
+  .toList(1, index).get(0));
+
+var pansharpen = function(image) {
+    var pan = image.select('pan');
+
+    var hsv  = image.select(0,1,2).rgbtohsv();
+    var huesat = hsv.select('hue', 'saturation');
+    var upres = ee.Image.cat(huesat, pan).hsvtorgb();
+ 
+    return upres;
+}
+
+var th = 20
+var max = 0.6
+var image_vis = {min:0.03, max:[max, max, max + 0.1], gamma:1.2}
+var clouds_max = 0.9
+var clouds_vis = {min:0.1, max:[clouds_max, clouds_max, clouds_max + 0.1], gamma:2}
+
+var edgeBuffer = 10
+
+var cloudscore = ee.Algorithms.Landsat.simpleCloudScore(image).select('cloud')
+  .clamp(th, 100)
+
+var cloudmask = cloudscore.divide(100).and(cloudscore.gt(th))
+  .focal_max(2)
+  .focal_min(2)
+
+var image = image
+  .select(['B4','B3', 'B2', 'B8'])
+  .rename(['red','green', 'blue', 'pan'])
+
+image = pansharpen(image)
+
+Map.addLayer(image, image_vis, 'image', false)
+Map.addLayer(cloudscore.mask(cloudmask), {min:0, max:100, palette:['ffffff', 'ff0000']}, 'cloud score', false)
+
+var clouds = image.mask(cloudmask)
+
+var edge = cloudmask.not().distance(ee.Kernel.euclidean(100)).mask(cloudmask)
+Map.addLayer(edge, {min:0, max:edgeBuffer}, 'cloud edge', false)
+
+var edgeMask = edge.clamp(0, edgeBuffer).divide(edgeBuffer)
+Map.addLayer(edgeMask, {min:0, max:1}, 'cloud edge buffer', false)
+
+Map.addLayer(ee.Image(1), {palette:['000000']}, 'black', false)
+
+Map.addLayer(clouds, clouds_vis, 'image (only clouds)', true)
+Map.addLayer(clouds.mask(edgeMask), clouds_vis, 'image (only clouds, without edge)', false)

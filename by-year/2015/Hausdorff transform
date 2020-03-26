@@ -1,0 +1,135 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var g = /* color: 000000 */ee.Geometry.MultiLineString(
+        [[[-120.86454391479492, 40.36341913876339],
+          [-120.81218719482422, 40.39493401873283],
+          [-120.776138305664, 40.39127329579797],
+          [-120.77219177681161, 40.42356206754989],
+          [-120.74000686673827, 40.426240664647224],
+          [-120.70966611978264, 40.43019128807319],
+          [-120.66284179687489, 40.427348876893504]],
+         [[-120.8607673645019, 40.3598875077983],
+          [-120.81545019357458, 40.38317107014461],
+          [-120.798110961914, 40.37819766081354],
+          [-120.78849792480469, 40.37950533853148],
+          [-120.772705078125, 40.38355897815619],
+          [-120.76120334846593, 40.410066775425044],
+          [-120.7483290866237, 40.40833611251855],
+          [-120.73871687881348, 40.40529665022464],
+          [-120.7280785211509, 40.40558379164489],
+          [-120.684136994906, 40.402995476538784],
+          [-120.6679916381836, 40.417416950586976]]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// Hausdorff transform
+// http://en.wikipedia.org/wiki/Hausdorff_distance
+
+var buffer = 3000;
+
+var add = function(image, name, visible) {
+  Map.addLayer(image, {min: 0, max: buffer, palette: ['FFFFFF', '000000']}, name, visible)
+}
+
+Map.centerObject(g, 12);
+
+var g1 = ee.Geometry(g.geometries().get(0));
+var g2 = ee.Geometry(g.geometries().get(1));
+
+var fc1 = ee.FeatureCollection([g1]);
+var fc2 = ee.FeatureCollection([g2]);
+
+// regurns all geometris which intersect with g, as a MultiPolygon
+function getIntersection(multiPolygon, geom) {
+  return ee.FeatureCollection(multiPolygon.geometries().map(function(poly) {
+    return ee.Algorithms.Feature(poly).set('intersects', ee.Geometry(poly).intersects(geom));
+  })).filter(ee.Filter.eq('intersects', true))
+}
+
+// compute concave hull
+var convexHull = fc1.merge(fc2).geometry().convexHull(1)
+var convexHullDiff1 = convexHull.difference(g1.buffer(1))
+var concaveHull1 = getIntersection(convexHullDiff1, g2);
+
+var convexHullDiff2 = convexHull.difference(g2.buffer(1))
+var concaveHull2 = getIntersection(convexHullDiff2, g1);
+Map.addLayer(concaveHull2, {}, 'concave hull2', false)
+
+var concaveHull = concaveHull1.geometry().intersection(concaveHull2.geometry())
+
+Map.addLayer(convexHull, {}, 'convex hull', false)
+Map.addLayer(concaveHull, {}, 'concave hull', false)
+
+var i1 = fc1.distance(buffer)
+var i2 = fc2.distance(buffer)
+add(i1, 'i1', false)
+add(i2, 'i2', false)
+
+var d1 = i2.clip(fc1);
+var d2 = i1.clip(fc2);
+var mask = d1.mask().or(d2.mask());
+var d = d1.mask(mask).add(d2.mask(mask));
+add(d1, 'd1', false)
+add(d2, 'd2', false)
+add(d, 'd', false)
+
+print('Minimum distance:', g1.distance(g2))
+
+// compute Hausdorff distance
+var hd = d.reduceRegion({ geometry: g, reducer: ee.Reducer.max(),  crs: 'EPSG:4326', scale: 100 }).getInfo().distance;
+print('Hausdorff distance:', hd);
+
+// draw a chart of HD depending on scale
+var showChart = function() {
+  var s = [500, 400, 300, 200, 100, 10]
+  var hds = []
+  
+  for(var i=0; i<6; i++) {
+    var hd = d.reduceRegion({ geometry: g, reducer: ee.Reducer.max(),  crs: 'EPSG:4326', scale: s[i] }).getInfo().distance;
+    hds.push(hd);
+  }
+  
+  var chart = Chart.array.values(hds, 0, s)
+  chart = chart.setChartType('LineChart');
+  chart = chart.setOptions({
+    title: 'Hausdorff distance (HD) depending on scale',
+    vAxis: { title: 'HD (meters)' },
+    hAxis: { title: 'Scale (meters)' },
+    legend: 'none',
+    lineWidth: 1,
+    pointSize: 4
+  });
+  
+  print(chart)
+}
+
+// showChart();
+
+// shift centerline left or right
+
+
+
+var shift = 0.5 // -1.0 ... 1.0
+i1 = i1.multiply(1.0 + shift)
+i2 = i2.multiply(1.0 - shift)
+
+var diff1 = i1.subtract(i2).add(200);
+Map.addLayer(diff1, {min: 0, max: buffer, palette: ['FFFFFF', '000000']}, 'i1-i2', false)
+
+var diff2 = i2.subtract(i1).add(200);
+Map.addLayer(diff2, {min: 0, max: buffer, palette: ['FFFFFF', '000000']}, 'i2-i1', false)
+
+
+// compute medial axis?
+// max((dt1-dt2), (dt2-dt1))
+var ma = i1.subtract(i2).max(i2.subtract(i1));
+
+var ma = ma.clip(concaveHull.buffer(1))
+Map.addLayer(ma, {min: 0, max: buffer, palette: ['FFFFFF', '000000']}, 'ma = max(i1-i2, i2-i1)', true)
+
+var lt30 = ma.lt(30);
+Map.addLayer(lt30.mask(lt30), {min: 0, max: 1, palette: ['000000', 'FF0000']}, 'ma < 20', true)
+
+var ls1 = ma.subtract(300).zeroCrossing();
+Map.addLayer(ls1.mask(ls1), {min: 0, max: 1, palette: ['000000', '0000FF']}, 'ma = 300', false)
+
+// var mask = ma.lt(50)
+// Map.addLayer(mask.mask(mask), {min: 0, max: 1, palette: ['FFFFFF', '005000']}, 'ma < 50', true)
+

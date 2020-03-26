@@ -1,0 +1,17 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: d63000 */ee.Geometry.LineString(
+        [[-125.947265625, 40.64730356252251],
+         [-119.619140625, 45.521743896993634],
+         [-109.248046875, 44.84029065139799]]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// projections (Map, geometry)
+
+print(Map.getScale()) // map scale is in meters
+print(ee.Projection('EPSG:3857')) // map projection (Pseudo-Mercator)
+
+print(geometry.projection().crs()) // coordinate reference system of geometry is geographic
+
+print(geometry.coordinates().get(0)) // 1st coordinate is in degrees
+print(geometry.length()) // but lengths is in meters 
+print(geometry.length(1e-5, geometry.projection())) // geometry length in degrees
+

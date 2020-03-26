@@ -1,0 +1,65 @@
+// normalize raster
+
+var l8_collection = ee.ImageCollection('LC8_L1T')
+              .select(['B4', 'B3', 'B2'], ['red', 'green', 'blue'])
+              .filterBounds(Map.getBounds(true));
+
+var l8 = ee.Image(l8_collection.first());
+
+Map.centerObject(l8, 11)
+
+Map.addLayer(l8, {'bands':['red', 'green', 'blue'] }, 'original');
+
+var l8_style_normalized = '\
+<RasterSymbolizer>\
+  <ChannelSelection>\
+    <RedChannel>\
+      <SourceChannelName>red</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Normalize/>\
+      </ContrastEnhancement>\
+    </RedChannel>\
+    <GreenChannel>\
+      <SourceChannelName>green</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Normalize/>\
+      </ContrastEnhancement>\
+    </GreenChannel>\
+    <BlueChannel>\
+      <SourceChannelName>blue</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Normalize/>\
+      </ContrastEnhancement>\
+    </BlueChannel>\
+  </ChannelSelection>\
+</RasterSymbolizer>';
+
+Map.addLayer(l8.sldStyle(l8_style_normalized), { 'gamma' : 3 }, 'normalized');
+
+
+var l8_style_equalized = '\
+<RasterSymbolizer>\
+  <ChannelSelection>\
+    <RedChannel>\
+      <SourceChannelName>red</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Histogram/>\
+      </ContrastEnhancement>\
+    </RedChannel>\
+    <GreenChannel>\
+      <SourceChannelName>green</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Histogram/>\
+      </ContrastEnhancement>\
+    </GreenChannel>\
+    <BlueChannel>\
+      <SourceChannelName>blue</SourceChannelName>\
+      <ContrastEnhancement>\
+        <Histogram/>\
+      </ContrastEnhancement>\
+    </BlueChannel>\
+  </ChannelSelection>\
+</RasterSymbolizer>';
+
+Map.addLayer(l8.sldStyle(l8_style_equalized), { 'gamma' : 3 }, 'histogram');
+

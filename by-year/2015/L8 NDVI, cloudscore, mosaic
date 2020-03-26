@@ -1,0 +1,35 @@
+// L8 NDVI, cloudscore, mosaic
+
+// Landsat 8 individual scenes
+var collection = ee.ImageCollection('LANDSAT/LC8_L1T_TOA')
+  .filterBounds(Map.getBounds(true));
+
+// cloud masking function with arbitrary 5% threshold
+var cloudMask = function(image) {
+  var clouds = ee.Algorithms.Landsat.simpleCloudScore(image)
+    .select('cloud');
+  var mask = image.mask().and(clouds.lte(5));
+  return image.mask(mask);
+};
+
+// add an NDVI band
+var ndviAdd = function(image) {
+  var ndvi = image.normalizedDifference(['B5', 'B4'])
+    .select([0], ['NDVI']);
+  return image.addBands(ndvi);
+};
+
+// map the functions over the collection
+var maskedCollection = collection.map(function(image) {
+  return ndviAdd(cloudMask(image));
+});
+
+// make a maximum (NDVI) value composite
+// data in other bands comes from the time at which NDVI is maximized
+var maxValueComposite = maskedCollection.qualityMosaic('NDVI');
+
+var palette = ['FF0000', 'FFFF00', '00FF00', '00FFFF', '0000FF'];
+Map.addLayer(maxValueComposite.select('NDVI'), 
+  {palette: palette}, 'NDVI max value');
+Map.addLayer(maxValueComposite.select(['B4','B3','B2']), 
+  {gamma:2.3}, 'true color');

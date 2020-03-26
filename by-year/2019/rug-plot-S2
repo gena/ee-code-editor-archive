@@ -1,0 +1,42 @@
+var assets = require('users/gena/packages:assets')
+var charting = require('users/gena/packages:charting')
+
+var bounds = Map.getBounds(true)
+
+var images = assets.getImages(bounds, {
+  missions: [ 
+    'S2', 
+    'L8' 
+  ],
+  filter: ee.Filter.date('2018-01-01', '2019-01-01')
+}) 
+
+print(images.size())
+
+images = assets.getMostlyCleanImages(images, bounds, {
+    cloudFrequencyThresholdDelta: 0.15
+})
+
+Map.addLayer(images.geometry())
+
+print(images.size())
+
+// plot
+var rect = ee.Geometry.Rectangle({ coords: [[0, 0], [100, 4]], geodesic: false })
+
+var start = ee.Date('2018-01-01')
+var stop = ee.Date('2019-01-01')
+
+// add rug plots
+var plot = new charting.Plot(rect.bounds(), { 
+  area: { width: 1, color: '000000', fillColor: '00000011' }
+})
+  
+plot.setMinMax(start.millis(), stop.millis(), 0, 1)
+
+var images = images.filterDate(start, stop)
+var times = ee.List(images.aggregate_array('system:time_start'))
+plot.addRugSeries('', times, { width: 1, color: 'red' }, 1)  
+
+print(plot.getThumbnail({ dimensions: '600x24'}))
+

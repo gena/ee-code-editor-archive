@@ -1,0 +1,381 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var jrc = ee.Image("JRC/GSW1_0/GlobalSurfaceWater"),
+    s2 = ee.ImageCollection("COPERNICUS/S2"),
+    srtm = ee.Image("USGS/SRTMGL1_003"),
+    modisClouds = ee.Image("users/gena/MODCF_meanannual"),
+    l8 = ee.ImageCollection("LANDSAT/LC08/C01/T1_RT_TOA"),
+    geometry = /* color: #d63000 */ee.Geometry.Point([27.77167797088623, -21.212339744904295]),
+    geometry2 = /* color: #d63000 */ee.Geometry.Point([27.77468204498291, -21.22554168010754]),
+    hand = ee.Image("users/gena/GlobalHAND/30m/hand-1000"),
+    jrcMonthly = ee.ImageCollection("JRC/GSW1_0/MonthlyHistory");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var utils = require('users/gena/packages:utils')
+var hydro = require('users/gena/packages:hydro')
+var style = require('users/gena/packages:style')
+var text = require('users/gena/packages:text')
+
+var ndwiMin = -0.15
+var ndwiMax = 0.25
+
+var dem = hydro.Map.addDem({layer: {visible: false, name: 'DEM'}})
+
+var hand = hydro.Map.addHand({layer: {visible: false, name: 'HAND'}})
+
+style.addBackground('white', 'ffffff')
+style.addBackground('black', '000000')
+
+var image = ee.ImageCollection.fromImages([
+  ee.Image('users/gena/Limpopo_occurrence_cell1'),
+  ee.Image('users/gena/Limpopo_occurrence_cell2'),
+  ee.Image('users/gena/Limpopo_occurrence_cell3'),
+  ee.Image('users/gena/Limpopo_occurrence_04913'),
+  ee.Image('users/gena/Limpopo_occurrence_04914'),
+  ee.Image('users/gena/Limpopo_occurrence_05058'),
+  ])
+  .map(function(i) { return i.resample('bicubic') })
+  
+image = image.mosaic()  
+
+
+var ndvi = image.select('ndvi')
+var ndwi = image.select('ndwi')
+var mndwi = image.select('mndwi')
+
+
+
+Map.addLayer(ee.Image.pixelLonLat(), {}, 'coords', false)
+
+var assets = require('users/gena/packages:assets')
+
+var aoi = ee.Geometry(Map.getBounds(true))// .centroid(1)
+var scale = Map.getScale()
+
+var clear = true
+var images = assets.getImages(aoi, clear)
+
+images = images
+  .map(function(i) {
+    return i
+      .addBands(ee.Image.constant(i.get('SUN_ELEVATION')).rename('SUN_ELEVATION').float())
+      .addBands(ee.Image.constant(i.get('SUN_AZIMUTH')).rename('SUN_AZIMUTH').float())
+      .copyProperties(i)
+  })
+
+print('Image count: ' , images.size())
+var bounds = ee.Geometry(Map.getBounds(true))
+
+var annotations = [
+  {
+    position: 'top', offset: '50%', margin: '5%',
+    property: 'system:time_start',
+    text: {fontSize: 32, outlineWidth: 4, outlineOpacity: 0.4, textColor: 'edf8e9'},
+    format: function(o) { return ee.Date(o).format('YYYY-MM-dd') }
+  },
+  {
+    position: 'left', offset: '5%', margin: '0.5%',
+    property: 'system:index',
+    text: {fontSize: 16, outlineWidth: 3, outlineOpacity: 0.6},
+    format: function(o) { return ee.String('ID: ').cat(ee.String(o)) }
+  },
+  {
+    position: 'left', offset: '80%', margin: '0.5%',
+    property: 'SUN_ELEVATION',
+    text: {fontSize: 16, outlineWidth: 3, outlineOpacity: 0.6},
+    format: function(o) { return ee.Number(o).format('Elevation: %.1f degree') }
+  },
+  {
+    position: 'left', offset: '85%', margin: '0.5%',
+    property: 'SUN_AZIMUTH',
+    text: {fontSize: 16, outlineWidth: 3, outlineOpacity: 0.6},
+    format: function(o) { return ee.Number(o).format('Azimuth: %.1f degree') }
+  }
+]
+
+var videoFrames = images.sort('system:time_start').map(function(i) {
+  var vis = {min: 0.0, max: 0.3, bands: ['swir','nir','red']}
+  return text.annotateImage(i, vis, bounds, annotations)
+})
+
+var name = 'images-by-time'
+Export.video.toDrive({
+  collection: videoFrames, 
+  description: name, 
+  folder: 'Limpopo', 
+  fileNamePrefix: name, 
+  framesPerSecond: 5, 
+  dimensions: 1920, 
+  region: Map.getBounds(true)
+})
+
+var videoFrames = images.sort('SUN_ELEVATION').sort('SUN_AZIMUTH').map(function(i) {
+  var vis = {min: 0.0, max: 0.3, bands: ['swir','nir','red']}
+  return text.annotateImage(i, vis, bounds, annotations)
+})
+
+var name = 'images-by-sun'
+Export.video.toDrive({
+  collection: videoFrames, 
+  description: name, 
+  folder: 'Limpopo', 
+  fileNamePrefix: name, 
+  framesPerSecond: 5, 
+  dimensions: 1920, 
+  region: Map.getBounds(true)
+})
+
+// generate corellogram for every azimuth interval
+var aMin = images.aggregate_min('SUN_AZIMUTH')
+var aMax = images.aggregate_max('SUN_AZIMUTH')
+
+var azimuthStep = 10
+var azimuthLength = 30
+
+var azimuthValues = ee.List.sequence(aMin, aMax, azimuthLength)
+
+print('azimuthValues: ', azimuthValues)
+
+var correlogramByAzimuth = ee.ImageCollection(azimuthValues.map(function(a) { return ee.Image().set({a:a} )})).map(function(a) {
+  a = ee.Number(a.get('a'))
+  
+  var c = images.filter(ee.Filter.and(
+      ee.Filter.gt('SUN_AZIMUTH', a),ee.Filter.lt('SUN_AZIMUTH', a.add(azimuthStep))
+  ))
+  
+  var r2 = corr(c.select(['nir', 'SUN_ELEVATION']))
+
+  var mask = r2.abs()
+  
+  mask = mask.multiply(2)
+  
+  r2 = r2.mask(mask)
+
+  return r2
+    .set({'SUN_AZIMUTH_RANGE': a.format('%.1f - ').cat(a.add(azimuthStep).format('%.1f'))})
+    .set({mean: images.mean()})
+})
+
+azimuthValues = ee.ImageCollection(azimuthValues)
+
+var videoFrames = correlogramByAzimuth.map(function(r2) {
+  var mean = ee.Image(r2.get('mean'))
+  
+  var image = ee.ImageCollection.fromImages([
+    mean.visualize({min: 0.0, max: 0.3, bands: ['swir','nir','red']}),
+    r2.visualize({min: -0.8, max: 0.8, palette: ['fc8d59', '000000', '91bfdb']}),
+  ]).mosaic()
+  
+  var annotations = [
+    {
+      position: 'top', offset: '40%', margin: '0.5%',
+      property: 'SUN_AZIMUTH_RANGE',
+      text: {fontSize: 18, outlineWidth: 6, outlineOpacity: 0.6},
+      format: function(o) { return ee.String('SUN_AZIMUTH_RANGE: ').cat(o) }
+    }
+  ]
+  
+  return r2.visualize({min: -0.8, max: 0.8, palette: ['fc8d59', '000000', '91bfdb']})
+  //return text.annotateImage(image, {}, bounds, annotations)
+})
+
+videoFrames = ee.ImageCollection(videoFrames)
+
+// var layers = utils.animateImages(videoFrames, 'correlogram(I,A)', 10)
+
+var name = 'images-by-sun-azimuth'
+Export.video.toDrive({
+  collection: videoFrames, 
+  description: name, 
+  folder: 'Limpopo', 
+  fileNamePrefix: name, 
+  framesPerSecond: 5, 
+  dimensions: 1920, 
+  region: Map.getBounds(true)
+})
+
+Map.addLayer(ee.Image(videoFrames.first()), {}, 'frame 0, by time', false)
+
+print('Zenith: ', ui.Chart.feature.histogram(images, 'SUN_ELEVATION', 10))
+print('Azimuth: ', ui.Chart.feature.histogram(images, 'SUN_AZIMUTH', 10))  
+
+var chart = ui.Chart.feature.byFeature(images, 'SUN_AZIMUTH', 'SUN_ELEVATION').setChartType('ScatterChart')
+print('Zenith vs Azimuth: ', chart)
+
+chart.onClick(function(a, z) {
+  var i = images.filter(ee.Filter.and(
+      ee.Filter.gt('SUN_AZIMUTH', a-0.001),ee.Filter.lt('SUN_AZIMUTH', a+0.001),
+      ee.Filter.gt('SUN_ELEVATION', z-0.001),ee.Filter.lt('SUN_ELEVATION', z+0.001)
+  ))
+  
+  Map.addLayer(i.select(['swir','nir','red']), {min:0.05, max:0.3}, a + ' - ' + z)
+})
+
+Map.addLayer(images.select('nir').reduce(ee.Reducer.stdDev()), {}, 'SD(nir)', false)
+Map.addLayer(images, {}, 'images raw', false)
+
+geometry = geometry.buffer(50)
+geometry2 = geometry2.buffer(50)
+
+/*
+print('slope: ', ui.Chart.image.series(images, geometry, ee.Reducer.mean(), 10))
+var values = images.map(function(i) { return ee.Feature(geometry, i.reduceRegion(ee.Reducer.mean(), geometry, 10)) })
+print('slope: ', ui.Chart.feature.byFeature(values, 'nir', 'SUN_ELEVATION').setChartType('ScatterChart'))
+print('slope: ', ui.Chart.feature.byFeature(values, 'nir', 'SUN_AZIMUTH').setChartType('ScatterChart'))
+
+print('water: ', ui.Chart.image.series(images, geometry2, ee.Reducer.mean(), 10))
+var values = images.map(function(i) { return ee.Feature(geometry2, i.reduceRegion(ee.Reducer.mean(), geometry2, 10)) })
+print('water: ', ui.Chart.feature.byFeature(values, 'nir', 'SUN_ELEVATION').setChartType('ScatterChart'))
+print('water: ', ui.Chart.feature.byFeature(values, 'nir', 'SUN_AZIMUTH').setChartType('ScatterChart'))
+*/
+
+function corr(c) {
+  // compute correlation
+  var mean = c.reduce(ee.Reducer.mean())
+  var stddev = c.reduce(ee.Reducer.stdDev())
+  
+  var r = c.map(function(i) {
+    var e = i.subtract(mean).divide(stddev)
+    var product = e.reduce(ee.Reducer.product()).rename('product')
+    return product.addBands(e.pow(2))
+  })
+  
+  var s1 = r.select(1).reduce(ee.Reducer.sum())
+  var s2 = r.select(2).reduce(ee.Reducer.sum())
+  var r1 = r.select('product').reduce(ee.Reducer.sum())
+  
+  r1 = r1.divide(s1.multiply(s2).sqrt())
+
+  return r1  
+}
+
+function computeRegression(zmin, zmax, amin, amax, v) {
+  var c = images.select(['nir', v])
+    .filter(ee.Filter.and(
+        ee.Filter.gte('SUN_ELEVATION', zmin),
+        ee.Filter.lte('SUN_ELEVATION', zmax),
+        ee.Filter.gte('SUN_AZIMUTH', amin),
+        ee.Filter.lte('SUN_AZIMUTH', amax)
+    ))
+  
+  // mask outliers (TODO: normalize before regression)
+  var ts = c.reduce(ee.Reducer.sensSlope())
+  
+  var min = -30, max = 80
+  Map.addLayer(ts.select('offset'), {min: min, max: max }, 'TS (offset) ' + v + ' Z ' + zmin + '-' + zmax + ', A ' + Math.round(amin) + '-' + Math.round(amax), false)
+  var min = -100, max = 300
+  Map.addLayer(ts.select('slope'), {min: min, max: max }, 'TS (scale) ' + v + ' Z ' + zmin + '-' + zmax + ', A ' + Math.round(amin) + '-' + Math.round(amax), false)
+}
+
+function computeCorrelation(zmin, zmax, amin, amax, v) {
+  var c = images.select(['nir', v])
+    .filter(ee.Filter.and(
+        ee.Filter.gte('SUN_ELEVATION', zmin),
+        ee.Filter.lte('SUN_ELEVATION', zmax),
+        ee.Filter.gte('SUN_AZIMUTH', amin),
+        ee.Filter.lte('SUN_AZIMUTH', amax)
+    ))
+    
+  //print(zmin + '-' + zmax + ', ' + amin + '-' + amax)
+  // var locations = ee.FeatureCollection.randomPoints(geometry, 100)
+  // var values = c.map(function(i) { return ee.Feature(null, i.reduceRegion(ee.Reducer.mean(), locations, 10)) })
+  //print(ui.Chart.feature.byFeature(values, 'SUN_ELEVATION', 'nir').setChartType('ScatterChart'))
+
+  var r2 = corr(c)  
+  
+  var mask = r2.abs()
+
+  var one = ee.Image(1).float()
+  
+  // apply shifted sigmoid centered at correlation threshold
+  var th = 0.25 // shift
+  var scale = 15 // squeeze
+  mask = one.divide(one.add(mask.subtract(th).multiply(scale).multiply(-1).exp()))
+  
+  
+  Map.addLayer(r2.mask(mask), {min: -0.85, max: 0.85, palette: ['fc8d59', '000000', '91bfdb']}, 'Z ' + zmin + '-' + zmax + ', A ' + Math.round(amin) + '-' + Math.round(amax) + ', ' + v, false)
+  
+  return r2
+}
+
+function compute(fn) {
+  fn(0, 45, 0, 180, 'SUN_ELEVATION')
+  fn(0, 45, 0, 180, 'SUN_AZIMUTH')  
+
+  fn(0, 50, 0, 180, 'SUN_ELEVATION')
+  fn(0, 50, 0, 180, 'SUN_AZIMUTH')  
+  
+  fn(0, 55, 0, 180, 'SUN_ELEVATION')
+  fn(0, 55, 0, 180, 'SUN_AZIMUTH')  
+
+  // all
+  fn(0, 90, 0, 180, 'SUN_ELEVATION')
+  fn(0, 90, 0, 180, 'SUN_AZIMUTH')  
+/*  
+ee.List.sequence(aMin, aMax, azimuthStep).evaluate(function(aValues) {
+    aValues.map(function(a) {
+      computeCorrelation(0, 90, a, a+azimuthLength, 'SUN_ELEVATION')
+      computeCorrelation(0, 90, a, a+azimuthLength, 'SUN_AZIMUTH')
+
+      computeCorrelation(0, 50, a, a+azimuthLength, 'SUN_ELEVATION')
+      computeCorrelation(0, 50, a, a+azimuthLength, 'SUN_AZIMUTH')
+
+      computeCorrelation(50, 90, a, a+azimuthLength, 'SUN_ELEVATION')
+      computeCorrelation(50, 90, a, a+azimuthLength, 'SUN_AZIMUTH')
+    })
+  })
+*/
+}
+
+compute(computeRegression)
+
+Map.addLayer(image, {min: ndwiMin, max: ndwiMax}, 'ndvi, ndwi, mndwi', false)
+
+var maskMndwi = mndwi.add(0.15).multiply(15)
+Map.addLayer(mndwi.mask(maskMndwi), {min: ndwiMin, max: ndwiMax, palette: style.Palettes.RedToBlue }, 'mndwi', false)
+
+var maskNdwi = ndwi.add(0.15).multiply(15)
+Map.addLayer(ndwi.mask(maskNdwi), {min: ndwiMin, max: ndwiMax, palette: style.Palettes.RedToBlue }, 'ndwi', true)
+
+var waterMaskPermanent = mndwi.gte(0.05).or(ndwi.gt(0.05)).multiply(ndvi.lte(0.1))
+
+//waterMaskPermanent = waterMaskPermanent.focal_mode(3, 'circle', 'pixels', 3)
+
+// add hand mask
+var handThreshold = 15
+var handMask = hand.gt(handThreshold)
+
+//handMask = utils.focalMax(handMask, 7)
+//handMask = utils.focalMin(handMask, 5)
+
+var handMax = 50
+var handWaterProbability = ee.Image.constant(handMax).subtract(hand.clamp(handThreshold, handMax)).divide(handMax-handThreshold)
+Map.addLayer(handWaterProbability.mask(ee.Image(1).subtract(handWaterProbability)), {min:0, max:1}, 'HAND water score', true, 0.7)
+Map.addLayer(handMask.mask(handMask), {min:0, max:1, palette: ['000000']}, 'HAND < ' + handThreshold, false, 0.8)
+
+// TODO: remplace by region growing?
+waterMaskPermanent = waterMaskPermanent.mask(1)
+var waterMask = utils.focalMax(waterMaskPermanent, 80)
+var waterMask = utils.focalMaxWeight(waterMask, 10)
+
+/*
+var mndwiCumulativeCost = mndwi.mask(1).cumulativeCost({
+  source: waterMask,
+  maxDistance: 100
+});
+
+Map.addLayer(mndwiCumulativeCost, {min: 0, max: 1e4}, 'accumulated cost')
+
+*/
+Map.addLayer(waterMask, {}, 'probably water (buffer)', false)
+  
+waterMask = waterMask.multiply(mndwi.gt(-0.05).or(ndwi.gt(-0.05))).multiply(ndvi.lte(0.2))
+
+//waterMask = utils.focalMin(waterMask, 5)
+waterMask = utils.focalMax(waterMask, 3)
+
+Map.addLayer(mndwi.updateMask(waterMask.multiply(ndvi.mask()).multiply(hand.lt(30).or(utils.focalMax(waterMaskPermanent, 3)))), {min: ndwiMin, max: ndwiMax, palette: style.Palettes.RedToBlue }, 'mndwi (around permanent)', false)
+Map.addLayer(waterMaskPermanent.mask(waterMaskPermanent), {min: ndwiMin, max: ndwiMax, palette: ['ffff00'] }, 'probably water', false)
+
+var jrcOccurrence = jrc.select('occurrence')
+Map.addLayer(jrcOccurrence.divide(100), {min: 0, max:1, palette: style.Palettes.RedToBlue }, 'JRC (1984-2015)', false)
+
+compute(computeCorrelation)

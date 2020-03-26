@@ -1,0 +1,202 @@
+// Export Linear Fit
+// https://lpdaac.usgs.gov/products/modis_products_table/mod09ga   (documentation)
+// http://www.perbang.dk/rgbgradient/    (color gradient generator)
+
+/*
+Notes on .mask
+  Gets or sets an image's mask. THE OUTPUT IMAGE RETAINS THE METADATA AND FOOTPRINT OF THE INPUT IMAGE.
+  Arguments:
+    -this:image (Image):
+     The input image.
+     
+    -mask (Image, default: null):
+     The mask image. If specified, the input image is copied to the output but given the mask by the 
+     values of this image. If this is a single band, it is used for all bands in the input image. If not 
+     specified, returns an image created from the mask the input image, scaled to the range [0:1] (invalid = 0, valid = 1.0).
+  Returns: Image
+*/
+
+var Elevation = 2000;  
+var DEM = ee.Image('srtm90_v4');   //need a global DEM
+var StudyArea2k = ee.Image(DEM).gte(Elevation);
+var AOI = DEM.mask(StudyArea2k);   //Area of Intrest
+//Map.addLayer(AOI, {min: 0, max: 7000},'Elevation', false);   //DEM with contrast
+Map.addLayer(AOI, {
+  palette: '000000',
+  opacity: 0.5},
+  'Valid Study Area',
+  true);
+
+var RedToBlue = ['0000FF', '0071FF', '00E2FF', '00FFA9', '38FF00', 'AAFF00', 'FFE200', 'FF7100', 'FF0000'];
+
+//========================================================================================
+//---------------------  <head> ---------------------------------------------------------
+//========================================================================================
+
+//======= returns ??? ====================================================
+//========================================================================
+// https://groups.google.com/forum/?utm_source=digest&utm_medium=email/#!topic/google-earth-engine-developers/MvU5BR_xKic
+
+/* A function that returns an image containing just the specified QA bits.
+ *
+ * Args:
+ *   image - The QA Image to get bits from.  12(MODIS Documentation)
+ *   start - The first bit position, 0-based.
+ *   end   - The last bit position, inclusive.
+ *   name  - A name for the output image.
+ */
+ 
+var GetQABits = function(image, start, end, newName) {
+    // Compute the bits we need to extract.
+    var pattern = 0;
+    
+    // This For loop executes once, returns:  pattern = 2E10 (2^10) for clouds
+    //                                        pattern = 2E12 (2^12) for MOD35 snow&ice
+    //                                        pattern = 2E15 (2^15) for snow
+    for (var i = start; i <= end; i++) {
+       pattern += Math.pow(2, i);
+    }  
+    
+    // Return a single band image of the extracted QA bits, giving the band a new name.
+    return image.select([0], [newName])
+                .bitwiseAnd(pattern)  
+                .rightShift(start);
+};
+
+
+//======= Function to mask out the pixels flagged as clouds ==============
+//========================================================================
+var MaskClouds = function(image) {
+  var QA = image.select('state_1km');
+  
+  // Get the internal_cloud_algorithm_flag bit
+  // Return a single band image of the extracted QA bits, giving the band a new name
+  var Cloud = GetQABits(QA, 10, 10, 'internal cloud algorithm flag');
+  
+  // Returns an image that has masked out cloudy areas
+  // Returns an image where there are no clouds
+  // THE OUTPUT IMAGE RETAINS THE METADATA AND FOOTPRINT OF THE INPUT IMAGE
+  
+  // Here, 0 = no clouds
+  // Return image(Modis_clouds_only(only_where_cloud = 0))
+  return image.mask(Cloud.eq(0));
+};
+
+
+//======= Function to mask out the pixles flagged as no snow =============
+//========================================================================
+var MaskSnow = function(image) {
+  var QA = image.select('state_1km');
+  
+  // Get the internal_snow_algorithm_flag bit.
+  // Return a single band image of the extracted QA bits, giving the band a new name.
+  var SnowInternal = GetQABits(QA, 15, 15, 'internal snow mask');        
+  
+  // Returns an image that has masked out cells with no snow
+  // Returns an image where there are no clouds
+  // THE OUTPUT IMAGE RETAINS THE METADATA AND FOOTPRINT OF THE INPUT IMAGE
+  
+  // Here, 1 = Snow
+  // Return image(Modis_snow_only(only_where_snow = 1))
+  return image.mask(SnowInternal.eq(1));
+};
+
+
+//======= Function to mask out pixels that have a 0 quality score ========
+//========================================================================
+var MaskBadPixels = function(image) {
+  // Find pixels that had observations.
+  var withObs = image.select('num_observations_1km')
+                     .gt(0);
+  
+  // Returns an image that has masked out cells with no observation
+  // Returns an image where there all pixels have an observation
+  // Returns an image that has masked out cells with a 0 quality score
+  // THE OUTPUT IMAGE RETAINS THE METADATA AND FOOTPRINT OF THE INPUT IMAGE
+  return image.mask(withObs);
+};
+
+
+//======= Function to mask out pixels have a zenith angle > 25  ==========  (angle from the vertical)
+//========================================================================
+var SensorCorrectPixels = function(image) {
+  var LT25 = image.select('SensorZenith').lte(2500); // Angle is *.01 
+  
+  // Returns an image that has masked out pixels where zenith > 25
+  // Returns an image where there all pixels have a zenith <= 25
+  // THE OUTPUT IMAGE RETAINS THE METADATA AND FOOTPRINT OF THE INPUT IMAGE
+  return image.mask(LT25);
+};
+
+
+//======= Function that ties all the masks together  =====================  
+//========================================================================
+var CreateSnowMap = function(image) {
+  return image.map(SensorCorrectPixels)
+              .map(MaskBadPixels)
+              .map(MaskClouds);
+};
+
+
+//======= Function that ties SCF to a single function  ===================  
+//========================================================================
+var GenerateWaterYear = function(StartDate, EndDate) {
+  var BaseMap = ee.ImageCollection('MOD09GA')
+                  .filterDate(StartDate, EndDate);
+  var ProcessedWaterYear = CreateSnowMap(BaseMap);
+  var TotalCount = ProcessedWaterYear.select('num_observations_1km')
+                                     .count();
+  var SnowCount = ProcessedWaterYear.map(MaskSnow)
+                                    .select('num_observations_1km')
+                                    .count()
+                                    .mask(1);  //mask with a 1 so that everywhere has a count (allows 0)
+  var SCF = (SnowCount.toFloat().divide(TotalCount));
+  return ee.Image(new Date(StartDate).getFullYear())
+           .addBands(SCF).toDouble();
+};
+
+//========================================================================================
+//---------------------  </head> ---------------------------------------------------------
+//========================================================================================
+
+//////////////////////////////////////////////////////////////////////////////////////////
+
+//========================================================================================
+//---------------------  SCF map definitions and generation-------------------------------
+//========================================================================================
+// Water year as defined by the calender year on which it ends
+var WaterYear2003 = GenerateWaterYear('2002-10-01', '2003-09-30');
+var WaterYear2004 = GenerateWaterYear('2003-10-01', '2004-09-30');
+var WaterYear2005 = GenerateWaterYear('2004-10-01', '2005-09-30');
+var WaterYear2006 = GenerateWaterYear('2005-10-01', '2006-09-30');
+var WaterYear2007 = GenerateWaterYear('2006-10-01', '2007-09-30');
+var WaterYear2008 = GenerateWaterYear('2007-10-01', '2008-09-30');
+var WaterYear2009 = GenerateWaterYear('2008-10-01', '2009-09-30');
+var WaterYear2010 = GenerateWaterYear('2009-10-01', '2010-09-30');
+var WaterYear2011 = GenerateWaterYear('2010-10-01', '2011-09-30');
+var WaterYear2012 = GenerateWaterYear('2011-10-01', '2012-09-30');
+
+//========================================================================================
+//========================================================================================
+//----------------------  Yearly SCF -----------------------------------------------------
+var SCFYearCollection = ee.ImageCollection([WaterYear2003, WaterYear2004, WaterYear2005, WaterYear2006, WaterYear2007, 
+                                            WaterYear2008, WaterYear2009, WaterYear2010, WaterYear2011, WaterYear2012]);
+                                            
+                                            
+//========================================================================================
+//---------------------  End of definitions ----------------------------------------------
+//========================================================================================
+
+//---------------------  Linear Fit ----------------------------------------------
+var LinearFit = SCFYearCollection.reduce(ee.Reducer.linearFit());
+var LinearFitNoZero = LinearFit.select([0]).mask(LinearFit.select([0]).neq(0));
+Map.addLayer(LinearFitNoZero, 
+  {min:-0.025, max:0.03, palette:RedToBlue}, 
+  'Linear Trend',
+  false);
+
+//---------------------  Export example ----------------------------------------------
+var imageToExport = LinearFitNoZero.visualize({bands:'scale', 'min':-0.03, 'max':0.03, 'palette':RedToBlue, 'forceRgbOutput':true});
+Map.addLayer(imageToExport,{},'LinearFit', true);
+Export.image(imageToExport, 'LinearFit', {'maxPixels':67000000000 });
+

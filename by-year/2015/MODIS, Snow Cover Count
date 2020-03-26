@@ -1,0 +1,79 @@
+// MODIS, Snow Cover Count?
+
+//======= Function to extract bits =======================================
+//========================================================================
+var GetQABits = function(image, start, end, newName) {
+    var pattern = 0;
+    for (var i = start; i <= end; i++) {
+       pattern += Math.pow(2, i);
+    }  
+    return image.select([0], [newName])
+                .bitwiseAnd(pattern)  
+                .rightShift(start);
+};
+
+//======= Function to mask out the pixels flagged as clouds ==============
+//========================================================================
+var MaskClouds = function(image) {
+  var QA = image.select('state_1km');
+  var Cloud = GetQABits(QA, 10, 10, 'internal cloud algorithm flag');
+  return image.mask(Cloud.eq(0));
+};
+
+//======= Function to mask out the pixles flagged as no snow =============
+//========================================================================
+var MaskSnow = function(image) {
+  var QA = image.select('state_1km');
+  var SnowInternal = GetQABits(QA, 15, 15, 'internal snow mask');        
+  return image.mask(SnowInternal.eq(1));
+};
+
+//======= Function to mask out pixels that have a 0 quality score ========
+//========================================================================
+var MaskBadPixels = function(image) {
+  // Find pixels that had observations.
+  var withObs = image.select('num_observations_1km')
+                     .gt(0);
+  return image.mask(withObs);
+};
+
+//======= Function to mask out pixels have a zenith angle > 25  ==========  
+//========================================================================
+var SensorCorrectPixels = function(image) {
+  var LT25 = image.select('SensorZenith').lte(2500); // Angle is *.01 
+  return image.mask(LT25);
+};
+
+//======= Function that ties all the masks together  =====================  
+//========================================================================
+var CreateSnowMap = function(image) {
+  return image.map(SensorCorrectPixels)
+              .map(MaskBadPixels)
+              .map(MaskClouds);
+};
+
+//======= Function that ties SCF to a single function  ===================  
+//========================================================================
+var GenerateWaterYear = function(StartDate, EndDate) {
+  var BaseMap = ee.ImageCollection('MOD09GA')
+                  .filterDate(StartDate, EndDate);
+  var ProcessedWaterYear = CreateSnowMap(BaseMap);
+  var SnowCount = ProcessedWaterYear.map(MaskSnow);
+  return SnowCount.select('num_observations_1km');
+};
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+//========================================================================================
+//---------------------  SCF map definitions and generation-------------------------------
+//========================================================================================
+// Water year as defined by the calender year on which it ends
+var WaterYear2008 = GenerateWaterYear('2008-10-01', '2009-09-30');
+
+Map.addLayer(WaterYear2008,
+  {min:0, max:1},
+  'WaterYear2008 Snow observations Pixels',
+  false);

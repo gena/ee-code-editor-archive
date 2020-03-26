@@ -1,0 +1,12 @@
+var c1 = ee.ImageCollection("LEDAPS/LE7_L1T_SR")
+  .filterDate("2008-01-01", "2008-02-01")
+  .filterBounds(Map.getBounds(true));
+
+var c2 = c1.select(['B7', 'B4', 'B2']);
+Map.addLayer(c2.median(), {'gain':[0.05]}, 'median');
+//Map.addLayer(c2.reduce(ee.Reducer.intervalMean(10, 30)), {'gain':[0.05]}, '10_30');
+//Map.addLayer(c2.reduce(ee.Reducer.intervalMean(70, 80)), {'gain':[0.05]}, '70_80');
+
+var c3 = c1.select(['QA']);
+Map.addLayer(c3.median(), {'gain':[0.05]}, 'QA');
+

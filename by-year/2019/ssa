@@ -1,0 +1,224 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var imageCollection = ee.ImageCollection("users/fbaart/ssh_grids_v1609");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+imageCollection = imageCollection
+  .map(function(i) { return i.resample('bilinear') })
+
+var palettes = require('users/gena/packages:colorbrewer').Palettes
+var globalPolygon = ee.Geometry.Polygon(
+  [
+    [
+      [-180, 90],
+      [0, 90],
+      [180, 90],
+      [180, -90],
+      [0, -90],
+      [-180, -90]
+    ]
+  ], 
+  null, 
+  false
+)
+
+var northsea = ee.Geometry.Polygon(
+  [
+    [
+      [-5.625, 59.13086309725591],
+      [1.845703125, 50.90303283111257],
+      [8.701171875, 54.00776876193477],
+      [4.5703125, 62.63376960786814],
+      [-4.39453125, 60.06484046010452]
+    ]
+  ]
+)
+// Map.addLayer(globalPolygon)
+
+// Create a copy and reverse it
+var GnYlRd = palettes.RdYlGn[7].slice().reverse()
+var BuRd = palettes.RdBu[7].slice().reverse()
+
+print(imageCollection)
+var variance = imageCollection.reduce(ee.Reducer.variance())
+var first = ee.Image(imageCollection.first())
+var imageList = imageCollection.toList(imageCollection.size())
+var last = ee.Image(imageList.get(imageCollection.size().min(1)))
+// Compute absolute sea-level rise, since first image
+Map.addLayer(imageCollection, {min: -0.3, max: 0.3, palette: palettes.PiYG[7]}, 'ssh', false)
+Map.addLayer(last.min(first), {min: -0.02 * 30, max: 0.02 * 30, palette: GnYlRd}, 'last-first', false)
+Map.addLayer(variance, {min: 0, max: 0.1, palette: palettes.BuGn[7]}, 'variance', false)
+
+// var region = imageCollection.filter(geometry)
+
+print(variance)
+print('map bounds', Map.getBounds(true))
+
+var scale = first.projection().nominalScale()
+
+print('dates', imageCollection.aggregate_array('system:time_start'))
+print('bounds', ee.Feature(first).geometry())
+print('first', first)
+print('mean', first.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: globalPolygon,
+    scale: scale
+  })
+)
+
+
+var chart = ui.Chart.image.series(imageCollection, globalPolygon, ee.Reducer.mean(), scale)
+print(chart)
+
+var northSeaChart = ui.Chart.image.series(imageCollection, northsea, ee.Reducer.mean(), scale)
+print(northSeaChart)
+
+// Map.addLayer(first.reduce(ee.Reducer.mean()), {}, 'mean')
+
+var globalMeanSeries = imageCollection.map(function(i) {
+  var t = i.date().millis()
+  var mean = i.reduceRegion({
+    reducer: ee.Reducer.mean(), 
+    geometry: globalPolygon,
+    scale: scale
+  })
+  i = i.set('mean', mean.get('b1'))
+  
+  return i
+})
+print('globalMeans', globalMeanSeries)
+print('means', globalMeanSeries.aggregate_array('mean'))
+
+
+var series = imageCollection.map(function(i) {
+  
+  var constant = ee.Image.constant(1).rename('constant')
+  
+  var t = i.date().millis()
+  // ms -> s -> m -> hr -> day -> year
+  var years = ee.Image.constant(t)
+      .divide(1e3 * 60 * 60 * 24 * 365.25)
+      .float()
+      .rename('time')
+  var timeRadians = ee.Image.constant(t)
+      .divide(1e3 * 60 * 60 * 24 * 365.25)
+      .multiply(2 * Math.PI)
+      .float()
+      .rename('time-radians')
+  var nodalRadians = ee.Image.constant(t)
+      .float()
+      .divide(1e3 * 60 * 60 * 24 * 365.25 * 18.613)
+      .multiply(2 * Math.PI)
+      .float()
+      .rename('nodal-radians')
+  var cosTime = timeRadians.cos().rename('cos')
+  var sinTime = timeRadians.sin().rename('sin')
+  var cosNodalTime = nodalRadians.cos().rename('cos-nodal')
+  var sinNodalTime = nodalRadians.sin().rename('sin-nodal')
+  return i.addBands(
+    years
+  ).addBands(
+    cosTime
+  ).addBands(
+    sinTime
+  ).addBands(
+    cosNodalTime
+  ).addBands(
+    sinNodalTime
+  ).addBands(
+    constant
+  ).addBands(
+    timeRadians
+  ).addBands(
+    nodalRadians
+  )
+  
+})
+
+var timeChart = ui.Chart.image.series(series.select('sin'), northsea, ee.Reducer.firstNonNull(), scale)
+print(timeChart)
+var nodalChart = ui.Chart.image.series(series.select('sin-nodal'), northsea, ee.Reducer.firstNonNull(), scale)
+print(nodalChart)
+
+
+function regression(collection, dependent, independent) {
+  var allVars = independents.concat(dependent)
+  print(collection)
+  var fit = collection.select(allVars)
+    .reduce(ee.Reducer.linearRegression(independents.length, 1))
+    .select('coefficients')
+    .arrayProject([0])
+    .arrayFlatten([independents])  
+  return fit
+}
+
+var independents = ['constant', 'time']
+var dependent = ['b1']
+var fit = regression(series, dependent, independents)
+print('fit', fit)
+var independents = ['constant', 'time', 'cos', 'sin']
+var harmonicFit = regression(series, dependent, independents)
+print('harmonicFit', harmonicFit)
+  
+var independents = ['constant', 'time','cos', 'sin', 'cos-nodal', 'sin-nodal']
+var harmonicNodalFit = regression(series, dependent, independents)
+
+Map.addLayer(fit, {min: -0.01, max: 0.01, bands: ['time'], palette: BuRd}, 'trend')
+Map.addLayer(fit, {min: -1.5, max: 1.5, bands: ['constant'], palette: GnYlRd}, 'constant', false)
+Map.addLayer(harmonicFit, {}, 'harmonic-fit', false)
+Map.addLayer(harmonicNodalFit, {}, 'harmonic-nodal-fit', false)
+
+function harmonic2rgb(fit, options) {
+  var cosName = (options && options.cosName) || 'cos'
+  var sinName = (options && options.sinName) || 'sin'
+  var amplitudeScale = (options && options.amplitudeScale) || 1
+  var cos = fit.select(cosName)
+  var sin = fit.select(sinName)
+  var phase = cos.atan2(sin)
+  var amplitude = cos.hypot(sin)
+  // hue
+  var hsv = phase.unitScale(-Math.PI, Math.PI)
+    .addBands(
+      // saturation
+      amplitude.multiply(amplitudeScale)
+    ).addBands(			  
+      // value
+      ee.Image(1)
+    )
+  var rgb = hsv.hsvToRgb();	
+  
+  return rgb
+}
+
+var utils = require('users/gena/packages:utils')
+
+var harmonicRgb = harmonic2rgb(harmonicFit, {amplitudeScale: 5})
+Map.addLayer(harmonicRgb, {}, 'Season phase (hue), amplitude (saturation)', false);
+Map.addLayer(harmonic2rgb(harmonicNodalFit, {amplitudeScale: 10, cosName: 'cos-nodal', sinName: 'sin-nodal'}), {}, 'Nodal phase (hue), amplitude (saturation)', false);
+
+var weight = 1.1 // hillshade vs color
+var azimuth = 315 - 180
+var elevation = 35
+var castShadows = false
+var exaggeration = 5000000
+
+var hillshadedRgb = utils.hillshadeRGB(
+  harmonicRgb,  // style
+  harmonicFit.select('cos').hypot(harmonicFit.select('sin')), // elevation 
+  weight, 
+  exaggeration, 
+  azimuth, 
+  elevation, 
+  castShadows
+)
+Map.addLayer(hillshadedRgb/*.reproject(proj)*/, {}, 'hillshaded-seasonal')
+
+Export.image.toCloudStorage({
+  image: harmonicRgb, 
+  description: 'harmonic-seasonal', 
+  bucket: 'slr',
+  fileNamePrefix: 'results/harmonic-seasonal',
+  region: globalPolygon,
+  scale: scale.getInfo()
+})
+
+
+require('users/gena/packages:style').SetMapStyleDark()

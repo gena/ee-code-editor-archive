@@ -1,0 +1,7 @@
+// https://www.sciencedirect.com/science/article/pii/S0034425719305292?via%3Dihub
+
+
+var path = 'users/FROM-Tsinghua/GAIA_1985_2018'
+// print(ee.data.getList({id: path}))
+print(ee.Image(path)) 
+Map.addLayer(ee.Image(path), {min: 34, max: 0})

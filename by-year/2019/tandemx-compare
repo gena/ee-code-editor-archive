@@ -1,0 +1,66 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var ahn = ee.Image("AHN/AHN2_05M_RUW"),
+    alos = ee.Image("JAXA/ALOS/AW3D30_V1_1"),
+    ned = ee.Image("USGS/NED"),
+    srtm = ee.Image("USGS/SRTMGL1_003"),
+    tandemx = ee.Image("users/gena/TDM1_DEM__30_N51E005_DEM");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var utils = require('users/gena/packages:utils')
+var palettes = require('users/gena/packages:palettes')
+
+Map.setCenter(5.60168, 51.44298, 14)
+
+var reducer = ee.Reducer.percentile([2, 98], ['min', 'max'])
+var bounds = Map.getBounds(true)
+var scale = Map.getScale() * 10
+var minMax = ahn.reduceRegion(reducer, bounds, scale)
+
+function addDem(dem, name, skipDiff) {
+  dem = dem.rename('elevation').resample('bicubic')
+
+  // Map.setCenter(5.92528, 50.9009, 17)
+
+  var demStyled = dem.visualize({ 
+    min: minMax.get('elevation_min'), 
+    max: minMax.get('elevation_max'), 
+    palette: palettes.cb.BrBG[7] 
+  })
+  
+  // Map.addLayer(demStyled, {}, 'dem')
+  
+  var weight = 1.0
+  var extrusion = 10
+  var sunAzimuth = 315
+  var sunElevation = 25
+  var shadows = false
+                                 
+  var demHillshaded = utils.hillshadeRGB(demStyled, dem, weight, extrusion, 
+                                         sunAzimuth, sunElevation, shadows)
+  
+  Map.addLayer(demHillshaded, {}, name)
+  
+  if(skipDiff) {
+    return
+  }
+
+  var diff = dem.subtract(ahn.resample('bicubic'))
+  Map.addLayer(diff/*.mask(diff.abs().unitScale(0, 10))*/, {min: -10, max: 10, palette: ['0000ff', 'ffffff', 'ff0000']}, name + ' - AHN', false)
+
+  print(name)
+  print(ui.Chart.image.histogram({
+    image: diff.clamp(-15, 15), 
+    region: ee.Geometry(Map.getBounds(true)), 
+    scale: Map.getScale(), 
+    maxBuckets: 200
+  }).setOptions({
+    hAxis: {
+      viewWindow: { min: -15, max: 15 }
+    }
+  }))
+}
+
+addDem(ahn, 'AHN 0.5m', true)
+addDem(srtm, 'SRTM 30m')
+addDem(alos.select('AVE'), 'ALOS AVE 30m')
+addDem(alos.select('MED'), 'ALOS MED 30m')
+addDem(tandemx.subtract(44), 'TanDEM-X 90m')

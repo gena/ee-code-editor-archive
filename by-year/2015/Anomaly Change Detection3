@@ -1,0 +1,77 @@
+// Anomaly Change Detection3
+
+var Xoriginal = ee.Image('LC8_L1T/LC81980332014244LGN00').select('B1','B2','B3','B4','B5','B6','B7','B9');
+var Yoriginal = ee.Image('LC8_L1T/LC81980332014260LGN00').select('B1','B2','B3','B4','B5','B6','B7','B9');
+
+// copia para visulizacion.. en mapa
+var X = Xoriginal;
+var Y = Yoriginal;
+
+var regTrain = ee.Geometry.Rectangle(-0.3708, 39.4800,-0.3505,39.474);
+var regTest = ee.Geometry.Rectangle(-0.3708,39.474,-0.3505, 39.4682);
+
+// train and test data
+X = X.clip(regTrain);
+Y = Y.clip(regTrain);
+var XTest = Xoriginal.clip(regTest);
+var YTest = Yoriginal.clip(regTest);
+
+// sacamos la media para cada imagen, en la "region"
+var Xmeans = X.reduceRegion(ee.Reducer.mean(), regTrain, 30);
+var Ymeans = Y.reduceRegion(ee.Reducer.mean(), regTrain, 30);
+var XTrainMeans = XTest.reduceRegion(ee.Reducer.mean(), regTest, 30);
+var YTrainMmeans = YTest.reduceRegion(ee.Reducer.mean(), regTest, 30);
+
+// convertimos en imagen y array nuestras medias
+var XmeansArray = ee.Image(Xmeans.toArray());
+var YmeansArray = ee.Image(Ymeans.toArray());
+var XTrainMeansArray = ee.Image(XTrainMeans.toArray());
+var YTrainMeansArray = ee.Image(YTrainMmeans.toArray());
+
+// los volvemos array a las imagenes
+var Xreshape = X.toArray();
+var Yreshape = Y.toArray();
+var XTestReshape = XTest.toArray();
+var YTestReshape = YTest.toArray();
+
+// quitamos la media...
+X = Xreshape.subtract(XmeansArray);
+Y = Yreshape.subtract(YmeansArray);
+var Z = (ee.Image(X)).addBands(ee.Image(Y));
+Z = Z.toArray();
+
+XTest = XTestReshape.subtract(XTrainMeansArray);
+YTest = YTestReshape.subtract(YTrainMeansArray);
+var ZTest = (ee.Image(XTest)).addBands(ee.Image(YTest));
+ZTest = ZTest.toArray();
+
+// chosing the model
+var BetaX = 1;
+var BetaY = 1;
+
+// algorithm variables
+var ZPinv = (Z.matrixTranspose().matrixMultiply(Z)).matrixPseudoInverse();
+var Ez = Z.matrixTranspose().matrixMultiply(ZPinv).matrixMultiply(Z);
+
+var XPinv = (X.matrixTranspose().matrixMultiply(X)).matrixPseudoInverse();
+var Ex = X.matrixTranspose().matrixMultiply(XPinv).matrixMultiply(X);
+
+var YPinv = (Y.matrixTranspose().matrixMultiply(Y)).matrixPseudoInverse();
+var Ey = Y.matrixTranspose().matrixMultiply(YPinv).matrixMultiply(Y);
+
+var A = Ez.subtract(Ex.matrixMultiply(BetaX)).subtract(Ey.matrixMultiply(BetaY));
+//A = A.matrixDiagonal();
+
+Map.addLayer(Xoriginal,{bands: ['B4', 'B3', 'B2'], min: 5000, max: 20000},'Imagen X');
+Map.addLayer(Yoriginal,{bands: ['B4', 'B3', 'B2'], min: 5000, max: 20000}, 'Imagen Y');
+Map.addLayer(ee.Image().paint(regTest, 0, 3),{'palette': 'e71010'}, 'RegTest');
+Map.addLayer(ee.Image().paint(regTrain, 0, 3),{'palette': 'f9f10f'}, 'RegTrain');
+
+Map.addLayer(A,{},'Anomaly');
+Map.setCenter(-0.361, 39.4737, 14);
+
+
+function mostrar(descrip, image) {
+  print('==> ' + descrip + ' <==');
+  print(ee.ImageCollection([image]).getRegion(ee.Geometry.Point(-0.36071, 39.4743), 30).getInfo());
+}

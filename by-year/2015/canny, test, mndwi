@@ -1,0 +1,60 @@
+// canny, test, mndwi
+
+var bounds = Map.getBounds(true);
+var center = ee.Geometry(bounds).centroid(1);
+var hbounds = center.buffer(5000);
+
+var LC8_BANDS = ['B2',   'B3',    'B4',  'B5',  'B6',    'B7',    'B8', 'B10', 'BQA'];
+var LC7_BANDS = ['B1',   'B2',    'B3',  'B4',  'B5',    'B7',    'B8', 'B8',  'B7'];
+var STD_NAMES = ['blue', 'green', 'red', 'nir', 'swir1', 'swir2', 'pan', 'temp', 'BQA'];
+
+// Select a single Landsat 7 image in Indonesia. 
+var images =  ee.ImageCollection( // LT4_L1T; LT5_L1T; LE7_L1T; LC8_L1T
+      'LANDSAT/LC8_L1T_TOA')
+      .select(LC8_BANDS, STD_NAMES)
+
+/*      'LANDSAT/LE7_L1T_TOA') 
+      .select(LC7_BANDS, STD_NAMES)
+*/
+      .filterBounds(hbounds)
+        .filterMetadata('CLOUD_COVER', 'less_than', 20)
+      //.filterMetadata('DATE_ACQUIRED', 'equals', '2014-05-19')
+      ;
+
+var img = ee.Image('L7_L1T_TOA/LE71130602002104EDC00');
+
+// select average image
+
+
+
+//Map.centerObject(img);
+
+img = img.clip(Map.getBounds(true));
+
+Map.addLayer(img.select([2,1,0]));
+
+var mndwi = img.normalizedDifference(['50','20']);
+Map.addLayer(mndwi, {min:-0.5, max:0.5}, "mndwi")
+
+var crs = img.getInfo().bands[0].crs;
+var mndwi = mndwi.reproject(crs, null, 5);
+
+var gaussianKernel = ee.Kernel.gaussian(30, 15, 'meters');
+var mndwi4 = mndwi.convolve(gaussianKernel);
+
+Map.addLayer(mndwi4, {min:-0.5, max:0.5}, "mndwi4")
+
+var canny4 = ee.Algorithms.CannyEdgeDetector(mndwi4, 0.3);
+addToMap(canny4.mask(canny4), {min: 0, max: 1, palette: 'FF0000'}, 'cannny4');
+
+var canny = ee.Algorithms.CannyEdgeDetector(mndwi, 0.3);
+addToMap(canny.mask(canny), {min: 0, max: 1, palette: 'FF0000'}, 'cannny', false);
+
+// var canny_v = canny.mask(canny).reduceToVectors();
+// print(canny_v)
+
+/*var region = JSON.stringify(Map.getBounds(true).coordinates);
+print(region)
+Export.image(canny4, "canny", { scale: 30, region: region });
+
+*/

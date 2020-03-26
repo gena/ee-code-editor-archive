@@ -1,0 +1,7 @@
+// transparent polygons
+
+var pa = ee.FeatureCollection('ft:1u9f2vs39TSQVFR6YXVo9SWXweSDJ2m8DtcRoHyw');
+var outlines = ee.Image(0).mask(0).byte().paint(pa, 255, 2);
+outlines = outlines.mask(outlines.neq(0));
+addToMap(outlines, {min:0, max:255});
+centerMap(108.9,4.5,7);

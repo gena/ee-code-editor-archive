@@ -1,0 +1,48 @@
+// L7_HSV-based_Pan-Sharpened_NDVI_calculator
+
+centerMap(-88.82601,40.15887, 15); // Example location
+
+var collection = ee.ImageCollection('LE7_L1T')
+        .filterMetadata('catalog_cloud_cover', 'less_than', 2.0)
+        .filterDate(new Date('2000-01-01'), new Date('2000-11-31'));
+        
+// Visualize original image_composite
+var image1 = collection.mosaic().visualize(['B7', 'B4', 'B2'],1.6); 
+//==============================================================================// 
+            // Pan sharpen each image in collection //
+function pan_sharpen(input_image) {
+var rgb = input_image.select(['B7', 'B4', 'B3']).unitScale(0,200);
+var gray = input_image.select(['B8']).unitScale(30, 80);
+// Convert to HSV, swap in the pan band, and convert back to RGB.
+var huesat = rgb.rgbtohsv().select(['hue', 'saturation']);
+var pan_result = ee.Image.cat(huesat, gray).hsvtorgb();
+  return pan_result;
+}
+var pan_sharpened_collection = collection.map(pan_sharpen); // map over each image in collection
+var PanIm = pan_sharpened_collection.mosaic(); // make sure the pan sharpen worked
+
+//==============================================================================// 
+            // Compute NDVI for each image in collection //
+function NDVI_calc(input_image2) {
+  var NDVI_result = input_image2.expression("(b('green')-b('blue'))/(b('green')+b('blue'))"); // these aren't actully green adn blue - just didn't rename
+  return NDVI_result;
+}
+// map over each image in collection
+var NDVI_collection = pan_sharpened_collection.map(NDVI_calc); 
+// reduce according the maximum NDVI value
+var NDVI_Image = NDVI_collection.max()//.abs();
+
+//==============================================================================// 
+
+// test individual bands in pan-sharpened collection
+var B4 = PanIm.select(['green']);
+var B3 = PanIm.select(['blue']);
+
+           // Visualize Original,Pan sharpened, and NDVI//
+addToMap(image1,{}, 'Original');
+addToMap(PanIm,{}, 'Pan_sharpened');
+addToMap(B4,{}, 'B4');
+addToMap(B3,{}, 'B3');
+addToMap(NDVI_Image,{}, 'NDVI_custom'); // Why doesn't this retain the 15m pixel resolution?
+
+

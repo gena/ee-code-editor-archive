@@ -1,0 +1,202 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var outlet = /* color: #d63000 */ee.Geometry.Point([-2.684560401409044, 16.732788605838515]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var animation = require('users/gena/packages:animation')
+var text = require('users/gena/packages:animation')
+var assets = require('users/gena/packages:assets')
+var hydro = require('users/gena/packages:hydro')
+
+var bands = ['SWIR', 'NIR', 'RED']
+
+// hydro.Map.addDem({ asset: 'ALOS', layer: { name: 'DEM', visible: false } })
+hydro.Map.addDemDark({ weight: 15, layer: { name: 'DEM' } })
+hydro.Map.addHand({ layer: { name: 'HAND', visible: false } })
+
+Map.addLayer(ee.Image(1), {}, 'dark', true, 0.8)
+
+var catchments = hydro.Map.addCatchments({ outlet: outlet, layer: { name: 'catchments', opacity: 0.5, color: 'grey' } })
+
+var catchmentsMask = ee.Image().int().paint(catchments, 1)
+
+// hydro.Map.addWaterOccurrenceMax({ mask: catchmentsMask, percentile: 85 })
+var waterOccurrenceMax = ee.Image('users/gena/JRC_MAX_ANNUAL_WATER_OCCURRENCE').resample('bicubic')
+var palette = ["ffffcc","ffeda0","fed976","feb24c","fd8d3c","fc4e2a","e31a1c","bd0026","800026"].reverse().slice(1)
+Map.addLayer(waterOccurrenceMax.mask(waterOccurrenceMax.multiply(2)), {min: 0, max: 1, palette: palette}, 'water occurrence (max)', true)
+
+var proba100 = ee.ImageCollection('VITO/PROBAV/C1/S1_TOC_100M').select(bands)
+
+var proba333 = ee.ImageCollection('VITO/PROBAV/C1/S1_TOC_333M').select(bands)
+
+print('Count (100m): ', proba100.size())
+print('Count (333m): ', proba333.size())
+
+var start = '2015-01-01'
+var stop = '2018-01-01'
+
+proba100 = proba100.filterDate(start, stop)
+proba333 = proba333.filterDate(start, stop)
+
+print('Count (100m): ', proba100.size())
+print('Count (333m): ', proba333.size())
+
+var proba = proba100.merge(proba333)
+
+proba = proba.map(function(i) {
+  return i
+    .resample('bicubic')
+    .multiply(5)
+    .copyProperties(i, ['system:time_start'])
+})
+
+
+/***
+ * Filters all images where percentage of pixels covering region is less than coverage (0-1, default: 0.99).
+ */
+function filterImagesByRegion(images, region, scale, opt_coverage) {
+  var coverage = typeof(opt_coverage) === undefined || 0.99
+  var area = region.area(scale)
+
+  images = images.map(function(i) {
+    var areaMask = ee.Image.pixelArea().mask(i.select(0).mask())
+      .reduceRegion(ee.Reducer.sum(), region, scale).values().get(0)
+      
+    return i.set({ areaMask: areaMask })
+  })
+  
+  print(area)
+  print(area.multiply(coverage))
+  print(images.aggregate_array('areaMask'))
+  
+  images = images.filter(ee.Filter.gt('areaMask', area.multiply(coverage)))
+  
+  return images
+}
+
+print(images)
+
+var center = Map.getCenter()
+var region = ee.Geometry(Map.getBounds(true))
+var scale = Math.max(Map.getScale(), 100)
+
+// var bounds = catchments.geometry()
+// var bounds = catchments.geometry().intersection(region, 10000)
+var bounds = region
+
+proba = filterImagesByRegion(proba, bounds, scale * 50, 0.01)
+
+print('Count: ', proba.size())
+
+var l8 = ee.ImageCollection('LANDSAT/LC08/C01/T1_SR')
+  .filterBounds(bounds)
+  .filterDate(start, stop)
+  
+  
+l8 = l8  
+  .select(['B6', 'B5', 'B4'], ['SWIR', 'NIR', 'RED'])
+
+var images = proba
+  //.merge(l8)
+
+print('Size: ', images.size())
+
+images = assets.addQualityScore(images, bounds, {
+  scale: scale * 10,
+  qualityBand: 'RED',
+  scorePercentile: 99
+})
+
+// print(ui.Chart.feature.histogram(images, 'quality_score'))
+
+// limit to 90% or the darkest images
+var count = images.size().multiply(0.85).int()
+images = images.sort('quality_score').limit(count)
+
+print('Size: ', images.size())
+
+Map.addLayer(images, {}, 'images (raw)', false)
+
+function getActualImages() {
+  images = images
+    .sort('system:time_start')
+  
+  images = images
+    .map(function(i) {
+      return i.set({ 
+        label: i.date().format()
+          // .cat(' ').cat(ee.Number(i.get('quality_score')).format('%.0f')) 
+      })
+    })
+    
+  return images
+}
+var bandNames = ee.Image(images.first()).bandNames()
+
+function getCompositeImages() {
+  var startDate = ee.Date(start)
+  var step = 1
+  var unit = 'month'
+  var count = 24
+  var duration = step * count
+
+  var output = ee.List.sequence(0, duration, step).map(function(offset) {
+    var t0 = startDate.advance(offset, unit)
+    var t1 = t0.advance(step, unit)
+    
+    var imagesSample = images
+      .filterDate(t0, t1)
+
+    return imagesSample      
+      .reduce(ee.Reducer.intervalMean(5, 50))
+      //.reduce(ee.Reducer.percentile([50]))
+      .rename(bandNames)
+      .set({ label: t0.format('YYYY-MM-dd ').cat(imagesSample.size().format('%d')) })
+  })
+  
+  return ee.ImageCollection(output)
+}
+  
+images = getActualImages()
+//images = getCompositeImages()
+
+print(images.first())
+
+var vis = { bands: bands, min: 500, max: 5500 }
+
+function addHydroLayers() {
+  hydro.Map.addRivers({ layer: { name: 'rivers' }})
+  // hydro.Map.addRivers({ maxFA: 50, layer: { name: 'rivers' }})
+}
+
+Export.video.toDrive({
+  collection: images.map(function(i) { 
+    return i.visualize(vis)
+      //.blend(timeStamp)
+  }), 
+  description: 'Niger-proba-l8', 
+  fileNamePrefix: 'Niger-proba-l8', 
+  framesPerSecond: 10, 
+  region: ee.Geometry(Map.getBounds(true)), 
+  scale: Map.getScale(), 
+  crs: 'EPSG:3857',
+  maxFrames: 10000
+})
+
+print(images)
+
+animation.animate(images, { vis: vis, maxFrames: 100, label: 'label' })
+  .then(addHydroLayers)
+
+/*
+images = images.map(function(i) {
+  return i.addBands(i.normalizedDifference(['NIR', 'RED']).rename('NDVI'))
+})
+*/
+
+
+// var chart = ui.Chart.image.seriesByRegion(images, region,  ee.Reducer.mean(), 'NDVI', scale, 'system:time_start')
+//   .setOptions({
+//     title: 'NDVI',
+//     vAxis: {title: 'NDVI'},
+//   });
+
+// print(chart);

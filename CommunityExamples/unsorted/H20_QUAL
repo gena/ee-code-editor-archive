@@ -1,0 +1,35 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var region = /* color: #d63000 */ee.Geometry.Polygon(
+        [[[121.89674377441406, 11.91539248304918],
+          [121.98291778564453, 11.93218823174339],
+          [121.95236206054688, 12.020516709145957],
+          [121.86378679003906, 12.006748772470699]]]),
+    point = /* color: #98ff00 */ee.Geometry.Point([121.92420959472656, 11.97081450325369]);
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+/***
+Define Viz Param and cloud mask function
+**/
+var vizParams= {'min': 0,'max': 90, 'bands':'N'};
+var cloudMask = function(im) {
+  var qa = im.select('QA60');
+  var mask = qa.bitwiseAnd(0x400).eq(0).and(qa.bitwiseAnd(0x800).eq(0)); 
+  var res = im.updateMask(mask).divide(10000);
+  return res;};
+
+var rescale = function(img, exp, thresholds) {
+    return img.expression(exp, {img: img})
+        .subtract(thresholds[0]).divide(thresholds[1] - thresholds[0]);
+  };
+
+//Image Collection
+var collection = ee.ImageCollection('COPERNICUS/S2')
+    .filterDate('2017-03-01', '2017-04-04')
+    .filterBounds(region)
+    .filterMetadata('CLOUDY_PIXEL_PERCENTAGE','less_than',20)
+Map.addLayer(collection, {min:0, max:3000, bands: ["B4", "B3", "B2"]}, 'TOA');
+
+var ndvi = collection.map(function(img) {
+  return img.divide(10000).normalizedDifference(["B8", "B4"]).rename("ndvi")});
+var vizNDVI =  {bands: ['ndvi'], min:0, max:1};  
+Map.addLayer(ndvi, vizNDVI, 'ndvi');
+

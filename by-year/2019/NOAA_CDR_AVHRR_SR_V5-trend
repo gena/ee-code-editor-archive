@@ -1,0 +1,159 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var images = ee.ImageCollection("NOAA/CDR/AVHRR/SR/V5");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+// var yearStart = 1981
+// var yearEnd = 2019
+// var variable = 'BT_CH4'
+// var scaleTemp = 0.1
+
+images = ee.ImageCollection('MODIS/006/MOD11A1')
+var yearStart = 2001
+var yearEnd = 2019
+var variable = 'LST_Day_1km'
+var scaleTemp = 0.02
+
+var addTimeBand = function(image) {
+  return image.addBands(image.metadata('system:time_start').divide(1e12))
+}
+
+// generate monthly
+var dates = ee.List.sequence(yearStart, yearEnd).map(function(y) {
+  return ee.List.sequence(1, 12).map(function(m) {
+    return ee.List.sequence(0, 3).map(function(w) {
+      return ee.Date.fromYMD(y, m, 1).advance(w, 'week')
+    })
+  })
+}).flatten()
+
+
+images = images.select(variable)
+
+var imagesMonthly = dates.map(function(d) {
+  d = ee.Date(d)
+  return images.filterDate(d, d.advance(1, 'month'))
+    // .map(function(i) { return i.resample('bicubic') })
+    .median()
+    .multiply(scaleTemp).subtract(273.15)
+    .set({ 'system:time_start': d.millis() })
+})
+
+imagesMonthly = ee.ImageCollection(imagesMonthly)
+
+var querying = false
+
+// chart with intervals
+Map.onClick(function(pt) {
+  if(querying) {
+    print('Wait until previous operation is complete ...')
+    return
+  }
+  
+  querying = true
+  
+  pt = ee.Geometry.Point([pt.lon, pt.lat])
+
+  // compute stats over area
+  var imagesInfo = dates.map(function(d) {
+    d = ee.Date(d)
+  
+    var result = images.filterDate(d, d.advance(1, 'month'))
+      .reduce(ee.Reducer.percentile([0, 50, 100]))
+      // .multiply(scaleTemp).subtract(273.15)
+      .reduceRegion({ reducer: ee.Reducer.first(), geometry: pt, scale: Map.getScale() })
+
+    return ee.Feature(null, result).set({ t: d.millis() })
+  })
+  
+  print(imagesInfo)
+
+  // plot chart with intervals over area
+  var values = imagesInfo.map(function(f) {
+    f = ee.Feature(f)
+    var t50 = f.get(variable + '_p50')
+    var t0 = f.get(variable + '_p0')
+    var t100 = f.get(variable + '_p100')
+
+    return [f.get('t'), t50, t0, t100]
+  })
+  
+  var dataTable = {
+    cols: [{id: 't', type: 'date'},
+          {id: 'y', type: 'number'},
+          {id: 'i0', type: 'number', role: 'interval'},
+          {id: 'i1', type: 'number', role: 'interval'}]
+  };
+  
+  values.evaluate(function(values) {
+    print(values)
+    
+    dataTable.rows = values.map(function(row) {
+      return { c: [ { v: new Date(row[0]) }, { v: row[1] }, { v: row[2] }, { v: row[3] } ] }
+    })
+    
+    var options = {  
+        title:'temperature (MODIS)',  
+        curveType:'function',  
+        series: [{'color': '#000000'}],  
+        intervals: { 'style':'area' },  
+        legend: 'none',  
+        pointSize: 2,
+        lineWidth: 1
+    };  
+    
+    var chart = ui.Chart(dataTable, 'LineChart', options)
+      // .setOptions({
+      //   trendlines: {
+      //     0: {
+      //       showR2: true,
+      //       visibleInLegend: true,
+      //       color: 'ff0000'
+      //     }
+      //   },
+          
+      //   series: {
+      //     0: {lineWidth: 1, pointSize: 1} 
+      //   }
+      // })
+    
+    print(chart)
+    
+    querying = false
+  //   chart.onClick(function(t) {
+  //     t = ee.Date(t)
+  //     var image = images.filterDate(t.getRange('second'))
+  //     imageLayer.setEeObject(image)
+  //     imageLayer.setShown(true)
+  //   })
+  })
+    
+  
+})
+
+
+// chart average
+var chart = ui.Chart.image.series(imagesMonthly, ee.Geometry(Map.getBounds(true)), ee.Reducer.median(), Map.getScale(), 'system:time_start')
+
+chart = chart.setOptions({
+  trendlines: {
+    0: {
+      showR2: true,
+      visibleInLegend: true,
+      color: 'ff0000'
+    }
+  },
+  
+  series: {
+    0: {lineWidth: 1, pointSize: 1} 
+  } 
+ })
+// print(chart) 
+
+// linear trend
+// images = images.map(addTimeBand)
+images = imagesMonthly.map(addTimeBand)
+
+Map.addLayer(imagesMonthly, {}, 'raw', false)
+
+var linearFit = images.select(['system:time_start', variable]).reduce(ee.Reducer.linearFit());
+
+Map.addLayer(linearFit, {min: 0, max: [5, 0, -5], bands: ['scale', 'scale', 'scale']}, 'fit')

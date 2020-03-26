@@ -1,0 +1,56 @@
+// classification, cloud masking
+
+var region = ee.Geometry.Rectangle(3.04802, 3.12672, 12.56531, 8.90052);
+
+var applyCloudScore = function(image) {
+  var t = ee.Algorithms.Landsat.simpleCloudScore(image);
+  var quality = t.select('cloud').lte(10);
+  var maskedImage = image.mask().and(quality);
+  return image.mask(maskedImage);
+};
+
+// combine the two date ranges into a single filter
+var dateFilter = ee.Filter.or(
+  ee.Filter.date('1999-01-01','2004-12-31'),
+  ee.Filter.date('2009-01-01','2014-12-31')
+);
+                
+var collection = ee.ImageCollection('LANDSAT/LE7_L1T_TOA')
+    .filter(dateFilter)
+    .filterBounds(region)
+    .map(applyCloudScore);
+
+var masked_image = collection
+                    .select(['B4','B5','B7'])
+                    .median()
+                    .multiply(255)
+                    .toUint8();
+                    
+Map.addLayer(masked_image, {min: 0, max: 127}, 'input imagery');
+
+var features = ee.FeatureCollection("ft:1g6pewI94uiSxBs6dgCtI0bmikJmVaFG2uYm6tVad");
+Map.addLayer(features, {}, 'training features');
+
+var classifier = masked_image.trainClassifier({ 
+  training_features: features,
+  training_property: "class",
+  classifier_name: "VotingSvm",
+  crs: "EPSG:4326",
+  crs_transform: [
+          0.00008983152841195213,
+          0,
+          -180,
+          0,
+          -0.00008983152841195213,
+          90]
+});
+var result = masked_image.classify(classifier)
+
+var palette = ["22e5ef","ff4217","4de41c","2b783b","fbff13"];
+Map.addLayer(result, {palette: palette, min:1, max:5,"resolution": 10, format:"png"}, 'classification');
+Map.addLayer(ee.Image().paint(region, 1, 1), {}, 'region');
+Map.setCenter(6.8259, 5.4622, 11);
+
+Export.image(result, "Classification_2009_2014", {
+  region: JSON.stringify(region.toGeoJSON().coordinates),'maxPixels': 10e9,
+  scale: 30})

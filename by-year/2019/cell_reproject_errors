@@ -1,0 +1,26 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = /* color: #d63000 */ee.Geometry.Point([4.891711212694645, 52.37387901062078]),
+    geometry2 = /* color: #98ff00 */ee.Geometry.Point([4.892429709434509, 52.37429575380689]),
+    utm31n_to_wgs = ee.FeatureCollection("users/gena/test_cell"),
+    utm31n = ee.FeatureCollection("users/gena/test_cell_utm");
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var gridUtils = require('users/gena/packages:grid')
+
+var origin = geometry
+var dx = 100
+var dy = 100
+var proj = ee.Projection('EPSG:32631')
+var grid = gridUtils.generateRasterGrid(origin, dx, dy, proj) 
+
+Map.addLayer(grid.select(0), {min: 0, max: 1}, 'grid', true, 0.3)
+
+var gridVector = grid.select(0).reduceToVectors({eightConnected: false, geometry: geometry2.buffer(300), scale: 1}).filterBounds(geometry2)
+
+print(gridVector.geometry().area(0.1, proj))
+Map.addLayer(gridVector, {}, 'EE UTM31N')
+
+print(utm31n_to_wgs.geometry().area(0.1, proj))
+Map.addLayer(utm31n_to_wgs, {}, 'QGIS UTM31N to WGS')
+
+print(utm31n.geometry().area(0.1, proj))
+Map.addLayer(utm31n, {}, 'QGIS UTM31N')

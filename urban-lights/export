@@ -1,0 +1,302 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var washington = /* color: #00ffff */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-77.67734230307906, 41.48856652346571],
+              [-77.60043800620406, 38.11353844791115],
+              [-71.20639503745406, 37.9837645366679],
+              [-71.43710792807906, 41.44740482762993]]]),
+        {
+          "system:index": "0",
+          "name": "Washington"
+        }),
+    dakota = /* color: #bf04c2 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-104.99715197132377, 49.927364479100646],
+              [-105.06306994007377, 46.729516180297665],
+              [-95.30721056507377, 46.65415855327896],
+              [-95.61482775257377, 50.335827711959084]]]),
+        {
+          "system:index": "0",
+          "name": "North Dakota"
+        }),
+    sudan = /* color: #ff0000 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[35.849873317877154, 14.496368855962672],
+              [35.847126735845904, 13.975903794141711],
+              [37.099568142095904, 13.975903794141711],
+              [37.08720852295528, 14.477754091084142]]]),
+        {
+          "system:index": "0",
+          "name": "Sudan"
+        }),
+    eastChinaSea = /* color: #00ff00 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[125.69182517955528, 35.98703935567333],
+              [125.66985252330528, 29.02750938660408],
+              [139.42473533580517, 29.085131095808897],
+              [138.94133689830517, 35.91589061964288]]]),
+        {
+          "system:index": "0",
+          "name": "East Chinese Sea"
+        }),
+    hainan = /* color: #0000ff */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[107.89785363308602, 20.567784614713137],
+              [107.91982628933602, 17.902217556555996],
+              [112.96255089871102, 17.860395039606576],
+              [112.85268761746102, 20.608923184353884]]]),
+        {
+          "system:index": "0",
+          "name": "Hainan"
+        }),
+    viirs = ee.ImageCollection("NOAA/VIIRS/DNB/MONTHLY_V1/VCMSLCFG"),
+    baghdad = /* color: #d63000 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[41.81848821647668, 32.430489685415814],
+              [45.70764837272668, 32.27271221406058],
+              [45.75159368522668, 34.45627221146016],
+              [41.78552923210168, 34.54681172566661]]]),
+        {
+          "name": "Baghdad",
+          "system:index": "0"
+        }),
+    shilabo = /* color: #98ff00 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[44.09021007134743, 5.862288858054221],
+              [44.8578797490818, 5.844529157984614],
+              [44.8633729131443, 6.32793253166328],
+              [44.1492615850193, 6.337486911422047]]]),
+        {
+          "name": "Shilabo",
+          "system:index": "0"
+        }),
+    syria = /* color: #d63000 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[35.10075341672518, 32.66435412825785],
+              [41.91227685422518, 32.84913859576277],
+              [41.97819482297518, 37.2189596593166],
+              [35.56217919797518, 36.973597484603424]]]),
+        {
+          "name": "Syria",
+          "system:index": "0"
+        }),
+    manila = /* color: #d63000 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[119.24251225773855, 13.691279653014167],
+              [122.05501225773855, 13.637902838140562],
+              [122.00008061711355, 15.180755541997629],
+              [119.13264897648855, 15.170152321101016]]]),
+        {
+          "name": "Manila",
+          "system:index": "0"
+        }),
+    northsea = /* color: #d63000 */ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-4.1422965902012265, 59.40600167047936],
+              [-4.3180778402012265, 49.845124032560875],
+              [11.765906534798773, 50.1839895181305],
+              [11.941687784798773, 58.819475534311174]]]),
+        {
+          "system:index": "0",
+          "name": "north-sea"
+        }),
+    dutchcoast = 
+    /* color: #4ad66e */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Feature(
+        ee.Geometry.Polygon(
+            [[[0.2399511391120086, 54.64360645184654],
+              [0.2399511391120086, 50.452215729660104],
+              [7.490927701612009, 50.452215729660104],
+              [7.490927701612009, 54.64360645184654]]], null, false),
+        {
+          "name": "dutch-coast",
+          "system:index": "0"
+        });
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+var utils = require('users/gena/packages:utils')
+
+// Now a bit more difficult, compute the linear trend through the VIIRS dataset
+// TODO: add anual cycle (see sealevel examples)
+var viirsEquations = viirs.map(function(i) {
+  // var logRad = i.select('avg_rad').log().rename('log-avg-rad')
+  var constant = ee.Image.constant(1).rename('constant')
+  // Convert dates to years, so we have year as a unit
+  var t = i.date().millis()
+  // ms -> s -> m -> hr -> day -> year
+  var years = ee.Image.constant(t)
+      .divide(1e3 * 60 * 60 * 24 * 365.25)
+      .float()
+      .rename('time')
+  // seasonal cycle
+  var timeRadians = ee.Image.constant(t)
+      .divide(1e3 * 60 * 60 * 24 * 365.25)
+      .multiply(2 * Math.PI)
+      .float()
+      .rename('time-radians')      
+  var cosTime = timeRadians.cos().rename('cos')
+  var sinTime = timeRadians.sin().rename('sin')
+  return i.resample('bicubic')
+  .addBands(
+    years
+  ).addBands(
+    cosTime
+  ).addBands(
+    sinTime
+  ).addBands(
+    constant
+  )
+})
+
+// The regression function (OLS)
+function regression(collection, dependent, independent, robust) {
+  var allVars = independents.concat(dependent)
+  var reducer = ee.Reducer.linearRegression(independents.length, 1)
+  if (robust) {
+    reducer = ee.Reducer.robustLinearRegression(independents.length, 1)
+  }
+  var fit = collection.select(allVars)
+    .reduce(reducer)
+    .select('coefficients')
+    .arrayProject([0])
+    .arrayFlatten([independents])  
+  return fit
+}
+
+// Define the equations
+var independents = ['constant', 'time', 'cos', 'sin']
+var dependent = ['avg_rad']
+var fitRobust = regression(viirsEquations, dependent, independents, true)
+var fit = regression(viirsEquations, dependent, independents, false)
+
+var geometry = viirs.geometry(100)
+// Global region
+var region = ee.Geometry.Polygon([-180, 90, 0, 90, 180, 90, 180, -90, 10, -90, -180, -90], null, false)
+print(geometry.projection().crs())
+Export.image.toAsset({
+  image:fitRobust, 
+  description: 'viirs-fit-robust', 
+  assetId: 'viirs/fit-robust', 
+  region: region, 
+  scale: 10000, 
+  maxPixels: 1e9,
+  crs: geometry.projection().crs().getInfo()
+})
+
+Export.image.toAsset({
+  image:fit, 
+  description: 'viirs-fit', 
+  assetId: 'viirs/fit', 
+  region: region, 
+  scale: 10000, 
+  maxPixels: 1e9,
+  crs: geometry.projection().crs().getInfo()
+})
+
+var features = [
+  washington,
+  dakota,
+  sudan,
+  eastChinaSea,
+  hainan,
+  baghdad,
+  shilabo,
+  syria,
+  manila,
+  northsea,
+  dutchcoast
+]
+
+features = [
+  northsea,
+  dutchcoast
+]
+
+var minLight = 0.3
+var minOpaque = 1
+var maxLight = 6
+
+
+
+var paletteLights = ['000000', 'f03b20', 'ffff55', 'ffffb2', 'ffffee']
+var viirsRgb = viirs.map(function(i) {
+  var i = i.select('avg_rad')
+  i = i.resample('bicubic')      
+  i = i
+     .mask(
+       i.unitScale(minLight, minOpaque).clamp(0, 1)
+     )
+      
+  i = i
+      .visualize({
+          min: 0,
+          max: maxLight,
+          palette: paletteLights
+        })
+  
+  return i
+})
+
+
+var viirsAlpha = viirs.map(function(i) {
+  // Lookup avg_rad
+  var i = i.select('avg_rad')
+  // clamp to 0,1 
+  i = i.resample('bicubic')
+  i = i.unitScale(minLight, minOpaque).clamp(0, 1)
+  
+  // visualize black white
+  i = i
+      .visualize({
+          min: 0,
+          max: 1,
+          palette: ['000000', 'ffffff']
+        })
+  return i
+})
+Map.addLayer(ee.Image(0))
+Map.addLayer(ee.Image(viirsAlpha.first()), {}, 'alpha')
+Map.addLayer(ee.Image(viirsRgb.first()), {}, 'color')
+
+features.map(function(feature) {
+  print(feature.bounds())
+  
+  var params = utils.generateExportParameters(
+    feature.geometry(),
+    1920,
+    1080,
+    'EPSG:3857'
+  )
+  var videoBounds = ee.Algorithms.ProjectionTransform(
+      params.bounds, 
+      'EPSG:4326',
+      1
+    ).bounds()
+  Map.addLayer(videoBounds, {}, 'bounds')
+  print(videoBounds)
+  Export.video.toCloudStorage({
+    collection: viirsRgb, 
+    description: feature.get('name').getInfo(), 
+    bucket: 'slr', 
+    fileNamePrefix: 'viirs-' + feature.get('name').getInfo(), 
+    framesPerSecond: 10, 
+    region: params.bounds, 
+    scale: params.scale.getInfo(), 
+    crs: 'EPSG:3857'
+  })
+  Export.video.toCloudStorage({
+    collection: viirsAlpha, 
+    description: feature.get('name').getInfo() + '-alpha', 
+    bucket: 'slr', 
+    fileNamePrefix: 'viirs-alpha-' + feature.get('name').getInfo(), 
+    framesPerSecond: 10, 
+    region: params.bounds, 
+    scale: params.scale.getInfo(), 
+    crs: 'EPSG:3857'
+  })
+})

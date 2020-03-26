@@ -1,0 +1,218 @@
+var geometry =     ee.Geometry.Polygon(
+        [[[-7.780510647532537, 33.12380141439545],
+          [-7.780510647532537, 33.06210458015715],
+          [-7.7106444671126155, 33.06210458015715],
+          [-7.7106444671126155, 33.12380141439545]]], null, false);
+
+var mask_agricole = ee.FeatureCollection("users/mahyouh/mask_agricole");
+
+// Définir le Maroc dans la liste des pays du Monde
+
+var Maroc = ee.FeatureCollection("users/mahyouh/MAROC_COV_AMS");
+
+// Add Maroc outline to the Map as a layer.
+Map.centerObject(Maroc, 6);
+
+// #############################################################################
+// Import LST image collection.
+var MODIS_LST = ee.ImageCollection("MODIS/006/MOD11A2");
+
+// Define a date range of interest; here, a start date is defined and the end
+// date is determined by advancing 1 year from the start date.
+var start = ee.Date('2019-09-01');
+var dateRange = ee.DateRange(start, start.advance(1, 'year'));
+
+// Filter the LST collection to include only images intersecting the desired
+// date range.
+
+var mod11a2 = MODIS_LST.filterDate(dateRange);
+
+
+// #############################################################################
+
+// Scale to Kelvin and convert to Celsius, set image acquisition time.
+var modLSTc = mod11a2.map(function(img) {
+  return img
+    .multiply(0.02)
+    .subtract(273.15)
+    .copyProperties(img, ['system:time_start']);
+});
+
+
+/////////////////////////////////////////////////////////////
+
+// Select only the 1km day and night LST data band.
+var modLSTday = modLSTc.select('LST_Day_1km');
+var modLSTnight = modLSTc.select('LST_Night_1km');
+
+//#############################################################################
+
+var stack_LST = modLSTday.merge(modLSTnight)
+
+
+// Create and print charts.
+
+print(ui.Chart.image.series(stack_LST, geometry, ee.Reducer.mean(), 1000)
+.setChartType('ColumnChart')
+.setOptions({
+      title: 'Evolution de la température diurne et nocture',
+      lineWidth: 1,
+      pointSize: 3,
+            vAxis: {title: 'Température (°C)'},
+            hAxis: {title: 'Temps'},
+      
+     }));
+
+// Create and print charts.
+
+print(ui.Chart.image.series(stack_LST, geometry, ee.Reducer.mean(), 1000));
+
+
+
+// #############################################################################
+
+
+// Calculate day min and max temperature for Maroc.
+var LSTmin_d = modLSTday.min().clip(Maroc);
+var LSTmax_d = modLSTday.max().clip(Maroc);
+
+// Mapping min and max temperature.
+
+var thresholds = ee.Image([-5, 0,5,10,15,20, 25]);
+
+var LSTmin_d1 = LSTmin_d.gt(thresholds).reduce('sum');
+
+var thresholds1 = ee.Image([15,20, 25, 30,35, 40, 45]);
+var LSTmax_d1 = LSTmax_d.gt(thresholds1).reduce('sum');
+
+
+var palette = {min: 0, max: 7, palette: ["1f4c8f", "258dd8","5ad9ff","76fef8","fdf73a","f49441", "d73027"]};
+
+
+// Mapping min and max temperature.
+
+
+//////////////////////////////Day//////////////////////////////////////////////
+
+
+Map.addLayer(LSTmin_d1, palette, 'Day_min temperature', false);
+
+Map.addLayer(LSTmax_d1  , palette,  'Day_max temperature', false);
+  
+
+
+//Légende
+
+// set position of panel
+var legend = ui.Panel({
+  style: {
+    position: 'top-left',
+    padding: '8px 15px'
+  }
+});
+
+// Create legend title
+var legendTitle = ui.Label({
+  value: 'Température °C',
+  style: {
+    fontWeight: 'bold',
+    fontSize: '18px',
+    margin: '0 0 4px 0',
+    padding: '0'
+    }
+});
+
+// Add the title to the panel
+legend.add(legendTitle);
+
+// Creates and styles 1 row of the legend.
+var makeRow = function(color, name) {
+
+      // Create the label that is actually the colored box.
+      var colorBox = ui.Label({
+        style: {
+          backgroundColor: '#' + color,
+          // Use padding to give the box height and width.
+          padding: '8px',
+          margin: '0 0 4px 0'
+        }
+      });
+
+      // Create the label filled with the description text.
+      var description = ui.Label({
+        value: name,
+        style: {margin: '0 0 4px 6px'}
+      });
+
+      // return the panel
+      return ui.Panel({
+        widgets: [colorBox, description],
+        layout: ui.Panel.Layout.Flow('horizontal')
+      });
+};
+
+//  Palette with the colors
+var palette =["1f4c8f", "258dd8","5ad9ff","76fef8","fdf73a","f49441", "d73027"];
+
+// name of the legend
+var names = ['< -5', '0','5','10','15','20', '25'];
+
+// Add color and and names
+for (var i = 0; i <7; i++) {
+  legend.add(makeRow(palette[i], names[i]));
+  }  
+
+// add legend to map 
+Map.add(legend);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

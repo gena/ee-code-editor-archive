@@ -1,0 +1,46 @@
+// MODIS corrected reflectance
+
+Map.setCenter(37.53, -17.64, 10);
+
+var bounds = Map.getBounds(true);
+var date = '2014-06-10';
+var options = { min:0, max:1600 }
+
+// 250m, bands 1-2
+// wavelengths (nm)
+// 1: 620 - 570 RED
+// 2: 841 - 876 NIR
+//var terraGQ = ee.ImageCollection(ee.ImageCollection('MODIS/MOD09GQ').merge(ee.ImageCollection('MODIS/MYD09GQ')))
+var terraGQ = ee.ImageCollection('MODIS/MOD09GQ')
+  .filterBounds(bounds)
+  .select(['sur_refl_b01', 'sur_refl_b02'], ['red', 'nir']);
+
+print(terraGQ)
+Map.addLayer(terraGQ.select(['nir', 'red']), options, '250m', false);
+
+// 500m, bands 3-7
+// 3: 459 - 479 BLUE
+// 4: 545 - 565 GREEN
+//var terraGA = ee.ImageCollection(ee.ImageCollection('MODIS/MOD09GA').merge(ee.ImageCollection('MODIS/MYD09GA')))
+var terraGA = ee.ImageCollection('MODIS/MOD09GA')
+  .filterBounds(bounds)
+  .select(['sur_refl_b01', 'sur_refl_b02', 'sur_refl_b03', 'sur_refl_b04'], ['red', 'nir', 'blue', 'green']);
+
+// merge GQ and GA
+var merged = terraGQ.map(function(image1) {
+      var date = image1.get('system:time_start');
+      var image2 = ee.Image(terraGA.filterMetadata('system:time_start', 'equals', date).first())
+        //.bilinearSample();
+      
+      var ratio = image2.select('red').divide(image1.select('red'));
+      var blue = image2.select('blue').divide(ratio);
+      var green = image2.select('green').divide(ratio);
+      
+      return image1.addBands([blue, green]);
+  });
+
+Export.video(merged.sort('system:time_start').select(['red', 'green', 'blue'])
+  .map(function(i) { return i.visualize(options) }))
+
+Map.addLayer(terraGA.filterDate(date).select(['red', 'green', 'blue']), options, '500m');
+Map.addLayer(merged.filterDate(date).select(['red', 'green', 'blue']), options, 'corrected reflectance');
