@@ -82,7 +82,11 @@ Map.addLayer(Terrain(dem).aspect, {min:0, max:2*Math.PI, palette:colorsRainbow},
 Map.addLayer(ee.Terrain.hillshade(dem.multiply(ex).resample('bicubic'), 315, 40).resample('bicubic'), {min:0, max:250, palette: p }, 'hillshade', false)
 
 var demRGB = dem.visualize({min: 0, max: 2500, palette: p})
-var hs = utils.hillshadeRGB(demRGB, dem, 1.1, ex, 315, 25, true)
+var contrast = 1
+var brightness = 0
+var saturation = 1
+var castShadows = true
+var hs = utils.hillshadeRGB(demRGB, dem, 1, ex, 315, 25, contrast, brightness, saturation, castShadows)
 Map.addLayer(hs, {}, 'DEM')
 
 // upwind
@@ -209,7 +213,7 @@ for(var n=0; n<N; n++) {
       palette: paletteSubstance
     })
     
-    image = utils.hillshadeRGB(image, dem, 0.5, ex, 315, 25, true)
+    image = utils.hillshadeRGB(image, dem, 0.5, ex, 315, 25)
 
     results = results.merge([image])
   }
@@ -221,4 +225,3 @@ var animation = require('users/gena/packages:animation')
 animation.animate(results, { 
   maxFrames: N / visStep
 })
-  
