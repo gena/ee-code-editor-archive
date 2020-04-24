@@ -82,7 +82,7 @@ Map.addLayer(Terrain(dem).aspect, {min:0, max:2*Math.PI, palette:colorsRainbow},
 Map.addLayer(ee.Terrain.hillshade(dem.multiply(ex).resample('bicubic'), 315, 40).resample('bicubic'), {min:0, max:250, palette: p }, 'hillshade', false)
 
 var demRGB = dem.visualize({min: 0, max: 2500, palette: p})
-var contrast = 1
+var contrast = 0.1
 var brightness = 0
 var saturation = 1
 var castShadows = true
