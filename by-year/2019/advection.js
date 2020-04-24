@@ -70,23 +70,25 @@ var colorsRainbow = [
 'F26D7D'  // Light Magenta Red
 ];
 
-var ex = 2
+var ex = 4
 
 var p = ['040613', '292851', '3f4b96', '427bb7', '61a8c7', '9cd4da', 'eafdfd']
 
 var dem = demALOS.select('MED').resample('bicubic')
 
-dem = dem.convolve(ee.Kernel.gaussian(3, 2))
+dem = dem.convolve(ee.Kernel.gaussian(2, 1))
 
 Map.addLayer(Terrain(dem).aspect, {min:0, max:2*Math.PI, palette:colorsRainbow}, 'aspect', false)
 Map.addLayer(ee.Terrain.hillshade(dem.multiply(ex).resample('bicubic'), 315, 40).resample('bicubic'), {min:0, max:250, palette: p }, 'hillshade', false)
 
 var demRGB = dem.visualize({min: 0, max: 2500, palette: p})
-var contrast = 0.1
+var contrast = 0
 var brightness = 0
 var saturation = 1
 var castShadows = true
-var hs = utils.hillshadeRGB(demRGB, dem, 1, ex, 315, 25, contrast, brightness, saturation, castShadows)
+var azimuth = 315
+var elevation = 55
+var hs = utils.hillshadeRGB(demRGB, dem, 1, ex, azimuth, elevation, contrast, brightness, saturation, castShadows)
 Map.addLayer(hs, {}, 'DEM')
 
 // upwind
@@ -213,7 +215,13 @@ for(var n=0; n<N; n++) {
       palette: paletteSubstance
     })
     
-    image = utils.hillshadeRGB(image, dem, 0.5, ex, 315, 25)
+    image = utils.hillshadeRGB(image, dem, 1.0, ex, azimuth, elevation, contrast, brightness, saturation)
+    
+    // speed-up, forct output to be coarser
+    // var outputScaleFactor = 5
+    // image = image
+    //   .reproject(ee.Projection('EPSG:3857').atScale(Map.getScale() * outputScaleFactor))
+    //   .resample('bicubic')
 
     results = results.merge([image])
   }
