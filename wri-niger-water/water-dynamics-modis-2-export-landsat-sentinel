@@ -33,7 +33,7 @@ var vis = { min: 0.03, max: 0.5, bands: ['swir', 'nir', 'green'] }
 function computeTimeSeries(catchment, scale) {
   var region = catchment.geometry()
   
-  // LANDSAT and MODIS
+  // LANDSAT
   var images = assets.getImages(region, {
     filterMasked: true,
     missions: ['S2', 'L8', 'L7', 'L5', 'L4'],
