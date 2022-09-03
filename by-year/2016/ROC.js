@@ -62,6 +62,9 @@ var urban = /* color: #ff0000 */ee.FeatureCollection(
               "system:index": "5"
             })]);
 /***** End of imports. If edited, may not auto-convert in the playground. *****/
+
+// From https://gis.stackexchange.com/questions/265623/how-to-access-accuracy-of-binary-probability-in-google-earth-engine
+
 // A random image
 var ndvi = ee.Image("LANDSAT/LC8_L1T_TOA/LC80440342013106LGN01").normalizedDifference(['B5', 'B4']).rename('NDVI');
 Map.addLayer(ndvi,{min:0, max:1}, "NDVI")
